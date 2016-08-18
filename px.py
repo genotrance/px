@@ -446,15 +446,31 @@ def quit():
 		if pid == mypid:
 			continue
 
-		p = psutil.Process(pid)
 		try:
+			p = psutil.Process(pid)
 			if p.exe() == sys.executable:
 				p.send_signal(signal.CTRL_C_EVENT)
 		except:
 			pass
 
+def handle_exceptions(type, value, tb):
+	# Create traceback log
+	list = traceback.format_tb(tb, None) + traceback.format_exception_only(type, value)
+	tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % ("".join(list[:-1]), list[-1])
+	
+	if LOGGER != None:
+		print(tracelog)
+	else:
+		sys.stderr.write(tracelog)
+
+		# Save to debug.log
+		dbg = open('debug-%s.log' % multiprocessing.current_process().name, 'w')
+		dbg.write(tracelog)
+		dbg.close()
+
 if __name__ == "__main__":
 	multiprocessing.freeze_support()
+	sys.excepthook = handle_exceptions
 
 	if "--quit" in sys.argv:
 		quit()

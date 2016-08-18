@@ -31,9 +31,7 @@ If preferred, the proxy server can be set on the command line as follows:-
 
 Px doesn't have any GUI and runs completely in the background. It is distributed using 
 PyInstaller to have a self-contained executable but can also be run using a Python 
-distribution with the required packages (psutil, pywin32). The executable version requires
-the "Visual C++ Redistributable for Visual Studio 2015" installed.
-	https://www.microsoft.com/en-us/download/details.aspx?id=48145
+distribution with the required packages (psutil, pywin32).
 
 In order to make Px a capable proxy server, it is designed to run in multiple processes. The 
 number of parallel workers or processes is configurable via px.ini.

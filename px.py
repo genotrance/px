@@ -1,6 +1,11 @@
+from __future__ import print_function
+
 import base64
 import email.parser
-import http.server
+try:
+	import http.server as httpserver
+except:
+	import SimpleHTTPServer as httpserver
 import io
 import multiprocessing
 import os
@@ -10,7 +15,10 @@ import re
 import select
 import signal
 import socket
-import socketserver
+try:
+	import socketserver
+except:
+	import SocketServer as socketserver
 import sspi
 import sys
 import time
@@ -56,10 +64,10 @@ class Log(object):
 	def flush(self):
 		self.file.flush()
 
-def dprint(*objs, end="\n"):
+def dprint(*objs):
 	if DEBUG:
 		print(multiprocessing.current_process().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
-		print(*objs, end=end)
+		print(*objs)
 
 class NtlmMessageGenerator:
 	def __init__(self,user=None):
@@ -94,12 +102,12 @@ class NtlmMessageGenerator:
 		response_msg = response_msg.decode("utf-8").replace('\012', '')
 		return response_msg
 
-class Proxy(http.server.SimpleHTTPRequestHandler):
+class Proxy(httpserver.SimpleHTTPRequestHandler):
 	def handle_one_request(self):
 		try:
-			http.server.SimpleHTTPRequestHandler.handle_one_request(self)
-		except ConnectionAbortedError:
-			pass
+			httpserver.SimpleHTTPRequestHandler.handle_one_request(self)
+		except socket.error:
+			dprint("Connection error")
 
 	def address_string(self):
 		host, port = self.client_address[:2]
@@ -228,7 +236,10 @@ class Proxy(http.server.SimpleHTTPRequestHandler):
 
 			if ntlm_challenge:
 				dprint("Challenged")
-				ntlm_challenge = base64.decodebytes(ntlm_challenge.split()[1].encode("utf-8"))
+				try:
+					ntlm_challenge = base64.decodebytes(ntlm_challenge.split()[1].encode("utf-8"))
+				except:
+					ntlm_challenge = base64.decodestring(ntlm_challenge.split()[1])
 				resp, headers, body = self.do_socket({
 					"Proxy-Authorization": "NTLM %s" % ntlm.create_challenge_response(ntlm_challenge)
 				})
@@ -253,16 +264,12 @@ class Proxy(http.server.SimpleHTTPRequestHandler):
 	def do_GET(self):
 		dprint("Entering")
 
-		try:
-			resp, headers, body = self.do_transaction()
-			if resp >= 400:
-				dprint("Error %d" % resp)
-				self.send_error(resp)
-			else:
-				self.fwd_resp(resp, headers, body)
-		except ConnectionResetError:
-			dprint("Connection closed")
-			pass
+		resp, headers, body = self.do_transaction()
+		if resp >= 400:
+			dprint("Error %d" % resp)
+			self.send_error(resp)
+		else:
+			self.fwd_resp(resp, headers, body)
 
 		dprint("Done")
 
@@ -276,41 +283,37 @@ class Proxy(http.server.SimpleHTTPRequestHandler):
 	def do_CONNECT(self):
 		dprint("Entering")
 
-		try:
-			resp, headers, body = self.do_transaction()
-			if resp >= 400:
-				dprint("Error %d" % resp)
-				self.send_error(resp)
-			else:
-				dprint("Tunneling through proxy")
-				self.send_response(200, "Connection established")
-				self.send_header("Proxy-Agent", self.version_string())
-				self.end_headers()
+		resp, headers, body = self.do_transaction()
+		if resp >= 400:
+			dprint("Error %d" % resp)
+			self.send_error(resp)
+		else:
+			dprint("Tunneling through proxy")
+			self.send_response(200, "Connection established")
+			self.send_header("Proxy-Agent", self.version_string())
+			self.end_headers()
 
-				rlist = [self.connection, self.client_socket]
-				wlist = []
-				count = 0
-				while not EXIT:
-					count += 1
-					(ins, _, exs) = select.select(rlist, wlist, rlist, 1)
-					if exs:
-						break
-					if ins:
-						for i in ins:
-							if i is self.client_socket:
-								out = self.connection
-							else:
-								out = self.client_socket
+			rlist = [self.connection, self.client_socket]
+			wlist = []
+			count = 0
+			while not EXIT:
+				count += 1
+				(ins, _, exs) = select.select(rlist, wlist, rlist, 1)
+				if exs:
+					break
+				if ins:
+					for i in ins:
+						if i is self.client_socket:
+							out = self.connection
+						else:
+							out = self.client_socket
 
-							data = i.recv(8192)
-							if data:
-								out.send(data)
-								count = 0
-					if count == MAX_IDLE:
-						break
-		except ConnectionResetError:
-			dprint("Connection closed")
-			pass
+						data = i.recv(8192)
+						if data:
+							out.send(data)
+							count = 0
+				if count == MAX_IDLE:
+					break
 
 		dprint("Done")
 
@@ -362,14 +365,16 @@ def runpool():
 	httpd = ThreadedTCPServer((GATEWAY, PORT), Proxy)
 	mainsock = httpd.socket
 
-	workers = WORKERS
-	for i in range(workers-1):
-		(pipeout, pipein) = multiprocessing.Pipe()
-		p = multiprocessing.Process(target=start_worker, args=(pipeout,), daemon=True)
-		p.start()
-		while p.pid == None:
-			time.sleep(1)
-		pipein.send(mainsock.share(p.pid))
+	if hasattr(socket, "fromshare"):
+		workers = WORKERS
+		for i in range(workers-1):
+			(pipeout, pipein) = multiprocessing.Pipe()
+			p = multiprocessing.Process(target=start_worker, args=(pipeout,))
+			p.daemon = True
+			p.start()
+			while p.pid == None:
+				time.sleep(1)
+			pipein.send(mainsock.share(p.pid))
 
 	serve_forever(httpd)
 
@@ -435,6 +440,9 @@ def parsecli():
 	for i in range(len(sys.argv)):
 		if "--proxy=" in sys.argv[i]:
 			parseproxy(sys.argv[i].split("=")[1])
+
+	if "--debug" in sys.argv:
+		DEBUG = True
 
 	if NTLM_PROXY == None:
 		print("No proxy defined")

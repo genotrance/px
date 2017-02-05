@@ -23,28 +23,37 @@ Px requires only one piece of information in order to function - the server name
 the NTLM proxy server. This needs to be configured in px.ini. Without this, Px will not work
 and exit immediately.
 
-There are a few other settings to tweak in the INI file but most are self-explanatory.
+The noproxy capability allows Px to connect to hosts in the configured subnets directly, 
+bypassing the NTLM proxy altogether. This allows clients to connect to hosts within the 
+intranet without requiring additional configuration for each client or at the NTLM proxy.
 
-If preferred, the proxy server can be set on the command line as follows:-
+There are a few other settings to tweak in the INI file but most are self-explanatory. A few
+of the settings can be specified on the command line for convenience.
 
-	px --proxy=proxyserver.com:80
+	px --proxy=proxyserver.com:80 --noproxy=0.0.0.0/0 --debug
+
+The binary distribution of Px runs in the background once started and can be quit by 
+running "px --quit". When run directly using Python, use CTRL-C to quit.
+
+Dependencies
 
 Px doesn't have any GUI and runs completely in the background. It is distributed using 
 Python 3.x and PyInstaller to have a self-contained executable but can also be run using a 
-Python distribution with the required packages (psutil, pywin32). Python 2.x also requires 
-the futures package.
+Python distribution with the following additional packages.
+
+	netaddr, psutil, pywin32
+	futures on Python 2.x
 
 In order to make Px a capable proxy server, it is designed to run in multiple processes. The 
 number of parallel workers or processes is configurable via px.ini. However, this only works
 on Python 3.3+ since that's when support was added to share sockets across processes in
 Windows. On older versions of Python, Px will run multi-threaded but in a single process.
 
-The binary distribution of Px runs in the background once started and can be quit by 
-running "px --quit". When run directly using Python, use CTRL-C to quit.
-
 Feedback
 
-Px is definitely a work in progress and any feedback or suggestions are welcome.
+Px is definitely a work in progress and any feedback or suggestions are welcome. It is hosted
+on GitHub (https://github.com/genotrance/px) with an MIT license so issues, forks and pushes
+are most appreciated.
 
 Credits
 

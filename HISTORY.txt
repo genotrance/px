@@ -1,0 +1,13 @@
+v0.2.0 - TBD
+- Added "noproxy" feature to bypass NTLM proxy
+- Added "threads" setting to configure number of threads per process
+- Added "test.py" to validate basic Px functionality
+- Fixed bug where host disconnects would throw httpserver into an infinite loop
+- Fixed bug where HEAD requests were waiting for a response body
+- Fixed bug where Px was waiting if remote server disconnected before response code
+- Fixed bug where content length = 0 was waiting for a response body
+- Fixed bug where chunked response was being returned without content length
+- Fixed Px to exit completely with CTRL-C
+
+v0.1.0 - 2016-08-18
+- Initial release

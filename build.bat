@@ -6,7 +6,7 @@ rmdir /s /q dist
 
 pyinstaller --clean --noupx -w -i px.ico px.py
 copy px.ini dist\px\.
-copy README dist\px\README.txt
+copy *.txt dist\px\.
 upx --best dist\px\*.pyd
 upx --best dist\px\py*.dll
 

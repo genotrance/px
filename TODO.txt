@@ -1,0 +1,4 @@
+In no particular order:-
+- Domain names with wildcards for noproxy
+- Add Px as a Windows service
+- Installer for easy setup

@@ -2,12 +2,9 @@ from __future__ import print_function
 
 import base64
 import email.parser
-try:
-	import http.server as httpserver
-except:
-	import SimpleHTTPServer as httpserver
 import io
 import multiprocessing
+import netaddr
 import os
 import psutil
 import pywintypes
@@ -15,12 +12,9 @@ import re
 import select
 import signal
 import socket
-try:
-	import socketserver
-except:
-	import SocketServer as socketserver
 import sspi
 import sys
+import threading
 import time
 import traceback
 import urllib
@@ -29,8 +23,14 @@ import win32timezone
 
 try:
 	import configparser
+	import http.server as httpserver
+	import socketserver
+	import urllib.parse as urlparse
 except:
 	import ConfigParser as configparser
+	import SimpleHTTPServer as httpserver
+	import SocketServer as socketserver
+	import urlparse
 
 import concurrent.futures
 
@@ -38,12 +38,16 @@ DEBUG = False
 EXIT = False
 GATEWAY = '127.0.0.1'
 LOGGER = None
-MAX_IDLE = 30
+NOPROXY = netaddr.IPSet([])
 NTLM_PROXY = None
 PORT = 3128
-WORKERS = 2
 
-MAXLINE = 65536 + 1
+MAX_IDLE = 30
+MAX_DISCONNECT = 3
+MAX_LINE = 65536 + 1
+MAX_THREADS = 40
+MAX_WORKERS = 2
+
 INI = "px.ini"
 
 class Log(object):
@@ -66,7 +70,7 @@ class Log(object):
 
 def dprint(*objs):
 	if DEBUG:
-		print(multiprocessing.current_process().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
+		print(multiprocessing.current_process().name + ": " + threading.current_thread().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
 		print(*objs)
 
 class NtlmMessageGenerator:
@@ -107,25 +111,42 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 		try:
 			httpserver.SimpleHTTPRequestHandler.handle_one_request(self)
 		except socket.error:
-			dprint("Connection error")
+			if not hasattr(self, "_host_disconnected"):
+				self._host_disconnected = 1
+				dprint("Host disconnected")
+			elif self._host_disconnected < MAX_DISCONNECT:
+				self._host_disconnected += 1
+				dprint("Host disconnected: %d" % self._host_disconnected)
+			else:
+				dprint("Closed connection to avoid infinite loop")
+				self.close_connection = True
 
 	def address_string(self):
 		host, port = self.client_address[:2]
 		#return socket.getfqdn(host)
 		return host
 
-	def do_socket(self, xheaders=[]):
+	def do_socket(self, xheaders=[], destination=None):
 		dprint("Entering")
+		if not destination:
+			destination = NTLM_PROXY
+
 		if not hasattr(self, "client_socket") or self.client_socket == None:
 			dprint("New connection")
 			self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			try:
-				self.client_socket.connect(NTLM_PROXY)
+			try:				
+				self.client_socket.connect(destination)
 			except:
 				traceback.print_exc(file=sys.stdout)
 				return 503, None, None
 
-		self.client_socket.send(("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8"))
+		# No chit chat on SSL
+		if destination != NTLM_PROXY and self.command == "CONNECT":
+			return  200, None, None
+
+		cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
+		self.client_socket.send(cmdstr)
+		dprint(cmdstr)
 		for header in self.headers:
 			h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
 			self.client_socket.send(h)
@@ -151,14 +172,20 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 		nobody = False
 		headers = []
 		body = b""
+		
+		if self.command == "HEAD":
+			nobody = True
 
 		# Response code
 		dprint("Reading response code")
-		line = self.client_fp.readline(MAXLINE)
+		line = self.client_fp.readline(MAX_LINE)
 		try:
 			resp = int(line.split()[1])
 		except:
-			pass
+			if line == b"":
+				dprint("Client closed connection")
+				return 444, None, None
+			dprint("Bad response %s" % line)
 		if b"connection established" in line.lower() or resp == 204:
 			nobody = True
 		dprint("Response code: %d " % resp + str(nobody))
@@ -167,90 +194,103 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 		cl = None
 		chk = False
 		dprint("Reading response headers")
-		while True:
-			line = self.client_fp.readline(MAXLINE).decode("utf-8")
+		while not EXIT:
+			line = self.client_fp.readline(MAX_LINE).decode("utf-8")
+			if line == b"":
+				dprint("Client closed connection: %s" % resp)
+				return 444, None, None
 			if line == "\r\n":
 				break
 			nv = line.split(":", 1)
 			if len(nv) != 2:
-				dprint("Bad header %s" % line)
+				dprint("Bad header =>%s<=" % line)
 				continue
 			name = nv[0].strip()
 			value = nv[1].strip()
 			headers.append((name, value))
+			dprint("Received header %s = %s" % (name, value))
 
 			if name.lower() == "content-length":
 				cl = int(value)
+				if not cl:
+					nobody = True
 			elif name.lower() == "transfer-encoding" and value.lower() == "chunked":
 				chk = True
 
 		# Data
 		dprint("Reading response data")
-		if cl:
-			dprint("Content length %d" % cl)
-			body = self.client_fp.read(cl)
-		elif chk:
-			dprint("Chunked encoding")
-			while not EXIT:
-				line = self.client_fp.readline(MAXLINE).decode("utf-8").strip()
-				try:
-					csize = int(line.strip(), 16)
-					dprint("Chunk size %d" % csize)
-				except:
-					dprint("Bad chunk size '%s'" % line)
-					continue
-				if csize == 0:
-					dprint("No more chunks")
-					break
-				d = self.client_fp.read(csize)
-				if len(d) < csize:
-					dprint("Chunk doesn't match data")
-					break
-				body += d
-		elif not nobody:
-			dprint("Not sure how much")
-			while not EXIT:
-				time.sleep(0.1)
-				d = self.client_fp.read(1024)
-				if len(d) < 1024:
-					break
-				body += d
+		if not nobody:
+			if cl:
+				dprint("Content length %d" % cl)
+				body = self.client_fp.read(cl)
+			elif chk:
+				dprint("Chunked encoding")
+				while not EXIT:
+					line = self.client_fp.readline(MAX_LINE).decode("utf-8").strip()
+					try:
+						csize = int(line.strip(), 16)
+						dprint("Chunk size %d" % csize)
+					except:
+						dprint("Bad chunk size '%s'" % line)
+						continue
+					if csize == 0:
+						dprint("No more chunks")
+						break
+					d = self.client_fp.read(csize)
+					if len(d) < csize:
+						dprint("Chunk doesn't match data")
+						break
+					body += d
+				headers.append(("Content-Length", str(len(body))))
+			else:
+				dprint("Not sure how much")
+				while not EXIT:
+					time.sleep(0.1)
+					d = self.client_fp.read(1024)
+					if len(d) < 1024:
+						break
+					body += d
 
 		return resp, headers, body
 
 	def do_transaction(self):
 		dprint("Entering")
 
-		# Check for NTLM auth
-		ntlm = NtlmMessageGenerator()
-		resp, headers, body = self.do_socket({
-			"Proxy-Authorization": "NTLM %s" % ntlm.create_auth_request()
-		})
-		if resp == 407:
-			dprint("Auth required")
-			ntlm_challenge = ""
-			for header in headers:
-				if header[0] == "Proxy-Authenticate" and "NTLM" in header[1]:
-					ntlm_challenge = header[1]
-					break
-
-			if ntlm_challenge:
-				dprint("Challenged")
-				try:
-					ntlm_challenge = base64.decodebytes(ntlm_challenge.split()[1].encode("utf-8"))
-				except:
-					ntlm_challenge = base64.decodestring(ntlm_challenge.split()[1])
-				resp, headers, body = self.do_socket({
-					"Proxy-Authorization": "NTLM %s" % ntlm.create_challenge_response(ntlm_challenge)
-				})
-
-				return resp, headers, body
-			else:
-				dprint("Didn't get challenge, not NTLM proxy")
-		elif resp > 400:
-			return resp, None, None
+		ipport = self.get_destination()
+		if ipport != None:
+			dprint("Skipping NTLM proxying")
+			resp, headers, body = self.do_socket(destination=ipport)
 		else:
-			dprint("No auth required")
+			# Check for NTLM auth
+			ntlm = NtlmMessageGenerator()
+			resp, headers, body = self.do_socket({
+				"Proxy-Authorization": "NTLM %s" % ntlm.create_auth_request()
+			})
+			if resp == 407:
+				dprint("Auth required")
+				ntlm_challenge = ""
+				for header in headers:
+					if header[0] == "Proxy-Authenticate" and "NTLM" in header[1]:
+						ntlm_challenge = header[1]
+						break
+
+				if ntlm_challenge:
+					dprint("Challenged")
+					try:
+						ntlm_challenge = base64.decodebytes(ntlm_challenge.split()[1].encode("utf-8"))
+					except:
+						ntlm_challenge = base64.decodestring(ntlm_challenge.split()[1])
+					resp, headers, body = self.do_socket({
+						"Proxy-Authorization": "NTLM %s" % ntlm.create_challenge_response(ntlm_challenge)
+					})
+
+					return resp, headers, body
+				else:
+					dprint("Didn't get challenge, not NTLM proxy")
+			elif resp > 400:
+				return resp, None, None
+			else:
+				dprint("No auth required")
 
 		return resp, headers, body
 
@@ -308,7 +348,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 						else:
 							out = self.client_socket
 
-						data = i.recv(8192)
+						data = i.recv(4096)
 						if data:
 							out.send(data)
 							count = 0
@@ -328,9 +368,50 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
 		self.end_headers()
 
-		self.wfile.write(body)
+		try:
+			self.wfile.write(body)
+		except:
+			pass
 
 		dprint("Done")
+
+	def get_destination(self):
+		if NOPROXY.size:
+			netloc = self.path
+			path = "/"
+			if not self.command == "CONNECT":
+				parse = urlparse.urlparse(self.path, allow_fragments=False)
+				if parse.netloc:
+					netloc = parse.netloc
+				if not ":" in netloc:
+					port = parse.port
+					if not port:
+						if parse.scheme == "http":
+							port = 80
+						elif parse.scheme == "https":
+							port = 443
+					netloc = netloc + ":" + str(port)
+
+				path = parse.path
+				if parse.params:
+					path = path + ";" + parse.params
+				if parse.query:
+					path = path + "?" + parse.query
+
+			try:
+				spl = netloc.split(":", 1)
+				addr = socket.getaddrinfo(spl[0], int(spl[1]))
+				if len(addr) and len(addr[0]) == 5:
+					ipport = addr[0][4]
+					dprint("%s => %s + %s" % (self.path, ipport, path))
+					
+					if ipport[0] in NOPROXY:
+						self.path = path
+						return ipport
+			except:
+				traceback.print_exc(file=sys.stdout)
+			
+		return None
 
 class PoolMixIn(socketserver.ThreadingMixIn):
 	def process_request(self, request, client_address):
@@ -340,16 +421,21 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
 	daemon_threads = True
 	allow_reuse_address = True
 
-	pool = concurrent.futures.ThreadPoolExecutor(max_workers=40)
+	pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS)
 
 def serve_forever(httpd):
+	global EXIT
+
 	print("Serving at port %d proc %s" % (PORT, multiprocessing.current_process().name))
 
+	signal.signal(signal.SIGINT, signal.SIG_DFL)
 	try:
 		httpd.serve_forever()
 	except KeyboardInterrupt:
 		dprint("Exiting")
 		EXIT = True
+	
+	httpd.shutdown()
 
 def start_worker(pipeout):
 	parsecli()
@@ -366,7 +452,7 @@ def runpool():
 	mainsock = httpd.socket
 
 	if hasattr(socket, "fromshare"):
-		workers = WORKERS
+		workers = MAX_WORKERS
 		for i in range(workers-1):
 			(pipeout, pipein) = multiprocessing.Pipe()
 			p = multiprocessing.Process(target=start_worker, args=(pipeout,))
@@ -388,13 +474,34 @@ def parseproxy(proxystr):
 		NTLM_PROXY[1] = int(NTLM_PROXY[1])
 	NTLM_PROXY = tuple(NTLM_PROXY)
 
+def parsenoproxy(noproxy):
+	global NOPROXY
+
+	nops = [i.strip() for i in noproxy.split(",")]
+	for nop in nops:
+		if not nop:
+			continue
+		
+		try:
+			if "-" in nop:
+				spl = nop.split("-", 1)
+				ipns = netaddr.IPRange(spl[0], spl[1])
+			elif "*" in nop:
+				ipns = netaddr.IPGlob(nop)
+			else:
+				ipns = netaddr.IPNetwork(nop)
+			NOPROXY.add(ipns)
+		except:
+			print("Bad noproxy IP definition")
+			sys.exit()
+
 def parsecli():
 	global DEBUG
 	global GATEWAY
 	global LOGGER
 	global MAX_IDLE
+	global MAX_WORKERS
 	global PORT
-	global WORKERS
 
 	if os.path.exists(INI):
 		config = configparser.ConfigParser()
@@ -417,11 +524,21 @@ def parsecli():
 				if config.get("proxy", "gateway") == "1":
 					GATEWAY = ''
 
+			if "noproxy" in config.options("proxy"):
+				parsenoproxy(config.get("proxy", "noproxy"))
+
 		if "settings" in config.sections():
 			if "workers" in config.options("settings"):
 				workers = config.get("settings", "workers").strip()
 				try:
-					WORKERS = int(workers)
+					MAX_WORKERS = int(workers)
+				except:
+					pass
+
+			if "threads" in config.options("settings"):
+				threads = config.get("settings", "threads").strip()
+				try:
+					MAX_THREADS = int(threads)
 				except:
 					pass
 
@@ -440,8 +557,11 @@ def parsecli():
 	for i in range(len(sys.argv)):
 		if "--proxy=" in sys.argv[i]:
 			parseproxy(sys.argv[i].split("=")[1])
+		elif "--noproxy=" in sys.argv[i]:
+			parsenoproxy(sys.argv[i].split("=")[1])
 
 	if "--debug" in sys.argv:
+		LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
 		DEBUG = True
 
 	if NTLM_PROXY == None:

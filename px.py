@@ -77,7 +77,7 @@ class NtlmMessageGenerator:
 	def __init__(self,user=None):
 		if not user:
 			user = win32api.GetUserName()
-		self.sspi_client = sspi.ClientAuth("NTLM", user)
+		self.sspi_client = sspi.ClientAuth("NTLM", user, scflags=0)
 
 	def create_auth_request(self):
 		output_buffer = None

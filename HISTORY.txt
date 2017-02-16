@@ -1,4 +1,7 @@
-v0.2.0 - TBD
+TBD
+- Fixed issue 3 - Function requested not supported in SSPI
+
+v0.2.0 - 2017-02-05
 - Added "noproxy" feature to bypass NTLM proxy
 - Added "threads" setting to configure number of threads per process
 - Added "test.py" to validate basic Px functionality

@@ -62,3 +62,5 @@ Px is based on code from all over the internet and especially acknowledges these
 http://stackoverflow.com/questions/2969481/ntlm-authentication-in-python
 http://www.oki-osk.jp/esc/python/proxy/
 http://stupidpythonideas.blogspot.com/2014/09/sockets-and-multiprocessing.html
+https://curl.haxx.se/mail/lib-2014-09/0070.html
+https://github.com/fl4re/curl/blob/master/lib/curl_sasl_sspi.c

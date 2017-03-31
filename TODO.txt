@@ -4,3 +4,5 @@ In no particular order:-
 - Installer for easy setup
 - Read proxy info from registry
 - Read proxy info from PAC file in registry
+- Read noproxy info from registry
+- Support for chunked data on POST, PUT, PATCH over http

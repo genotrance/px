@@ -36,7 +36,7 @@ import concurrent.futures
 
 DEBUG = False
 EXIT = False
-GATEWAY = '127.0.0.1'
+LISTEN = '127.0.0.1'
 LOGGER = None
 NOPROXY = netaddr.IPSet([])
 NTLM_PROXY = None
@@ -144,6 +144,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 		if destination != NTLM_PROXY and self.command == "CONNECT":
 			return  200, None, None
 
+		cl = None
+		chk = False
 		cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
 		self.client_socket.send(cmdstr)
 		dprint(cmdstr)
@@ -152,17 +154,28 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 			self.client_socket.send(h)
 			dprint("Sending %s" % h)
 
+			if header.lower() == "content-length":
+				cl = int(self.headers[header])
+			elif header.lower() == "transfer-encoding" and self.headers[header].lower() == "chunked":
+				dprint("CHUNKED data")
+				chk = True
+
 		for header in xheaders:
 			h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
 			self.client_socket.send(h)
 			dprint("Sending extra %s" % h)
 		self.client_socket.send(b"\r\n")
 
-		if self.command == "POST":
-			dprint("Getting body for POST")
-			data = self.rfile.read()
-			dprint("Sending body for POST")
-			self.client_socket.send(data)
+		if self.command in ["POST", "PUT", "PATCH"]:
+			if not hasattr(self, "body"):
+				dprint("Getting body for POST/PUT/PATCH")
+				if cl != None:
+					self.body = self.rfile.read(cl)
+				else:	
+					self.body = self.rfile.read()
+
+			dprint("Sending body for POST/PUT/PATCH")
+			self.client_socket.send(self.body)
 
 		time.sleep(1)
 
@@ -320,6 +333,27 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
 		dprint("Done")
 
+	def do_PUT(self):
+		dprint("Entering")
+
+		self.do_GET()
+
+		dprint("Done")
+
+	def do_DELETE(self):
+		dprint("Entering")
+
+		self.do_GET()
+
+		dprint("Done")
+
+	def do_PATCH(self):
+		dprint("Entering")
+
+		self.do_GET()
+
+		dprint("Done")
+
 	def do_CONNECT(self):
 		dprint("Entering")
 
@@ -426,7 +460,7 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
 def serve_forever(httpd):
 	global EXIT
 
-	print("Serving at port %d proc %s" % (PORT, multiprocessing.current_process().name))
+	print("Serving at %s:%d proc %s" % (LISTEN, PORT, multiprocessing.current_process().name))
 
 	signal.signal(signal.SIGINT, signal.SIG_DFL)
 	try:
@@ -439,7 +473,7 @@ def serve_forever(httpd):
 
 def start_worker(pipeout):
 	parsecli()
-	httpd = ThreadedTCPServer((GATEWAY, PORT), Proxy, bind_and_activate=False)
+	httpd = ThreadedTCPServer((LISTEN, PORT), Proxy, bind_and_activate=False)
 	mainsock = socket.fromshare(pipeout.recv())
 	httpd.socket = mainsock
 
@@ -448,7 +482,12 @@ def start_worker(pipeout):
 def runpool():
 	parsecli()
 
-	httpd = ThreadedTCPServer((GATEWAY, PORT), Proxy)
+	try:
+		httpd = ThreadedTCPServer((LISTEN, PORT), Proxy)
+	except OSError as e:
+		print(e)
+		return
+		
 	mainsock = httpd.socket
 
 	if hasattr(socket, "fromshare"):
@@ -497,7 +536,7 @@ def parsenoproxy(noproxy):
 
 def parsecli():
 	global DEBUG
-	global GATEWAY
+	global LISTEN
 	global LOGGER
 	global MAX_IDLE
 	global MAX_WORKERS
@@ -520,9 +559,14 @@ def parsecli():
 				except:
 					pass
 
+			if "listen" in config.options("proxy"):
+				listen = config.get("proxy", "listen").strip()
+				if listen:
+				    LISTEN = listen
+				
 			if "gateway" in config.options("proxy"):
 				if config.get("proxy", "gateway") == "1":
-					GATEWAY = ''
+					LISTEN = ''
 
 			if "noproxy" in config.options("proxy"):
 				parsenoproxy(config.get("proxy", "noproxy"))

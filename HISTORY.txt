@@ -1,5 +1,9 @@
-TBD
+v0.2.1 - 2017-03-30
+- Implemented issue 7 - "listen" setting to configure IP address to bind service to
 - Fixed issue 3 - Function requested not supported in SSPI
+- Fixed issue 5 - Improved error message when port is already in use
+- Fixed issue 6 - Added support for PUT, PATCH and DELETE
+- Fixed issue where http POST was blocking forever, attempting to read POST data twice from socket
 
 v0.2.0 - 2017-02-05
 - Added "noproxy" feature to bypass NTLM proxy

@@ -17,6 +17,11 @@ Windows, the user has already logged in with his credentials so Px is designed f
 users who would like to use tools that aren't designed to deal with NTLM authentication, 
 without having to supply and maintain the credentials within Px.
 
+The following link from Microsoft provides a good starting point to understand how NTLM 
+authentication works:
+
+	https://msdn.microsoft.com/en-us/library/dd925287.aspx
+
 Configuration
 
 Px requires only one piece of information in order to function - the server name and port of

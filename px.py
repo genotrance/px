@@ -621,7 +621,7 @@ def quit():
 		try:
 			p = psutil.Process(pid)
 			if p.exe() == sys.executable:
-				p.send_signal(signal.CTRL_C_EVENT)
+				p.kill()
 		except:
 			pass
 

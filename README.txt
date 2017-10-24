@@ -46,8 +46,11 @@ Px doesn't have any GUI and runs completely in the background. It is distributed
 Python 3.x and PyInstaller to have a self-contained executable but can also be run using a 
 Python distribution with the following additional packages.
 
-	netaddr, psutil, pywin32
+	netaddr, psutil, pywin32 OR winkerberos
 	futures on Python 2.x
+
+	NOTE: winkerberos is required on Python 3.6+ since pywin32 SSPI is broken.
+		  https://github.com/genotrance/px/issues/9
 
 In order to make Px a capable proxy server, it is designed to run in multiple processes. The 
 number of parallel workers or processes is configurable via px.ini. However, this only works
@@ -57,8 +60,8 @@ Windows. On older versions of Python, Px will run multi-threaded but in a single
 Feedback
 
 Px is definitely a work in progress and any feedback or suggestions are welcome. It is hosted
-on GitHub (https://github.com/genotrance/px) with an MIT license so issues, forks and pushes
-are most appreciated.
+on GitHub (https://github.com/genotrance/px) with an MIT license so issues, forks and PRs are
+most appreciated.
 
 Credits
 
@@ -69,3 +72,4 @@ http://www.oki-osk.jp/esc/python/proxy/
 http://stupidpythonideas.blogspot.com/2014/09/sockets-and-multiprocessing.html
 https://curl.haxx.se/mail/lib-2014-09/0070.html
 https://github.com/fl4re/curl/blob/master/lib/curl_sasl_sspi.c
+https://github.com/mongodb-labs/winkerberos/issues/19

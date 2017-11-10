@@ -1,3 +1,13 @@
+TBD
+- Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug
+- Cleaned up loading module dependencies across Python versions
+- Fixed issue where thread name in logs was wrong due to Python 3.6+ issue
+- Fixed issue where URL without trailing / was sending blank path to remote
+- Fixed issue where Px was disconnecting instead of keeping connections alive
+- Changed Pyinstaller to build a single executable file
+- Fixed bug where chunked transfer headers were being returned incorrectly
+- Removed sleep from non-CONNECT methods that was slowing down Px considerably
+
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to
 - Fixed issue 3 - Function requested not supported in SSPI

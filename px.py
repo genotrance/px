@@ -140,6 +140,8 @@ class NtlmMessageGenerator:
         return auth_req
 
 class Proxy(httpserver.SimpleHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    
     def handle_one_request(self):
         try:
             httpserver.SimpleHTTPRequestHandler.handle_one_request(self)
@@ -209,8 +211,6 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
             dprint("Sending body for POST/PUT/PATCH")
             self.client_socket.send(self.body)
-
-        time.sleep(1)
 
         self.client_fp = self.client_socket.makefile("rb")
 
@@ -394,6 +394,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
     def do_CONNECT(self):
         dprint("Entering")
 
+        cl = 0
         resp, headers, body = self.do_transaction()
         if resp >= 400:
             dprint("Error %d" % resp)
@@ -423,8 +424,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         if data:
                             out.send(data)
                             count = 0
+                            cl += len(data)
                 if count == MAX_IDLE:
                     break
+
+        dprint("Transferred %d bytes" % cl)
 
         dprint("Done")
 
@@ -433,7 +437,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         self.send_response(resp)
 
         for header in headers:
-            if header[0] != "Transfer-Encoding":
+            if header[0].lower() != "transfer-encoding":
                 dprint("Returning %s: %s" % (header[0], header[1]))
                 self.send_header(header[0], header[1])
 
@@ -463,12 +467,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                             port = 443
                     netloc = netloc + ":" + str(port)
 
-                path = parse.path
+                path = parse.path or "/"
                 if parse.params:
                     path = path + ";" + parse.params
                 if parse.query:
                     path = path + "?" + parse.query
 
+            dprint(netloc)
             try:
                 spl = netloc.split(":", 1)
                 addr = socket.getaddrinfo(spl[0], int(spl[1]))
@@ -492,7 +497,11 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS)
+    try:
+        # Workaround bad thread naming code in Python 3.6+, fixed in master
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS, thread_name_prefix="Thread")
+    except:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS)
 
 def serve_forever(httpd):
     global EXIT

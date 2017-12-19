@@ -679,6 +679,9 @@ def parsecli():
         LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
         DEBUG = True
 
+    if "--gateway" in sys.argv:
+        LISTEN = ''
+
     if NTLM_PROXY == None:
         print("No proxy defined")
         sys.exit()

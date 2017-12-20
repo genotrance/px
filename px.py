@@ -233,7 +233,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Client closed connection")
                 return 444, None, None
             dprint("Bad response %s" % line)
-        if b"connection established" in line.lower() or resp == 204:
+        if b"connection established" in line.lower() or resp == 204 or resp == 304:
             nobody = True
         dprint("Response code: %d " % resp + str(nobody))
 

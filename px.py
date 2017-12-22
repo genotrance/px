@@ -675,10 +675,6 @@ def parsecli():
         elif "--allow=" in sys.argv[i]:
             parseallow(sys.argv[i].split("=")[1])
 
-    if "--debug" in sys.argv:
-        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
-        DEBUG = True
-
     if "--gateway" in sys.argv:
         LISTEN = ''
 
@@ -717,6 +713,10 @@ def handle_exceptions(type, value, tb):
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
+
+    if "--debug" in sys.argv:
+        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
+        DEBUG = True
 
     if "--quit" in sys.argv:
         quit()

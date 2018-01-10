@@ -499,7 +499,7 @@ class PoolMixIn(socketserver.ThreadingMixIn):
         if client_address[0] in ALLOW:
             return True
 
-        print("Client not allowed: %s" % client_address[0])
+        dprint("Client not allowed: %s" % client_address[0])
         return False
 
 class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):

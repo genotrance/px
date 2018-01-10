@@ -610,6 +610,7 @@ def parsecli():
 
     if os.path.exists(INI):
         config = configparser.ConfigParser()
+        config.set(config.default_section, "allow", "*.*.*.*")
         config.read(INI)
 
         if "proxy" in config.sections():

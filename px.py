@@ -67,6 +67,7 @@ EXIT = False
 LISTEN = '127.0.0.1'
 LOGGER = None
 NOPROXY = netaddr.IPSet([])
+ALLOW = netaddr.IPSet([])
 NTLM_PROXY = None
 PORT = 3128
 
@@ -232,7 +233,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Client closed connection")
                 return 444, None, None
             dprint("Bad response %s" % line)
-        if b"connection established" in line.lower() or resp == 204:
+        if b"connection established" in line.lower() or resp == 204 or resp == 304:
             nobody = True
         dprint("Response code: %d " % resp + str(nobody))
 
@@ -493,6 +494,14 @@ class PoolMixIn(socketserver.ThreadingMixIn):
     def process_request(self, request, client_address):
         self.pool.submit(self.process_request_thread, request, client_address)
 
+    def verify_request(self, request, client_address):
+        dprint("Client address: %s" % client_address[0])
+        if client_address[0] in ALLOW:
+            return True
+
+        dprint("Client not allowed: %s" % client_address[0])
+        return False
+
 class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -559,26 +568,37 @@ def parseproxy(proxystr):
         NTLM_PROXY[1] = int(NTLM_PROXY[1])
     NTLM_PROXY = tuple(NTLM_PROXY)
 
+def parseipranges(iprangesconfig):
+    ipranges = netaddr.IPSet([])
+
+    iprangessplit = [i.strip() for i in iprangesconfig.split(",")]
+    for iprange in iprangessplit:
+        if not iprange:
+            continue
+
+        try:
+            if "-" in iprange:
+                spl = iprange.split("-", 1)
+                ipns = netaddr.IPRange(spl[0], spl[1])
+            elif "*" in iprange:
+                ipns = netaddr.IPGlob(iprange)
+            else:
+                ipns = netaddr.IPNetwork(iprange)
+            ipranges.add(ipns)
+        except:
+            print("Bad IP definition: %s" % iprangesconfig)
+            sys.exit()
+    return ipranges
+
+def parseallow(allow):
+    global ALLOW
+
+    ALLOW = parseipranges(allow)
+
 def parsenoproxy(noproxy):
     global NOPROXY
 
-    nops = [i.strip() for i in noproxy.split(",")]
-    for nop in nops:
-        if not nop:
-            continue
-        
-        try:
-            if "-" in nop:
-                spl = nop.split("-", 1)
-                ipns = netaddr.IPRange(spl[0], spl[1])
-            elif "*" in nop:
-                ipns = netaddr.IPGlob(nop)
-            else:
-                ipns = netaddr.IPNetwork(nop)
-            NOPROXY.add(ipns)
-        except:
-            print("Bad noproxy IP definition")
-            sys.exit()
+    NOPROXY = parseipranges(noproxy)
 
 def parsecli():
     global DEBUG
@@ -590,6 +610,7 @@ def parsecli():
 
     if os.path.exists(INI):
         config = configparser.ConfigParser()
+        config.set(config.default_section, "allow", "*.*.*.*")
         config.read(INI)
 
         if "proxy" in config.sections():
@@ -610,6 +631,9 @@ def parsecli():
                 if listen:
                     LISTEN = listen
                 
+            if "allow" in config.options("proxy"):
+                parseallow(config.get("proxy", "allow"))
+
             if "gateway" in config.options("proxy"):
                 if config.get("proxy", "gateway") == "1":
                     LISTEN = ''
@@ -649,10 +673,11 @@ def parsecli():
             parseproxy(sys.argv[i].split("=")[1])
         elif "--noproxy=" in sys.argv[i]:
             parsenoproxy(sys.argv[i].split("=")[1])
+        elif "--allow=" in sys.argv[i]:
+            parseallow(sys.argv[i].split("=")[1])
 
-    if "--debug" in sys.argv:
-        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
-        DEBUG = True
+    if "--gateway" in sys.argv:
+        LISTEN = ''
 
     if NTLM_PROXY == None:
         print("No proxy defined")
@@ -666,7 +691,7 @@ def quit():
 
         try:
             p = psutil.Process(pid)
-            if p.exe() == sys.executable:
+            if p.exe().lower() == sys.executable.lower():
                 p.send_signal(signal.CTRL_C_EVENT)
         except:
             pass
@@ -689,6 +714,10 @@ def handle_exceptions(type, value, tb):
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
+
+    if "--debug" in sys.argv:
+        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
+        DEBUG = True
 
     if "--quit" in sys.argv:
         quit()

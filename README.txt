@@ -35,10 +35,31 @@ intranet without requiring additional configuration for each client or at the NT
 There are a few other settings to tweak in the INI file but most are self-explanatory. A few
 of the settings can be specified on the command line for convenience.
 
-	px --proxy=proxyserver.com:80 --noproxy=0.0.0.0/0 --debug
-
 The binary distribution of Px runs in the background once started and can be quit by 
 running "px --quit". When run directly using Python, use CTRL-C to quit.
+
+Examples
+
+	Use proxyserver.com:80 and allow requests from localhost only
+	px --proxy=proxyserver.com:80
+
+	Don't use any forward proxy at all, just log what's going on
+	px --proxy= --noproxy=0.0.0.0/0 --debug
+
+	Allow requests from localhost and from your own ip address. This is very useful for Docker
+	for Windows, because in a bridged docker network all requests from containers will originate
+	from your hosts ip.
+	px.exe --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
+
+	Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
+	px.exe --proxy=proxyserver.com:80 --gateway
+
+Remarks
+In Docker for Windows you need to set your proxy to http://<your ip>:3128 (or whatever port your
+px is listening to) and be aware of https://github.com/docker/for-win/issues/1380. 
+
+Workaround:
+docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile
 
 Dependencies
 

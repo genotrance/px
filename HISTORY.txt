@@ -7,6 +7,11 @@ TBD
 - Changed Pyinstaller to build a single executable file
 - Fixed bug where chunked transfer headers were being returned incorrectly
 - Removed sleep from non-CONNECT methods that was slowing down Px considerably
+- Added "allow" feature to allow (deny) client ip addresses (helpful with Docker for Windows)
+- Added "--gateway" parameter
+- Fixed issue where a HTTP 304 Not Modified response would hang
+- Enabled --debug also for --quit code path
+- Fixed issue where --quit would not be able to stop px instances with different uppercase/lowercase process names
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to

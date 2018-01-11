@@ -41,10 +41,10 @@ running "px --quit". When run directly using Python, use CTRL-C to quit.
 Examples
 
 	Use proxyserver.com:80 and allow requests from localhost only
-	px --proxy=proxyserver.com:80
+	px.exe --proxy=proxyserver.com:80
 
 	Don't use any forward proxy at all, just log what's going on
-	px --proxy= --noproxy=0.0.0.0/0 --debug
+	px.exe --proxy= --noproxy=0.0.0.0/0 --debug
 
 	Allow requests from localhost and from your own ip address. This is very useful for Docker
 	for Windows, because in a bridged docker network all requests from containers will originate

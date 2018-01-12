@@ -91,7 +91,10 @@ class Log(object):
         sys.stderr = self.stderr
         self.file.close()
     def write(self, data):
-        self.file.write(data)
+        try:
+            self.file.write(data)
+        except:
+            pass
         self.file.flush()
         self.stdout.write(data)
     def flush(self):
@@ -182,6 +185,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         cl = None
         chk = False
+        expect = False
+        keepalive = False
         cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
         self.client_socket.send(cmdstr)
         dprint(cmdstr)
@@ -192,9 +197,16 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
             if header.lower() == "content-length":
                 cl = int(self.headers[header])
+            elif header.lower() == "expect" and self.headers[header].lower() == "100-continue":
+                expect = True
+            elif header.lower() == "proxy-connection":
+                keepalive = True
             elif header.lower() == "transfer-encoding" and self.headers[header].lower() == "chunked":
                 dprint("CHUNKED data")
                 chk = True
+
+        if not keepalive and self.request_version.lower() == "http/1.0":
+            xheaders["Proxy-Connection"] = "keep-alive"
 
         for header in xheaders:
             h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
@@ -210,7 +222,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 else:    
                     self.body = self.rfile.read()
 
-            dprint("Sending body for POST/PUT/PATCH")
+            dprint("Sending body for POST/PUT/PATCH: %d = %d" % (cl or -1, len(self.body)))
             self.client_socket.send(self.body)
 
         self.client_fp = self.client_socket.makefile("rb")
@@ -224,18 +236,25 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             nobody = True
 
         # Response code
-        dprint("Reading response code")
-        line = self.client_fp.readline(MAX_LINE)
-        try:
-            resp = int(line.split()[1])
-        except:
-            if line == b"":
-                dprint("Client closed connection")
-                return 444, None, None
-            dprint("Bad response %s" % line)
-        if b"connection established" in line.lower() or resp == 204 or resp == 304:
-            nobody = True
-        dprint("Response code: %d " % resp + str(nobody))
+        for i in range(2):
+            dprint("Reading response code")
+            line = self.client_fp.readline(MAX_LINE)
+            if line == b"\r\n":
+                line = self.client_fp.readline(MAX_LINE)
+            try:
+                resp = int(line.split()[1])
+            except:
+                if line == b"":
+                    dprint("Client closed connection")
+                    return 444, nobody
+                dprint("Bad response %s" % line)
+            if b"connection established" in line.lower() or resp == 204 or resp == 304:
+                nobody = True
+            dprint("Response code: %d " % resp + str(nobody))
+
+            # Get response again if 100-Continue
+            if not (expect and resp == 100):
+                break
 
         # Headers
         cl = None
@@ -475,18 +494,15 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     path = path + "?" + parse.query
 
             dprint(netloc)
-            try:
-                spl = netloc.split(":", 1)
-                addr = socket.getaddrinfo(spl[0], int(spl[1]))
-                if len(addr) and len(addr[0]) == 5:
-                    ipport = addr[0][4]
-                    dprint("%s => %s + %s" % (self.path, ipport, path))
-                    
-                    if ipport[0] in NOPROXY:
-                        self.path = path
-                        return ipport
-            except:
-                traceback.print_exc(file=sys.stdout)
+            spl = netloc.split(":", 1)
+            addr = socket.getaddrinfo(spl[0], int(spl[1]))
+            if len(addr) and len(addr[0]) == 5:
+                ipport = addr[0][4]
+                dprint("%s => %s + %s" % (self.path, ipport, path))
+                
+                if ipport[0] in NOPROXY:
+                    self.path = path
+                    return ipport
             
         return None
 
@@ -535,8 +551,6 @@ def start_worker(pipeout):
     serve_forever(httpd)
 
 def runpool():
-    parsecli()
-
     try:
         httpd = ThreadedTCPServer((LISTEN, PORT), Proxy)
     except OSError as e:
@@ -679,6 +693,10 @@ def parsecli():
     if "--gateway" in sys.argv:
         LISTEN = ''
 
+    if "--debug" in sys.argv:
+        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
+        DEBUG = True
+
     if NTLM_PROXY == None:
         print("No proxy defined")
         sys.exit()
@@ -715,9 +733,7 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
 
-    if "--debug" in sys.argv:
-        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
-        DEBUG = True
+    parsecli()
 
     if "--quit" in sys.argv:
         quit()

@@ -45,9 +45,9 @@ def write(data, file):
 def check(url):
     px.parsecli()
 
-    a = curl(url, proxy="%s:%d" % (px.NTLM_PROXY[0], px.NTLM_PROXY[1]))
+    a = curl(url, proxy="%s:%d" % (px.NTLM_PROXY[0], px.NTLM_PROXY[1]), ntlm=True)
     b = curl(url, proxy="localhost:%d" % px.PORT)
-
+    
     la = len(a)
     lb = len(b)
     

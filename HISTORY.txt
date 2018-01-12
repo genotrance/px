@@ -12,6 +12,10 @@ TBD
 - Fixed issue where a HTTP 304 Not Modified response would hang
 - Enabled --debug also for --quit code path
 - Fixed issue where --quit would not be able to stop px instances with different uppercase/lowercase process names
+- Fixed exception when logging bad requests containing unicode
+- Fixed issue 12 - proxy keep-alive support for HTTP/1.0 clients
+- Fixed issue 13 - support for HTTP Expect-Continue
+- Fixed issue where non-resolving hostnames were not failing and going through proxy instead
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to

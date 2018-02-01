@@ -11,8 +11,11 @@ import sys
 import threading
 import time
 import traceback
+import datetime
 
 # Dependencies
+import winipaddrs
+
 try:
     import concurrent.futures
 except:
@@ -68,6 +71,8 @@ LISTEN = '127.0.0.1'
 LOGGER = None
 NOPROXY = netaddr.IPSet([])
 ALLOW = netaddr.IPSet([])
+ALLOWLOCAL=False
+ALLOWLOCAL_NEXTREFRESH = None
 NTLM_PROXY = None
 PORT = 3128
 
@@ -76,6 +81,7 @@ MAX_DISCONNECT = 3
 MAX_LINE = 65536 + 1
 MAX_THREADS = 40
 MAX_WORKERS = 2
+MAX_ALLOWLOCAL_TTL = 5
 
 INI = "px.ini"
 
@@ -495,7 +501,20 @@ class PoolMixIn(socketserver.ThreadingMixIn):
         self.pool.submit(self.process_request_thread, request, client_address)
 
     def verify_request(self, request, client_address):
+        global ALLOWLOCAL
+        global ALLOW
+        global ALLOWLOCAL_NEXTREFRESH
+
         dprint("Client address: %s" % client_address[0])
+
+        if ALLOWLOCAL:
+            if (ALLOWLOCAL_NEXTREFRESH is None) or (ALLOWLOCAL_NEXTREFRESH < datetime.datetime.now()):
+                newlocalipaddresses = netaddr.IPSet(winipaddrs.get_IPAddresses())
+                if newlocalipaddresses != ALLOW:
+                    ALLOW=newlocalipaddresses
+                    dprint("Allow connections from: %s" % (", ".join(str(ip) for ip in ALLOW)))
+                ALLOWLOCAL_NEXTREFRESH = datetime.datetime.now() + datetime.timedelta(seconds=MAX_ALLOWLOCAL_TTL)
+
         if client_address[0] in ALLOW:
             return True
 
@@ -607,6 +626,7 @@ def parsecli():
     global MAX_IDLE
     global MAX_WORKERS
     global PORT
+    global ALLOWLOCAL
 
     if os.path.exists(INI):
         config = configparser.ConfigParser()
@@ -633,6 +653,10 @@ def parsecli():
                 
             if "allow" in config.options("proxy"):
                 parseallow(config.get("proxy", "allow"))
+
+            if "allowlocal" in config.options("proxy"):
+                if config.get("proxy", "allowlocal") == "1":
+                    ALLOWLOCAL = True
 
             if "gateway" in config.options("proxy"):
                 if config.get("proxy", "gateway") == "1":
@@ -675,6 +699,8 @@ def parsecli():
             parsenoproxy(sys.argv[i].split("=")[1])
         elif "--allow=" in sys.argv[i]:
             parseallow(sys.argv[i].split("=")[1])
+        elif "--allowlocal" in sys.argv[i]:
+            ALLOWLOCAL=True
 
     if "--gateway" in sys.argv:
         LISTEN = ''

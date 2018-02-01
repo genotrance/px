@@ -12,6 +12,7 @@ TBD
 - Fixed issue where a HTTP 304 Not Modified response would hang
 - Enabled --debug also for --quit code path
 - Fixed issue where --quit would not be able to stop px instances with different uppercase/lowercase process names
+- Added "allowlocal" to auto allow all traffic from local ip interfaces
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to

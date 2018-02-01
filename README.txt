@@ -51,6 +51,10 @@ Examples
 	from your hosts ip.
 	px.exe --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
 
+	Allow requests from all local ip addresses. The allowed interfaces will be refreshed every
+	30 seconds (helpful with dynamic IPs, VPNs, etc.)
+	px.exe --proxy=proxyserver.com:80 --gateway --allowlocal
+
 	Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
 	px.exe --proxy=proxyserver.com:80 --gateway
 

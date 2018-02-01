@@ -96,7 +96,7 @@ def get_adapters_addresses():
         yield pAdapterAddresses.contents
         pAdapterAddresses = pAdapterAddresses.contents.Next
 
-def get_IPAddresses():
+def get_ip_addresses():
     for i in get_adapters_addresses():
         if i.FirstUnicastAddress:
             fu = i.FirstUnicastAddress.contents

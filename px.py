@@ -525,7 +525,7 @@ class PoolMixIn(socketserver.ThreadingMixIn):
 
         if ALLOWLOCAL:
             if (ALLOWLOCAL_NEXTREFRESH is None) or (ALLOWLOCAL_NEXTREFRESH < datetime.datetime.now()):
-                newlocalipaddresses = netaddr.IPSet(winipaddrs.get_IPAddresses())
+                newlocalipaddresses = netaddr.IPSet(winipaddrs.get_ip_addresses())
                 if newlocalipaddresses != ALLOW:
                     ALLOW=newlocalipaddresses
                     dprint("Allow connections from: %s" % (", ".join(str(ip) for ip in ALLOW)))

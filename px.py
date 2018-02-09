@@ -3,7 +3,6 @@ from __future__ import print_function
 import base64
 import multiprocessing
 import os
-import re
 import select
 import signal
 import socket
@@ -15,19 +14,19 @@ import traceback
 # Dependencies
 try:
     import concurrent.futures
-except:
+except ImportError:
     print("Requires modules futures")
     sys.exit()
 
 try:
     import netaddr
-except:
+except ImportError:
     print("Requires modules netaddr")
     sys.exit()
 
 try:
     import psutil
-except:
+except ImportError:
     print("Requires modules psutil")
     sys.exit()
 
@@ -36,7 +35,7 @@ except:
 # - pywin32 known to fail in Python 3.6+ : https://github.com/genotrance/px/issues/9
 try:
     import winkerberos
-except:
+except ImportError:
     if sys.version_info[0] > 2:
         if sys.version_info[1] > 5:
             print("Requires Python module winkerberos")
@@ -46,7 +45,7 @@ except:
     try:
         import pywintypes
         import sspi
-    except:
+    except ImportError:
         print("Requires Python module pywin32 or winkerberos")
         sys.exit()
 
@@ -56,7 +55,7 @@ try:
     import http.server as httpserver
     import socketserver
     import urllib.parse as urlparse
-except:
+except ImportError:
     import ConfigParser as configparser
     import SimpleHTTPServer as httpserver
     import SocketServer as socketserver
@@ -67,7 +66,7 @@ EXIT = False
 LISTEN = '127.0.0.1'
 LOGGER = None
 NOPROXY = netaddr.IPSet([])
-ALLOW = netaddr.IPSet([])
+ALLOW = netaddr.IPGlob("*.*.*.*")
 NTLM_PROXY = None
 PORT = 3128
 
@@ -119,7 +118,7 @@ class NtlmMessageGenerator:
         if challenge:
             try:
                 challenge = base64.decodebytes(challenge.encode("utf-8"))
-            except:
+            except AttributeError:
                 challenge = base64.decodestring(challenge)
         output_buffer = None
         try:
@@ -131,21 +130,21 @@ class NtlmMessageGenerator:
         response_msg = output_buffer[0].Buffer
         try:
             response_msg = base64.encodebytes(response_msg.encode("utf-8"))
-        except:
+        except AttributeError:
             response_msg = base64.encodestring(response_msg)
         response_msg = response_msg.decode("utf-8").replace('\012', '')
         return response_msg
 
     def get_response_wkb(self, challenge=""):
         dprint("winkerberos SSPI")
-        status = winkerberos.authGSSClientStep(self.ctx, challenge)
+        winkerberos.authGSSClientStep(self.ctx, challenge)
         auth_req = winkerberos.authGSSClientResponse(self.ctx)
 
         return auth_req
 
 class Proxy(httpserver.SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    
+
     def handle_one_request(self):
         try:
             httpserver.SimpleHTTPRequestHandler.handle_one_request(self)
@@ -170,10 +169,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         if not destination:
             destination = NTLM_PROXY
 
-        if not hasattr(self, "client_socket") or self.client_socket == None:
+        if not hasattr(self, "client_socket") or self.client_socket is None:
             dprint("New connection")
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:                
+            try:
                 self.client_socket.connect(destination)
             except:
                 traceback.print_exc(file=sys.stdout)
@@ -219,7 +218,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Getting body for POST/PUT/PATCH")
                 if cl != None:
                     self.body = self.rfile.read(cl)
-                else:    
+                else:
                     self.body = self.rfile.read()
 
             dprint("Sending body for POST/PUT/PATCH: %d = %d" % (cl or -1, len(self.body)))
@@ -231,7 +230,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         nobody = False
         headers = []
         body = b""
-        
+
         if self.command == "HEAD":
             nobody = True
 
@@ -243,7 +242,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 line = self.client_fp.readline(MAX_LINE)
             try:
                 resp = int(line.split()[1])
-            except:
+            except ValueError:
                 if line == b"":
                     dprint("Client closed connection")
                     return 444, nobody
@@ -296,7 +295,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     try:
                         csize = int(line.strip(), 16)
                         dprint("Chunk size %d" % csize)
-                    except:
+                    except ValueError:
                         dprint("Bad chunk size '%s'" % line)
                         continue
                     if csize == 0:
@@ -330,7 +329,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             # Check for NTLM auth
             ntlm = NtlmMessageGenerator()
             ntlm_resp = ntlm.get_response()
-            if ntlm_resp == None:
+            if ntlm_resp is None:
                 dprint("Bad NTLM response")
                 return 503, None, None
             resp, headers, body = self.do_socket({
@@ -347,7 +346,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 if ntlm_challenge:
                     dprint("Challenged")
                     ntlm_resp = ntlm.get_response(ntlm_challenge)
-                    if ntlm_resp == None:
+                    if ntlm_resp is None:
                         dprint("Bad NTLM response")
                         return 503, None, None
                     resp, headers, body = self.do_socket({
@@ -474,11 +473,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         if NOPROXY.size:
             netloc = self.path
             path = "/"
-            if not self.command == "CONNECT":
+            if self.command != "CONNECT":
                 parse = urlparse.urlparse(self.path, allow_fragments=False)
                 if parse.netloc:
                     netloc = parse.netloc
-                if not ":" in netloc:
+                if ":" not in netloc:
                     port = parse.port
                     if not port:
                         if parse.scheme == "http":
@@ -499,11 +498,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             if len(addr) and len(addr[0]) == 5:
                 ipport = addr[0][4]
                 dprint("%s => %s + %s" % (self.path, ipport, path))
-                
+
                 if ipport[0] in NOPROXY:
                     self.path = path
                     return ipport
-            
+
         return None
 
 class PoolMixIn(socketserver.ThreadingMixIn):
@@ -539,7 +538,7 @@ def serve_forever(httpd):
     except KeyboardInterrupt:
         dprint("Exiting")
         EXIT = True
-    
+
     httpd.shutdown()
 
 def start_worker(pipeout):
@@ -553,10 +552,10 @@ def start_worker(pipeout):
 def runpool():
     try:
         httpd = ThreadedTCPServer((LISTEN, PORT), Proxy)
-    except OSError as e:
-        print(e)
+    except OSError as exc:
+        print(exc)
         return
-        
+
     mainsock = httpd.socket
 
     if hasattr(socket, "fromshare"):
@@ -566,7 +565,7 @@ def runpool():
             p = multiprocessing.Process(target=start_worker, args=(pipeout,))
             p.daemon = True
             p.start()
-            while p.pid == None:
+            while p.pid is None:
                 time.sleep(1)
             pipein.send(mainsock.share(p.pid))
 
@@ -624,7 +623,6 @@ def parsecli():
 
     if os.path.exists(INI):
         config = configparser.ConfigParser()
-        config.set(config.default_section, "allow", "*.*.*.*")
         config.read(INI)
 
         if "proxy" in config.sections():
@@ -637,14 +635,14 @@ def parsecli():
                 port = config.get("proxy", "port").strip()
                 try:
                     PORT = int(port)
-                except:
+                except ValueError:
                     pass
 
             if "listen" in config.options("proxy"):
                 listen = config.get("proxy", "listen").strip()
                 if listen:
                     LISTEN = listen
-                
+
             if "allow" in config.options("proxy"):
                 parseallow(config.get("proxy", "allow"))
 
@@ -660,21 +658,21 @@ def parsecli():
                 workers = config.get("settings", "workers").strip()
                 try:
                     MAX_WORKERS = int(workers)
-                except:
+                except ValueError:
                     pass
 
             if "threads" in config.options("settings"):
                 threads = config.get("settings", "threads").strip()
                 try:
                     MAX_THREADS = int(threads)
-                except:
+                except ValueError:
                     pass
 
             if "idle" in config.options("settings"):
                 idle = config.get("settings", "idle").strip()
                 try:
                     MAX_IDLE = int(idle)
-                except:
+                except ValueError:
                     pass
 
             if "log" in config.options("settings"):
@@ -697,7 +695,7 @@ def parsecli():
         LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
         DEBUG = True
 
-    if NTLM_PROXY == None:
+    if NTLM_PROXY is None:
         print("No proxy defined")
         sys.exit()
 
@@ -716,9 +714,9 @@ def quit():
 
 def handle_exceptions(type, value, tb):
     # Create traceback log
-    list = traceback.format_tb(tb, None) + traceback.format_exception_only(type, value)
-    tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % ("".join(list[:-1]), list[-1])
-    
+    lst = traceback.format_tb(tb, None) + traceback.format_exception_only(type, value)
+    tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % ("".join(lst[:-1]), lst[-1])
+
     if LOGGER != None:
         print(tracelog)
     else:

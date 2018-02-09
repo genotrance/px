@@ -137,8 +137,12 @@ class NtlmMessageGenerator:
 
     def get_response_wkb(self, challenge=""):
         dprint("winkerberos SSPI")
-        winkerberos.authGSSClientStep(self.ctx, challenge)
-        auth_req = winkerberos.authGSSClientResponse(self.ctx)
+        try:
+            winkerberos.authGSSClientStep(self.ctx, challenge)
+            auth_req = winkerberos.authGSSClientResponse(self.ctx)
+        except winkerberos.GSSError:
+            traceback.print_exc(file=sys.stdout)
+            return None
 
         return auth_req
 

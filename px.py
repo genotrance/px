@@ -1,6 +1,8 @@
 from __future__ import print_function
 
 import base64
+import ctypes
+import ctypes.wintypes
 import multiprocessing
 import os
 import select
@@ -71,6 +73,7 @@ NOPROXY = netaddr.IPSet([])
 ALLOW = netaddr.IPGlob("*.*.*.*")
 NTLM_PROXY = None
 PORT = 3128
+STDOUT = None
 
 MAX_IDLE = 30
 MAX_DISCONNECT = 3
@@ -105,6 +108,30 @@ def dprint(*objs):
     if DEBUG:
         print(multiprocessing.current_process().name + ": " + threading.current_thread().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
         print(*objs)
+
+def reopen_stdout():
+    global STDOUT
+
+    clrstr = "\r" + " " * 80 + "\r"
+    if LOGGER == None:
+        STDOUT = sys.stdout
+        sys.stdout = open("CONOUT$", "w")
+        sys.stdout.write(clrstr)
+    else:
+        STDOUT = LOGGER.stdout
+        LOGGER.stdout = open("CONOUT$", "w")
+        LOGGER.stdout.write(clrstr)
+
+def restore_stdout():
+    if LOGGER == None:
+        sys.stdout.close()
+        sys.stdout = STDOUT
+    else:
+        LOGGER.stdout.close()
+        LOGGER.stdout = STDOUT
+
+###
+# NTLM support
 
 class NtlmMessageGenerator:
     def __init__(self):
@@ -147,6 +174,9 @@ class NtlmMessageGenerator:
             return None
 
         return auth_req
+
+###
+# Proxy handler
 
 class Proxy(httpserver.SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -511,6 +541,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         return None
 
+###
+# Multi-processing and multi-threading
+
 class PoolMixIn(socketserver.ThreadingMixIn):
     def process_request(self, request, client_address):
         self.pool.submit(self.process_request_thread, request, client_address)
@@ -535,8 +568,6 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
 
 def serve_forever(httpd):
     global EXIT
-
-    print("Serving at %s:%d proc %s" % (LISTEN, PORT, multiprocessing.current_process().name))
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     try:
@@ -630,6 +661,13 @@ def parsecli():
     global MAX_WORKERS
     global PORT
 
+    if "--debug" in sys.argv:
+        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
+        DEBUG = True
+
+    if getattr(sys, "frozen", False):
+        attachConsole()
+
     if os.path.exists(INI):
         config = configparser.ConfigParser()
         config.read(INI)
@@ -700,34 +738,46 @@ def parsecli():
     if "--gateway" in sys.argv:
         LISTEN = ''
 
-    if "--debug" in sys.argv:
-        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
-        DEBUG = True
-
     if "--install" in sys.argv:
         install()
     elif "--uninstall" in sys.argv:
         uninstall()
+    elif "--quit" in sys.argv:
+        quit()
 
     if NTLM_PROXY is None:
         print("No proxy defined")
         sys.exit()
 
+    print("Serving at %s:%d proc %s" % (LISTEN, PORT, multiprocessing.current_process().name))
+
+    if getattr(sys, "frozen", False):
+        detachConsole()
+
 ###
 # Exit related
 
 def quit():
-    mypid = os.getpid()
+    count = 0
+    mypids = [os.getpid(), os.getppid()]
     for pid in sorted(psutil.pids(), reverse=True):
-        if pid == mypid:
+        if pid in mypids:
             continue
 
         try:
             p = psutil.Process(pid)
             if p.exe().lower() == sys.executable.lower():
                 p.send_signal(signal.CTRL_C_EVENT)
+                count += 1
         except:
             pass
+
+    if count != 0:
+        print("Quiting Px")
+    else:
+        print("Px is not running")
+
+    sys.exit()
 
 def handle_exceptions(type, value, tb):
     # Create traceback log
@@ -748,7 +798,7 @@ def handle_exceptions(type, value, tb):
 # Install Px to startup
 
 def get_script_path():
-    if "python" in sys.executable and ".py" in sys.argv[0]:
+    if getattr(sys, "frozen", False):
         # Script mode
         return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
     else:
@@ -796,6 +846,57 @@ def uninstall():
     sys.exit()
 
 ###
+# Attach/detach console
+
+def attachConsole():
+    if ctypes.windll.kernel32.GetConsoleWindow() != 0:
+        dprint("Already attached to a console")
+        return
+
+    # Find parent cmd.exe if exists
+    pid = os.getpid()
+    while True:
+        try:
+            p = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            # No such parent - started without console
+            pid = -1
+            break
+
+        if p.cmdline()[0] == "cmd":
+            # Found it
+            break
+
+        # Search parent
+        pid = p.ppid()
+
+    # Not found, started without console
+    if pid == -1:
+        return
+
+    dprint("Attaching to console " + str(pid))
+    if ctypes.windll.kernel32.AttachConsole(pid) == 0:
+        dprint("Attach failed with error " + str(ctypes.windll.kernel32.GetLastError()))
+        return
+
+    if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+        dprint("Not a console window")
+        return
+
+    reopen_stdout()
+
+def detachConsole():
+    if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+        return
+
+    restore_stdout()
+
+    if not ctypes.windll.kernel32.FreeConsole():
+        dprint("Free console failed with error " + str(ctypes.windll.kernel32.GetLastError()))
+    else:
+        dprint("Freed console successfully")
+
+###
 # Startup
 
 if __name__ == "__main__":
@@ -804,7 +905,4 @@ if __name__ == "__main__":
 
     parsecli()
 
-    if "--quit" in sys.argv:
-        quit()
-    else:
-        runpool()
+    runpool()

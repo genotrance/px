@@ -13,8 +13,6 @@ import traceback
 import datetime
 
 # Dependencies
-import winipaddrs
-
 try:
     import concurrent.futures
 except ImportError:
@@ -69,7 +67,8 @@ EXIT = False
 LISTEN = '127.0.0.1'
 LOGGER = None
 NOPROXY = netaddr.IPSet([])
-ALLOW = netaddr.IPGlob("*.*.*.*")
+ALLOW = None
+GATEWAY_IPADDRESSES = None
 ALLOWLOCAL=False
 ALLOWLOCAL_NEXTREFRESH = None
 NTLM_PROXY = None
@@ -522,6 +521,7 @@ class PoolMixIn(socketserver.ThreadingMixIn):
     def verify_request(self, request, client_address):
         global ALLOWLOCAL
         global ALLOW
+        global GATEWAY_IPADDRESSES
         global ALLOWLOCAL_NEXTREFRESH
 
         dprint("Client address: %s" % client_address[0])
@@ -529,14 +529,15 @@ class PoolMixIn(socketserver.ThreadingMixIn):
         if ALLOWLOCAL:
             if (ALLOWLOCAL_NEXTREFRESH is None) or (ALLOWLOCAL_NEXTREFRESH < datetime.datetime.now()):
                 ips = socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)
-                newlocalipaddresses = netaddr.IPSet(ip[4][0] for ip in ips)
-                newlocalipaddresses.add("127.0.0.1")
-                if newlocalipaddresses != ALLOW:
-                    ALLOW=newlocalipaddresses
-                    dprint("Allow connections from: %s" % (", ".join(str(ip) for ip in ALLOW)))
+                newgatewayips = netaddr.IPSet(ip[4][0] for ip in ips)
+                newgatewayips.add("127.0.0.1")
+                newgatewayips = newgatewayips | ALLOW # IPSet.add() not implemented for IPSets...
+                if newgatewayips != GATEWAY_IPADDRESSES:
+                    GATEWAY_IPADDRESSES=newgatewayips
+                    dprint("Allow connections from: %s" % (", ".join(str(ip) for ip in GATEWAY_IPADDRESSES.iter_cidrs())))
                 ALLOWLOCAL_NEXTREFRESH = datetime.datetime.now() + datetime.timedelta(seconds=MAX_ALLOWLOCAL_TTL)
 
-        if client_address[0] in ALLOW:
+        if (client_address[0] in GATEWAY_IPADDRESSES):
             return True
 
         dprint("Client not allowed: %s" % client_address[0])
@@ -646,6 +647,8 @@ def parsecli():
     global MAX_WORKERS
     global PORT
     global ALLOWLOCAL
+    global ALLOW
+    global GATEWAY_IPADDRESSES
 
     if os.path.exists(INI):
         config = configparser.ConfigParser()
@@ -730,6 +733,14 @@ def parsecli():
     if NTLM_PROXY is None:
         print("No proxy defined")
         sys.exit()
+
+    if ALLOW is None:
+        if ALLOWLOCAL:
+            ALLOW = netaddr.IPSet()
+        else:
+            ALLOW = netaddr.IPGlob("*.*.*.*")
+
+    GATEWAY_IPADDRESSES = ALLOW # Default. Will be overriden in verify_request() if allowlocal is used
 
 def quit():
     mypid = os.getpid()

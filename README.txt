@@ -55,6 +55,9 @@ Examples
 	30 seconds (helpful with dynamic IPs, VPNs, etc.)
 	px.exe --proxy=proxyserver.com:80 --gateway --allowlocal
 
+	Allow requests from all local ip addresses and an additional subnet. 
+	px.exe --proxy=proxyserver.com:80 --gateway --allowlocal --allow=192.168.1.0/24
+
 	Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
 	px.exe --proxy=proxyserver.com:80 --gateway
 

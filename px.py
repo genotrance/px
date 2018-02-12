@@ -55,11 +55,13 @@ try:
     import http.server as httpserver
     import socketserver
     import urllib.parse as urlparse
+    import winreg
 except ImportError:
     import ConfigParser as configparser
     import SimpleHTTPServer as httpserver
     import SocketServer as socketserver
     import urlparse
+    import _winreg as winreg
 
 DEBUG = False
 EXIT = False
@@ -575,6 +577,9 @@ def runpool():
 
     serve_forever(httpd)
 
+###
+# Parse settings and command line
+
 def parseproxy(proxystr):
     global NTLM_PROXY
 
@@ -699,9 +704,17 @@ def parsecli():
         LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
         DEBUG = True
 
+    if "--install" in sys.argv:
+        install()
+    elif "--uninstall" in sys.argv:
+        uninstall()
+
     if NTLM_PROXY is None:
         print("No proxy defined")
         sys.exit()
+
+###
+# Exit related
 
 def quit():
     mypid = os.getpid()
@@ -730,6 +743,60 @@ def handle_exceptions(type, value, tb):
         dbg = open('debug-%s.log' % multiprocessing.current_process().name, 'w')
         dbg.write(tracelog)
         dbg.close()
+
+###
+# Install Px to startup
+
+def get_script_path():
+    if "python" in sys.executable and ".py" in sys.argv[0]:
+        # Script mode
+        return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
+    else:
+        # Frozen mode
+        return sys.executable
+
+def get_script_cmd():
+    spath = get_script_path()
+    if spath != sys.executable:
+        return sys.executable + ' "%s"' % spath
+
+    return spath
+
+def check_installed():
+    ret = True
+    runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+    try:
+        value = winreg.QueryValueEx(runkey, "Px")
+    except:
+        ret = False
+    winreg.CloseKey(runkey)
+
+    return ret
+
+def install():
+    if check_installed() is False:
+        runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_WRITE)
+        winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ, get_script_cmd())
+        winreg.CloseKey(runkey)
+        print("Px installed successfully")
+    else:
+        print("Px already installed")
+
+    sys.exit()
+
+def uninstall():
+    if check_installed() is True:
+        runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_WRITE)
+        winreg.DeleteValue(runkey, "Px")
+        winreg.CloseKey(runkey)
+        print("Px uninstalled successfully")
+    else:
+        print("Px is not installed")
+
+    sys.exit()
+
+###
+# Startup
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()

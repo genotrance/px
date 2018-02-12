@@ -16,6 +16,8 @@ TBD
 - Fixed issue 12 - proxy keep-alive support for HTTP/1.0 clients
 - Fixed issue 13 - support for HTTP Expect-Continue
 - Fixed issue where non-resolving hostnames were not failing and going through proxy instead
+- Fixed winkerberos crash if no domain controller
+- Fixed issue 17 - ability to run Px at user login
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to

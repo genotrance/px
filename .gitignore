@@ -49,3 +49,4 @@ dist/
 debug-*
 *.pyc
 .vscode
+testrun

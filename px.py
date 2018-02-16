@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import traceback
+import datetime
 
 # Dependencies
 try:
@@ -70,7 +71,10 @@ EXIT = False
 LISTEN = '127.0.0.1'
 LOGGER = None
 NOPROXY = netaddr.IPSet([])
-ALLOW = netaddr.IPGlob("*.*.*.*")
+ALLOW = None
+GATEWAY_IPADDRESSES = None
+ALLOWLOCAL=False
+ALLOWLOCAL_NEXTREFRESH = None
 NTLM_PROXY = None
 PORT = 3128
 STDOUT = None
@@ -80,6 +84,7 @@ MAX_DISCONNECT = 3
 MAX_LINE = 65536 + 1
 MAX_THREADS = 40
 MAX_WORKERS = 2
+MAX_ALLOWLOCAL_TTL = 5
 
 INI = "px.ini"
 
@@ -549,8 +554,25 @@ class PoolMixIn(socketserver.ThreadingMixIn):
         self.pool.submit(self.process_request_thread, request, client_address)
 
     def verify_request(self, request, client_address):
+        global ALLOWLOCAL
+        global ALLOW
+        global GATEWAY_IPADDRESSES
+        global ALLOWLOCAL_NEXTREFRESH
+
         dprint("Client address: %s" % client_address[0])
-        if client_address[0] in ALLOW:
+
+        if ALLOWLOCAL:
+            if (ALLOWLOCAL_NEXTREFRESH is None) or (ALLOWLOCAL_NEXTREFRESH < datetime.datetime.now()):
+                ips = socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)
+                newgatewayips = netaddr.IPSet(ip[4][0] for ip in ips)
+                newgatewayips.add("127.0.0.1")
+                newgatewayips = newgatewayips | ALLOW # IPSet.add() not implemented for IPSets...
+                if newgatewayips != GATEWAY_IPADDRESSES:
+                    GATEWAY_IPADDRESSES=newgatewayips
+                    dprint("Allow connections from: %s" % (", ".join(str(ip) for ip in GATEWAY_IPADDRESSES.iter_cidrs())))
+                ALLOWLOCAL_NEXTREFRESH = datetime.datetime.now() + datetime.timedelta(seconds=MAX_ALLOWLOCAL_TTL)
+
+        if (client_address[0] in GATEWAY_IPADDRESSES):
             return True
 
         dprint("Client not allowed: %s" % client_address[0])
@@ -660,6 +682,9 @@ def parsecli():
     global MAX_IDLE
     global MAX_WORKERS
     global PORT
+    global ALLOWLOCAL
+    global ALLOW
+    global GATEWAY_IPADDRESSES
 
     if "--debug" in sys.argv:
         LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
@@ -692,6 +717,10 @@ def parsecli():
 
             if "allow" in config.options("proxy"):
                 parseallow(config.get("proxy", "allow"))
+
+            if "allowlocal" in config.options("proxy"):
+                if config.get("proxy", "allowlocal") == "1":
+                    ALLOWLOCAL = True
 
             if "gateway" in config.options("proxy"):
                 if config.get("proxy", "gateway") == "1":
@@ -734,6 +763,8 @@ def parsecli():
             parsenoproxy(sys.argv[i].split("=")[1])
         elif "--allow=" in sys.argv[i]:
             parseallow(sys.argv[i].split("=")[1])
+        elif "--allowlocal" in sys.argv[i]:
+            ALLOWLOCAL=True
 
     if "--gateway" in sys.argv:
         LISTEN = ''
@@ -748,6 +779,14 @@ def parsecli():
     if NTLM_PROXY is None:
         print("No proxy defined")
         sys.exit()
+
+    if ALLOW is None:
+        if ALLOWLOCAL:
+            ALLOW = netaddr.IPSet()
+        else:
+            ALLOW = netaddr.IPGlob("*.*.*.*")
+
+    GATEWAY_IPADDRESSES = ALLOW # Default. Will be overriden in verify_request() if allowlocal is used
 
     print("Serving at %s:%d proc %s" % (LISTEN, PORT, multiprocessing.current_process().name))
 

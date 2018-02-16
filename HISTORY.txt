@@ -19,6 +19,7 @@ TBD
 - Fixed winkerberos crash if no domain controller
 - Fixed issue 17 - ability to run Px at user login
 - Added support for px.exe to write to console when appropriate
+- Added "allowlocal" to auto allow all traffic from local ip interfaces
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to

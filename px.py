@@ -65,23 +65,19 @@ except ImportError:
     import urlparse
     import _winreg as winreg
 
-DEBUG = False
-EXIT = False
-LISTEN = '127.0.0.1'
-LOGGER = None
-NOPROXY = netaddr.IPSet([])
-ALLOW = netaddr.IPGlob("*.*.*.*")
-NTLM_PROXY = None
-PORT = 3128
-STDOUT = None
+class State(object):
+    allow = netaddr.IPGlob("*.*.*.*")
+    config = None
+    exit = False
+    logger = None
+    noproxy = netaddr.IPSet([])
+    proxy_server = None
+    stdout = None
 
-MAX_IDLE = 30
-MAX_DISCONNECT = 3
-MAX_LINE = 65536 + 1
-MAX_THREADS = 40
-MAX_WORKERS = 2
-
-INI = "px.ini"
+    ini = "px.ini"
+    max_disconnect = 3
+    max_line = 65536 + 1
+    max_workers = 2
 
 class Log(object):
     def __init__(self, name, mode):
@@ -105,30 +101,31 @@ class Log(object):
         self.file.flush()
 
 def dprint(*objs):
-    if DEBUG:
+    if State.logger != None:
         print(multiprocessing.current_process().name + ": " + threading.current_thread().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
         print(*objs)
 
-def reopen_stdout():
-    global STDOUT
+def dfile():
+    return "debug-%s.log" % multiprocessing.current_process().name
 
+def reopen_stdout():
     clrstr = "\r" + " " * 80 + "\r"
-    if LOGGER == None:
-        STDOUT = sys.stdout
+    if State.logger is None:
+        State.stdout = sys.stdout
         sys.stdout = open("CONOUT$", "w")
         sys.stdout.write(clrstr)
     else:
-        STDOUT = LOGGER.stdout
-        LOGGER.stdout = open("CONOUT$", "w")
-        LOGGER.stdout.write(clrstr)
+        State.stdout = State.logger.stdout
+        State.logger.stdout = open("CONOUT$", "w")
+        State.logger.stdout.write(clrstr)
 
 def restore_stdout():
-    if LOGGER == None:
+    if State.logger is None:
         sys.stdout.close()
-        sys.stdout = STDOUT
+        sys.stdout = State.stdout
     else:
-        LOGGER.stdout.close()
-        LOGGER.stdout = STDOUT
+        State.logger.stdout.close()
+        State.logger.stdout = State.stdout
 
 ###
 # NTLM support
@@ -188,7 +185,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             if not hasattr(self, "_host_disconnected"):
                 self._host_disconnected = 1
                 dprint("Host disconnected")
-            elif self._host_disconnected < MAX_DISCONNECT:
+            elif self._host_disconnected < State.max_disconnect:
                 self._host_disconnected += 1
                 dprint("Host disconnected: %d" % self._host_disconnected)
             else:
@@ -203,7 +200,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
     def do_socket(self, xheaders=[], destination=None):
         dprint("Entering")
         if not destination:
-            destination = NTLM_PROXY
+            destination = State.proxy_server
 
         if not hasattr(self, "client_socket") or self.client_socket is None:
             dprint("New connection")
@@ -215,7 +212,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 return 503, None, None
 
         # No chit chat on SSL
-        if destination != NTLM_PROXY and self.command == "CONNECT":
+        if destination != State.proxy_server and self.command == "CONNECT":
             return  200, None, None
 
         cl = None
@@ -273,9 +270,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Response code
         for i in range(2):
             dprint("Reading response code")
-            line = self.client_fp.readline(MAX_LINE)
+            line = self.client_fp.readline(State.max_line)
             if line == b"\r\n":
-                line = self.client_fp.readline(MAX_LINE)
+                line = self.client_fp.readline(State.max_line)
             try:
                 resp = int(line.split()[1])
             except ValueError:
@@ -295,8 +292,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         cl = None
         chk = False
         dprint("Reading response headers")
-        while not EXIT:
-            line = self.client_fp.readline(MAX_LINE).decode("utf-8")
+        while not State.exit:
+            line = self.client_fp.readline(State.max_line).decode("utf-8")
             if line == b"":
                 dprint("Client closed connection: %s" % resp)
                 return 444, None, None
@@ -326,8 +323,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 body = self.client_fp.read(cl)
             elif chk:
                 dprint("Chunked encoding")
-                while not EXIT:
-                    line = self.client_fp.readline(MAX_LINE).decode("utf-8").strip()
+                while not State.exit:
+                    line = self.client_fp.readline(State.max_line).decode("utf-8").strip()
                     try:
                         csize = int(line.strip(), 16)
                         dprint("Chunk size %d" % csize)
@@ -345,7 +342,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 headers.append(("Content-Length", str(len(body))))
             else:
                 dprint("Not sure how much")
-                while not EXIT:
+                while not State.exit:
                     time.sleep(0.1)
                     d = self.client_fp.read(1024)
                     if len(d) < 1024:
@@ -463,7 +460,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             rlist = [self.connection, self.client_socket]
             wlist = []
             count = 0
-            while not EXIT:
+            max_idle = State.config.getint("settings", "idle")
+            while not State.exit:
                 count += 1
                 (ins, _, exs) = select.select(rlist, wlist, rlist, 1)
                 if exs:
@@ -480,7 +478,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                             out.send(data)
                             count = 0
                             cl += len(data)
-                if count == MAX_IDLE:
+                if count == max_idle:
                     break
 
         dprint("Transferred %d bytes" % cl)
@@ -506,7 +504,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         dprint("Done")
 
     def get_destination(self):
-        if NOPROXY.size:
+        if State.noproxy.size:
             netloc = self.path
             path = "/"
             if self.command != "CONNECT":
@@ -535,7 +533,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 ipport = addr[0][4]
                 dprint("%s => %s + %s" % (self.path, ipport, path))
 
-                if ipport[0] in NOPROXY:
+                if ipport[0] in State.noproxy:
                     self.path = path
                     return ipport
 
@@ -550,7 +548,7 @@ class PoolMixIn(socketserver.ThreadingMixIn):
 
     def verify_request(self, request, client_address):
         dprint("Client address: %s" % client_address[0])
-        if client_address[0] in ALLOW:
+        if client_address[0] in State.allow:
             return True
 
         dprint("Client not allowed: %s" % client_address[0])
@@ -560,27 +558,31 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    try:
-        # Workaround bad thread naming code in Python 3.6+, fixed in master
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS, thread_name_prefix="Thread")
-    except:
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS)
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+        socketserver.TCPServer.__init__(self, server_address, RequestHandlerClass, bind_and_activate)
+
+        try:
+            # Workaround bad thread naming code in Python 3.6+, fixed in master
+            self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=State.config.getint("settings", "threads"), thread_name_prefix="Thread")
+        except:
+            self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=State.config.getint("settings", "threads"))
 
 def serve_forever(httpd):
-    global EXIT
-
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         dprint("Exiting")
-        EXIT = True
+        State.exit = True
 
     httpd.shutdown()
 
 def start_worker(pipeout):
     parsecli()
-    httpd = ThreadedTCPServer((LISTEN, PORT), Proxy, bind_and_activate=False)
+    httpd = ThreadedTCPServer(
+        (State.config.get("proxy", "listen").strip(), State.config.getint("proxy", "port")),
+        Proxy, bind_and_activate=False
+    )
     mainsock = socket.fromshare(pipeout.recv())
     httpd.socket = mainsock
 
@@ -588,7 +590,9 @@ def start_worker(pipeout):
 
 def runpool():
     try:
-        httpd = ThreadedTCPServer((LISTEN, PORT), Proxy)
+        httpd = ThreadedTCPServer(
+            (State.config.get("proxy", "listen").strip(), State.config.getint("proxy", "port")), Proxy
+        )
     except OSError as exc:
         print(exc)
         return
@@ -596,7 +600,7 @@ def runpool():
     mainsock = httpd.socket
 
     if hasattr(socket, "fromshare"):
-        workers = MAX_WORKERS
+        workers = State.config.getint("settings", "workers")
         for i in range(workers-1):
             (pipeout, pipein) = multiprocessing.Pipe()
             p = multiprocessing.Process(target=start_worker, args=(pipeout,))
@@ -612,14 +616,12 @@ def runpool():
 # Parse settings and command line
 
 def parseproxy(proxystr):
-    global NTLM_PROXY
-
-    NTLM_PROXY = proxystr.split(":")
-    if len(NTLM_PROXY) == 1:
-        NTLM_PROXY.append(80)
+    State.proxy_server = proxystr.split(":")
+    if len(State.proxy_server) == 1:
+        State.proxy_server.append(80)
     else:
-        NTLM_PROXY[1] = int(NTLM_PROXY[1])
-    NTLM_PROXY = tuple(NTLM_PROXY)
+        State.proxy_server[1] = int(State.proxy_server[1])
+    State.proxy_server = tuple(State.proxy_server)
 
 def parseipranges(iprangesconfig):
     ipranges = netaddr.IPSet([])
@@ -644,99 +646,103 @@ def parseipranges(iprangesconfig):
     return ipranges
 
 def parseallow(allow):
-    global ALLOW
-
-    ALLOW = parseipranges(allow)
+    State.allow = parseipranges(allow)
 
 def parsenoproxy(noproxy):
-    global NOPROXY
+    State.noproxy = parseipranges(noproxy)
 
-    NOPROXY = parseipranges(noproxy)
+def cfg_int_init(section, name, default, override=False):
+    val = default
+    if not override:
+        try:
+            val = State.config.get(section, name).strip()
+        except configparser.NoOptionError:
+            pass
+
+    try:
+        val = int(val)
+    except ValueError:
+        print("Invalid integer value for " + section + ":" + name)
+
+    State.config.set(section, name, str(val))
+
+def cfg_str_init(section, name, default, proc=None, override=False):
+    val = default
+    if not override:
+        try:
+            val = State.config.get(section, name).strip()
+        except configparser.NoOptionError:
+            pass
+
+    State.config.set(section, name, val)
+
+    if proc != None and val != "":
+        proc(val)
 
 def parsecli():
-    global DEBUG
-    global LISTEN
-    global LOGGER
-    global MAX_IDLE
-    global MAX_WORKERS
-    global PORT
-
     if "--debug" in sys.argv:
-        LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
-        DEBUG = True
+        State.logger = Log(dfile(), "w")
 
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False) != False:
         attachConsole()
 
-    if os.path.exists(INI):
-        config = configparser.ConfigParser()
-        config.read(INI)
+    State.config = configparser.ConfigParser()
+    ini = os.path.join(os.path.dirname(get_script_path()), State.ini)
+    if os.path.exists(ini):
+        State.config.read(ini)
 
-        if "proxy" in config.sections():
-            if "server" in config.options("proxy"):
-                server = config.get("proxy", "server").strip()
-                if server:
-                    parseproxy(server)
+    # [proxy] section
+    if "proxy" not in State.config.sections():
+        State.config.add_section("proxy")
 
-            if "port" in config.options("proxy"):
-                port = config.get("proxy", "port").strip()
-                try:
-                    PORT = int(port)
-                except ValueError:
-                    pass
+    cfg_str_init("proxy", "server", "", parseproxy)
 
-            if "listen" in config.options("proxy"):
-                listen = config.get("proxy", "listen").strip()
-                if listen:
-                    LISTEN = listen
+    cfg_int_init("proxy", "port", "3128")
 
-            if "allow" in config.options("proxy"):
-                parseallow(config.get("proxy", "allow"))
+    cfg_str_init("proxy", "listen", "127.0.0.1")
 
-            if "gateway" in config.options("proxy"):
-                if config.get("proxy", "gateway") == "1":
-                    LISTEN = ''
+    cfg_str_init("proxy", "allow", "*.*.*.*", parseallow)
 
-            if "noproxy" in config.options("proxy"):
-                parsenoproxy(config.get("proxy", "noproxy"))
+    cfg_int_init("proxy", "gateway", "0")
+    if State.config.getint("proxy", "gateway") == 1:
+        State.config.set("proxy", "listen", "")
 
-        if "settings" in config.sections():
-            if "workers" in config.options("settings"):
-                workers = config.get("settings", "workers").strip()
-                try:
-                    MAX_WORKERS = int(workers)
-                except ValueError:
-                    pass
+    cfg_str_init("proxy", "noproxy", "", parsenoproxy)
 
-            if "threads" in config.options("settings"):
-                threads = config.get("settings", "threads").strip()
-                try:
-                    MAX_THREADS = int(threads)
-                except ValueError:
-                    pass
+    # [settings] section
+    if "settings" not in State.config.sections():
+        State.config.add_section("settings")
 
-            if "idle" in config.options("settings"):
-                idle = config.get("settings", "idle").strip()
-                try:
-                    MAX_IDLE = int(idle)
-                except ValueError:
-                    pass
+    cfg_int_init("settings", "workers", "2")
+    cfg_int_init("settings", "threads", "40")
+    cfg_int_init("settings", "idle", "30")
 
-            if "log" in config.options("settings"):
-                if config.get("settings", "log") == "1":
-                    LOGGER = Log("debug-%s.log" % multiprocessing.current_process().name, "w")
-                    DEBUG = True
+    cfg_int_init("settings", "log", "0" if State.logger is None else "1")
+    if State.config.get("settings", "log") == "1" and State.logger is None:
+        State.logger = Log(dfile(), "w")
 
+    # Command line flags
     for i in range(len(sys.argv)):
-        if "--proxy=" in sys.argv[i]:
-            parseproxy(sys.argv[i].split("=")[1])
-        elif "--noproxy=" in sys.argv[i]:
-            parsenoproxy(sys.argv[i].split("=")[1])
-        elif "--allow=" in sys.argv[i]:
-            parseallow(sys.argv[i].split("=")[1])
+        if "=" in sys.argv[i]:
+            val = sys.argv[i].split("=")[1]
+            if "--proxy=" in sys.argv[i] or "--server=" in sys.argv[i]:
+                cfg_str_init("proxy", "server", val, parseproxy, True)
+            elif "--listen=" in sys.argv[i]:
+                cfg_str_init("proxy", "listen", val, None, True)
+            elif "--port=" in sys.argv[i]:
+                cfg_int_init("proxy", "port", val, True)
+            elif "--allow=" in sys.argv[i]:
+                cfg_str_init("proxy", "allow", val, parseallow, True)
+            elif "--noproxy=" in sys.argv[i]:
+                cfg_str_init("proxy", "noproxy", val, parsenoproxy, True)
+            else:
+                for j in ["workers", "threads", "idle"]:
+                    if "--" + j + "=" in sys.argv[i]:
+                        cfg_int_init("settings", j, val, True)
 
     if "--gateway" in sys.argv:
-        LISTEN = ''
+        State.config.set("proxy", "listen", "")
+        State.config.set("proxy", "gateway", "1")
 
     if "--install" in sys.argv:
         install()
@@ -745,13 +751,21 @@ def parsecli():
     elif "--quit" in sys.argv:
         quit()
 
-    if NTLM_PROXY is None:
+    if State.proxy_server is None:
         print("No proxy defined")
         sys.exit()
 
-    print("Serving at %s:%d proc %s" % (LISTEN, PORT, multiprocessing.current_process().name))
+    print("Serving at %s:%d proc %s" % (
+        State.config.get("proxy", "listen").strip(),
+        State.config.getint("proxy", "port"),
+        multiprocessing.current_process().name)
+    )
 
-    if getattr(sys, "frozen", False):
+    for section in State.config.sections():
+        for option in State.config.options(section):
+            dprint(section + ":" + option + " = " + State.config.get(section, option))
+
+    if getattr(sys, "frozen", False) != False:
         detachConsole()
 
 ###
@@ -784,13 +798,13 @@ def handle_exceptions(type, value, tb):
     lst = traceback.format_tb(tb, None) + traceback.format_exception_only(type, value)
     tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % ("".join(lst[:-1]), lst[-1])
 
-    if LOGGER != None:
+    if State.logger != None:
         print(tracelog)
     else:
         sys.stderr.write(tracelog)
 
         # Save to debug.log
-        dbg = open('debug-%s.log' % multiprocessing.current_process().name, 'w')
+        dbg = open(dfile(), 'w')
         dbg.write(tracelog)
         dbg.close()
 
@@ -798,7 +812,7 @@ def handle_exceptions(type, value, tb):
 # Install Px to startup
 
 def get_script_path():
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False) is False:
         # Script mode
         return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
     else:

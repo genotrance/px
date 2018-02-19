@@ -21,6 +21,8 @@ TBD
 - Added support for px.exe to write to console when appropriate
 - Consolidated all globals into class members, removed redundancies
 - Added CLI flags for all config options
+- Added --config flag to load alternate config file
+- Added ability to override or send User-Agent header on client's behalf
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind service to

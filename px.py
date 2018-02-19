@@ -73,6 +73,7 @@ class State(object):
     noproxy = netaddr.IPSet([])
     proxy_server = None
     stdout = None
+    useragent = ""
 
     ini = "px.ini"
     max_disconnect = 3
@@ -219,26 +220,35 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         chk = False
         expect = False
         keepalive = False
+        ua = False
         cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
         self.client_socket.send(cmdstr)
         dprint(cmdstr)
         for header in self.headers:
+            hlower = header.lower()
+            if hlower == "user-agent" and State.useragent != "":
+                ua = True
+                self.headers[header] = State.useragent
+
             h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
             self.client_socket.send(h)
             dprint("Sending %s" % h)
 
-            if header.lower() == "content-length":
+            if hlower == "content-length":
                 cl = int(self.headers[header])
-            elif header.lower() == "expect" and self.headers[header].lower() == "100-continue":
+            elif hlower == "expect" and self.headers[header].lower() == "100-continue":
                 expect = True
-            elif header.lower() == "proxy-connection":
+            elif hlower == "proxy-connection":
                 keepalive = True
-            elif header.lower() == "transfer-encoding" and self.headers[header].lower() == "chunked":
+            elif hlower == "transfer-encoding" and self.headers[header].lower() == "chunked":
                 dprint("CHUNKED data")
                 chk = True
 
         if not keepalive and self.request_version.lower() == "http/1.0":
             xheaders["Proxy-Connection"] = "keep-alive"
+
+        if not ua and State.useragent != "":
+            xheaders["User-Agent"] = State.useragent
 
         for header in xheaders:
             h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
@@ -686,8 +696,18 @@ def parsecli():
     if getattr(sys, "frozen", False) != False:
         attachConsole()
 
+    # Load configuration file
     State.config = configparser.ConfigParser()
     ini = os.path.join(os.path.dirname(get_script_path()), State.ini)
+    for i in range(len(sys.argv)):
+        if "=" in sys.argv[i]:
+            val = sys.argv[i].split("=")[1]
+            if "--config=" in sys.argv[i]:
+                if os.path.exists(val):
+                    ini = val
+                else:
+                    print("Could not find config file: " + val)
+                    sys.exit()
     if os.path.exists(ini):
         State.config.read(ini)
 
@@ -708,6 +728,8 @@ def parsecli():
         State.config.set("proxy", "listen", "")
 
     cfg_str_init("proxy", "noproxy", "", parsenoproxy)
+
+    cfg_str_init("proxy", "useragent", "", parsenoproxy)
 
     # [settings] section
     if "settings" not in State.config.sections():
@@ -735,6 +757,8 @@ def parsecli():
                 cfg_str_init("proxy", "allow", val, parseallow, True)
             elif "--noproxy=" in sys.argv[i]:
                 cfg_str_init("proxy", "noproxy", val, parsenoproxy, True)
+            elif "--useragent=" in sys.argv[i]:
+                cfg_str_init("proxy", "useragent", val, None, True)
             else:
                 for j in ["workers", "threads", "idle"]:
                     if "--" + j + "=" in sys.argv[i]:

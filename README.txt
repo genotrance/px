@@ -22,6 +22,26 @@ authentication works:
 
 	https://msdn.microsoft.com/en-us/library/dd925287.aspx
 
+Installation
+
+Px can be obtained in multiple ways:-
+
+- Download the latest binary ZIP from the releases page:
+    https://github.com/genotrance/px/releases
+
+- Download a source ZIP of the latest release from above link.
+
+- Clone the latest source:
+    git clone https://github.com/genotrance/px
+
+- Download the latest source ZIP:
+    https://github.com/genotrance/px/archive/master.zip
+
+Running the source directly requires Python and all dependencies installed.
+
+Once downloaded, extract to a folder of choice and use the --save and --install commands
+as documented below.
+
 Configuration
 
 Px requires only one piece of information in order to function - the server name and port of
@@ -33,10 +53,14 @@ bypassing the NTLM proxy altogether. This allows clients to connect to hosts wit
 intranet without requiring additional configuration for each client or at the NTLM proxy.
 
 There are a few other settings to tweak in the INI file but most are self-explanatory. All
-settings can be specified on the command line for convenience.
+settings can be specified on the command line for convenience. The INI file can also be
+created or updated from the command line using --save.
 
 The binary distribution of Px runs in the background once started and can be quit by
 running "px --quit". When run directly using Python, use CTRL-C to quit.
+
+Px can also be setup to automatically run on startup with the --install flag. This is done
+by adding an entry into the Window registry which can be removed with --uninstall.
 
 Usage
 
@@ -44,6 +68,12 @@ px [FLAGS]
 python px.py [FLAGS]
 
 Actions:
+  --save
+  Save configuration to px.ini or file specified with --config
+    Allows setting up Px config directly from command line
+    Values specified on CLI override any values in existing config file
+    Values not specified on CLI or config file are set to defaults
+
   --install
   Add Px to the Windows registry to run on startup
 

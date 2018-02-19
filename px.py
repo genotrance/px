@@ -1,4 +1,8 @@
+"Px is an HTTP proxy server to automatically authenticate through an NTLM proxy"
+
 from __future__ import print_function
+
+__version__ = "0.3.0"
 
 import base64
 import ctypes
@@ -65,13 +69,21 @@ except ImportError:
     import urlparse
     import _winreg as winreg
 
-HELP = """Px - An HTTP proxy server to automatically authenticate through an NTLM proxy
+HELP = """Px v%s
+
+An HTTP proxy server to automatically authenticate through an NTLM proxy
 
 Usage:
   px [FLAGS]
   python px.py [FLAGS]
 
 Actions:
+  --save
+  Save configuration to px.ini or file specified with --config
+    Allows setting up Px config directly from command line
+    Values specified on CLI override any values in existing config file
+    Values not specified on CLI or config file are set to defaults
+
   --install
   Add Px to the Windows registry to run on startup
 
@@ -129,7 +141,7 @@ Configuration:
   --debug  settings:log=
   Enable debug logging. default: 0
     Logs are written to working directory and over-written on startup
-    A log is automatically created if Px crashes for some reason"""
+    A log is automatically created if Px crashes for some reason""" % __version__
 
 class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
@@ -755,6 +767,15 @@ def cfg_str_init(section, name, default, proc=None, override=False):
     if proc != None and val != "":
         proc(val)
 
+def save():
+    with open(State.ini, "w") as cfgfile:
+        State.config.write(cfgfile)
+    print("Saved config to " + State.ini + "\n")
+    with open(State.ini, "r") as cfgfile:
+        sys.stdout.write(cfgfile.read())
+
+    sys.exit()
+
 def parsecli():
     if "--debug" in sys.argv:
         State.logger = Log(dfile(), "w")
@@ -768,18 +789,17 @@ def parsecli():
 
     # Load configuration file
     State.config = configparser.ConfigParser()
-    ini = os.path.join(os.path.dirname(get_script_path()), State.ini)
+    State.ini = os.path.join(os.path.dirname(get_script_path()), State.ini)
     for i in range(len(sys.argv)):
         if "=" in sys.argv[i]:
             val = sys.argv[i].split("=")[1]
             if "--config=" in sys.argv[i]:
-                if os.path.exists(val):
-                    ini = val
-                else:
+                State.ini = val
+                if not os.path.exists(val) and "--save" not in sys.argv:
                     print("Could not find config file: " + val)
                     sys.exit()
-    if os.path.exists(ini):
-        State.config.read(ini)
+    if os.path.exists(State.ini):
+        State.config.read(State.ini)
 
     # [proxy] section
     if "proxy" not in State.config.sections():
@@ -844,6 +864,8 @@ def parsecli():
         uninstall()
     elif "--quit" in sys.argv:
         quit()
+    elif "--save" in sys.argv:
+        save()
 
     if State.proxy_server is None:
         print("No proxy defined")

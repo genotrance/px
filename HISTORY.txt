@@ -1,4 +1,4 @@
-TBD
+v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug
 - Cleaned up loading module dependencies across Python versions
 - Fixed issue where thread name in logs was wrong due to Python 3.6+ issue
@@ -29,6 +29,9 @@ TBD
 - Added help menu accessible with --help
 - Addressed issue #23 - removed UPX compression of Px.exe since benefits are
   marginal and can potentially reduce odds of being flagged susicious
+- Added ability to --save configuration from CLI, allowing full setup of Px
+  without having to separately edit INI file
+- Added version info into Px to show up in help
 
 v0.2.1 - 2017-03-30
 - Implemented issue 7 - "listen" setting to configure IP address to bind

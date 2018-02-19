@@ -1,8 +1,0 @@
-In no particular order:-
-- Domain names with wildcards for noproxy
-- Add Px as a Windows service
-- Installer for easy setup
-- Read proxy info from registry
-- Read proxy info from PAC file in registry
-- Read noproxy info from registry
-- Support for chunked data on POST, PUT, PATCH over http

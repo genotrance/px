@@ -32,11 +32,76 @@ The noproxy capability allows Px to connect to hosts in the configured subnets d
 bypassing the NTLM proxy altogether. This allows clients to connect to hosts within the
 intranet without requiring additional configuration for each client or at the NTLM proxy.
 
-There are a few other settings to tweak in the INI file but most are self-explanatory. A few
-of the settings can be specified on the command line for convenience.
+There are a few other settings to tweak in the INI file but most are self-explanatory. All
+settings can be specified on the command line for convenience.
 
 The binary distribution of Px runs in the background once started and can be quit by
 running "px --quit". When run directly using Python, use CTRL-C to quit.
+
+Usage
+
+px [FLAGS]
+python px.py [FLAGS]
+
+Actions:
+  --install
+  Add Px to the Windows registry to run on startup
+
+  --uninstall
+  Remove Px from the Windows registry
+
+  --quit
+  Quit a running instance of Px.exe
+
+Configuration:
+  --config=
+  Specify config file. Valid file path, default: px.ini in working directory
+
+  --proxy=  --server=  proxy:server= in INI file
+  NTLM server to connect through. IP:port, hostname:port, required
+
+  --listen=  proxy:listen=
+  IP interface to listen on. Valid IP address, default: 127.0.0.1
+
+  --port=  proxy:port=
+  Port to run this proxy. Valid port number, default: 3128
+
+  --gateway  proxy:gateway=
+  Allow remote machines to use proxy. 0 or 1, default: 0
+    Overrides 'listen' and binds to all interfaces
+
+  --allow=  proxy:allow=
+  Allow connection from specific subnets. Comma separated, default: *.*.*.*
+    Whitelist which IPs can use the proxy
+    127.0.0.1 - specific ip
+    192.168.0.* - wildcards
+    192.168.0.1-192.168.0.255 - ranges
+    192.168.0.1/24 - CIDR
+
+  --noproxy=  proxy:noproxy=
+  Direct connect to specific subnets like a regular proxy. Comma separated
+    Skip the NTLM proxy for connections to these subnets
+    127.0.0.1 - specific ip
+    192.168.0.* - wildcards
+    192.168.0.1-192.168.0.255 - ranges
+    192.168.0.1/24 - CIDR
+
+  --useragent=  proxy:useragent=
+  Override or send User-Agent header on client's behalf
+
+  --workers=  settings:workers=
+  Number of parallel workers (processes). Valid integer, default: 2
+
+  --threads=  settings:threads=
+  Number of parallel threads per worker (process). Valid integer, default: 5
+
+  --idle=  settings:idle=
+  Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
+
+  --debug  settings:log=
+  Enable debug logging. default: 0
+    Logs are written to working directory and over-written on startup
+    A log is automatically created if Px crashes for some reason
 
 Examples
 
@@ -44,22 +109,21 @@ Examples
 	px --proxy=proxyserver.com:80
 
 	Don't use any forward proxy at all, just log what's going on
-	px --proxy= --noproxy=0.0.0.0/0 --debug
+	px --proxy=dummy.com:80 --noproxy=0.0.0.0/0 --debug
 
-	Allow requests from localhost and from your own ip address. This is very useful for Docker
-	for Windows, because in a bridged docker network all requests from containers will originate
-	from your hosts ip.
-	px.exe --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
+	Allow requests from localhost and from your own IP address. This is very useful for Docker
+	for Windows, because in a bridged Docker network, all requests from containers will originate
+	from your host's IP.
+	px --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
 
 	Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
-	px.exe --proxy=proxyserver.com:80 --gateway
+	px --proxy=proxyserver.com:80 --gateway
 
-Remarks
-In Docker for Windows you need to set your proxy to http://<your ip>:3128 (or whatever port your
-px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
+NOTE: In Docker for Windows you need to set your proxy to http://<your ip>:3128 (or actual port
+      Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
 
-Workaround:
-docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile
+      Workaround: docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg
+                  https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile
 
 Dependencies
 
@@ -74,9 +138,10 @@ Python distribution with the following additional packages.
 		  https://github.com/genotrance/px/issues/9
 
 In order to make Px a capable proxy server, it is designed to run in multiple processes. The
-number of parallel workers or processes is configurable via px.ini. However, this only works
-on Python 3.3+ since that's when support was added to share sockets across processes in
-Windows. On older versions of Python, Px will run multi-threaded but in a single process.
+number of parallel workers or processes is configurable. However, this only works on Python
+3.3+ since that's when support was added to share sockets across processes in Windows. On
+older versions of Python, Px will run multi-threaded but in a single process. The number of
+threads per process is also configurable.
 
 Feedback
 
@@ -100,3 +165,4 @@ http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
 Thank you to the following contributors as well for their PRs:-
 
 https://github.com/ccbur
+https://github.com/McBane87

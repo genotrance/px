@@ -65,6 +65,72 @@ except ImportError:
     import urlparse
     import _winreg as winreg
 
+HELP = """Px - An HTTP proxy server to automatically authenticate through an NTLM proxy
+
+Usage:
+  px [FLAGS]
+  python px.py [FLAGS]
+
+Actions:
+  --install
+  Add Px to the Windows registry to run on startup
+
+  --uninstall
+  Remove Px from the Windows registry
+
+  --quit
+  Quit a running instance of Px.exe
+
+Configuration:
+  --config=
+  Specify config file. Valid file path, default: px.ini in working directory
+
+  --proxy=  --server=  proxy:server= in INI file
+  NTLM server to connect through. IP:port, hostname:port, required
+
+  --listen=  proxy:listen=
+  IP interface to listen on. Valid IP address, default: 127.0.0.1
+
+  --port=  proxy:port=
+  Port to run this proxy. Valid port number, default: 3128
+
+  --gateway  proxy:gateway=
+  Allow remote machines to use proxy. 0 or 1, default: 0
+    Overrides 'listen' and binds to all interfaces
+
+  --allow=  proxy:allow=
+  Allow connection from specific subnets. Comma separated, default: *.*.*.*
+    Whitelist which IPs can use the proxy
+    127.0.0.1 - specific ip
+    192.168.0.* - wildcards
+    192.168.0.1-192.168.0.255 - ranges
+    192.168.0.1/24 - CIDR
+
+  --noproxy=  proxy:noproxy=
+  Direct connect to specific subnets like a regular proxy. Comma separated
+    Skip the NTLM proxy for connections to these subnets
+    127.0.0.1 - specific ip
+    192.168.0.* - wildcards
+    192.168.0.1-192.168.0.255 - ranges
+    192.168.0.1/24 - CIDR
+
+  --useragent=  proxy:useragent=
+  Override or send User-Agent header on client's behalf
+
+  --workers=  settings:workers=
+  Number of parallel workers (processes). Valid integer, default: 2
+
+  --threads=  settings:threads=
+  Number of parallel threads per worker (process). Valid integer, default: 5
+
+  --idle=  settings:idle=
+  Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
+
+  --debug  settings:log=
+  Enable debug logging. default: 0
+    Logs are written to working directory and over-written on startup
+    A log is automatically created if Px crashes for some reason"""
+
 class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
     config = None
@@ -696,6 +762,10 @@ def parsecli():
     if getattr(sys, "frozen", False) != False:
         attachConsole()
 
+    if "-h" in sys.argv or "--help" in sys.argv:
+        print(HELP)
+        sys.exit()
+
     # Load configuration file
     State.config = configparser.ConfigParser()
     ini = os.path.join(os.path.dirname(get_script_path()), State.ini)
@@ -736,7 +806,7 @@ def parsecli():
         State.config.add_section("settings")
 
     cfg_int_init("settings", "workers", "2")
-    cfg_int_init("settings", "threads", "40")
+    cfg_int_init("settings", "threads", "5")
     cfg_int_init("settings", "idle", "30")
 
     cfg_int_init("settings", "log", "0" if State.logger is None else "1")

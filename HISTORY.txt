@@ -7,15 +7,18 @@ TBD
 - Changed Pyinstaller to build a single executable file
 - Fixed bug where chunked transfer headers were being returned incorrectly
 - Removed sleep from non-CONNECT methods that was slowing down Px considerably
-- Added "allow" feature to allow (deny) client ip addresses (helpful with Docker for Windows)
+- Added "allow" feature to allow (deny) client ip addresses (helpful with
+  Docker for Windows)
 - Added "--gateway" parameter
 - Fixed issue where a HTTP 304 Not Modified response would hang
 - Enabled --debug also for --quit code path
-- Fixed issue where --quit would not be able to stop px instances with different uppercase/lowercase process names
+- Fixed issue where --quit would not be able to stop px instances with
+  different uppercase/lowercase process names
 - Fixed exception when logging bad requests containing unicode
 - Fixed issue 12 - proxy keep-alive support for HTTP/1.0 clients
 - Fixed issue 13 - support for HTTP Expect-Continue
-- Fixed issue where non-resolving hostnames were not failing and going through proxy instead
+- Fixed issue where non-resolving hostnames were not failing and going through
+  proxy instead
 - Fixed winkerberos crash if no domain controller
 - Fixed issue 17 - ability to run Px at user login
 - Added support for px.exe to write to console when appropriate
@@ -23,13 +26,18 @@ TBD
 - Added CLI flags for all config options
 - Added --config flag to load alternate config file
 - Added ability to override or send User-Agent header on client's behalf
+- Added help menu accessible with --help
+- Addressed issue #23 - removed UPX compression of Px.exe since benefits are
+  marginal and can potentially reduce odds of being flagged susicious
 
 v0.2.1 - 2017-03-30
-- Implemented issue 7 - "listen" setting to configure IP address to bind service to
+- Implemented issue 7 - "listen" setting to configure IP address to bind
+  service to
 - Fixed issue 3 - Function requested not supported in SSPI
 - Fixed issue 5 - Improved error message when port is already in use
 - Fixed issue 6 - Added support for PUT, PATCH and DELETE
-- Fixed issue where http POST was blocking forever, attempting to read POST data twice from socket
+- Fixed issue where http POST was blocking forever, attempting to read POST
+  data twice from socket
 
 v0.2.0 - 2017-02-05
 - Added "noproxy" feature to bypass NTLM proxy
@@ -37,7 +45,8 @@ v0.2.0 - 2017-02-05
 - Added "test.py" to validate basic Px functionality
 - Fixed bug where host disconnects would throw httpserver into an infinite loop
 - Fixed bug where HEAD requests were waiting for a response body
-- Fixed bug where Px was waiting if remote server disconnected before response code
+- Fixed bug where Px was waiting if remote server disconnected before response
+  code
 - Fixed bug where content length = 0 was waiting for a response body
 - Fixed bug where chunked response was being returned without content length
 - Fixed Px to exit completely with CTRL-C

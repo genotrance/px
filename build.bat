@@ -7,8 +7,8 @@ rmdir /s /q dist
 pyinstaller --clean --noupx -w -F -i px.ico px.py
 copy px.ini dist\.
 copy *.txt dist\.
-upx --best dist\px.exe -o dist\px.tmp
-move /Y dist\px.tmp dist\px.exe
+rem upx --best dist\px.exe -o dist\px.tmp
+rem move /Y dist\px.tmp dist\px.exe
 
 del /q px.spec
 rmdir /s /q build

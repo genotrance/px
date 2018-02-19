@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -13,6 +14,12 @@ CURL_PROXY = ' --proxy-ntlm '
 
 BASEURL = ""
 PROXY = ""
+TESTS = []
+
+try:
+    ConnectionRefusedError
+except NameError:
+    ConnectionRefusedError = socket.error
 
 def curl(url, proxy="", ntlm=False, filename="", head=False):
     output = ""
@@ -58,9 +65,10 @@ def check(url):
     elif la > lb:
         out = lb / la * 100
 
-    print("%.2f%% : %s" % (out, url))
+    print("  %.2f%% : %s" % (out, url))
 
 def run(base):
+    start = time.time()
     pop = ""
     while True:
         pop = curl(base, proxy="localhost:%d" % 3128)
@@ -90,19 +98,84 @@ def run(base):
                 procs.pop(0)
         time.sleep(0.1)
 
-def runPxTest(cmd):
-    pipe = subprocess.Popen("cmd /k start /wait " + cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    run(BASEURL)
+    end = time.time()
+    print("  Time: " + str(end-start) + " sec")
+
+def runPxTest(cmd, testproc):
+    pipe = subprocess.Popen("cmd /k start /wait /min " + cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    testproc()
+
     pxproc = psutil.Process(pipe.pid)
     for child in pxproc.children(recursive=True):
         try:
             child.kill()
-        except:
+        except psutil.NoSuchProcess:
             pass
     try:
         pxproc.kill()
     except:
         pass
+
+    time.sleep(0.5)
+
+def getips():
+    localips = [ip[4][0] for ip in socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)]
+    localips.insert(0, "127.0.0.1")
+
+    return localips
+
+# Test --listen and --port
+def checkSocket(ip, port):
+    if ip == "":
+        ip = "127.0.0.1"
+
+    if port == "":
+        port = "3128"
+    port = int(port)
+
+    # Make sure Px starts
+    retry = 10
+    while True:
+        try:
+            socket.create_connection((ip, port), 2)
+            break
+        except (socket.timeout, ConnectionRefusedError):
+            time.sleep(1)
+            retry -= 1
+            if retry == 0:
+                print("Px didn't start")
+                sys.exit()
+
+    localips = getips()
+    for lip in localips:
+        for pport in set([3128, port]):
+            sys.stdout.write("  Checking: " + lip + ":" + str(pport) + " = ")
+            ret = True
+            try:
+                socket.create_connection((lip, pport), 2)
+            except (socket.timeout, ConnectionRefusedError):
+                ret = False
+
+            sys.stdout.write(str(ret) + ": ")
+            if ((lip != ip or port != pport) and ret is False) or (lip == ip and port == pport and ret is True):
+                print("Passed")
+            else:
+                print("Failed")
+                sys.exit()
+
+def socketTestSetup():
+    localips = getips()
+    localips.insert(0, "")
+    for ip in localips[:3]:
+        for port in ["", "3129"]:
+            cmd = "--proxy=" + PROXY
+            if ip != "":
+                cmd += " --listen=" + ip
+            if port != "":
+                cmd += " --port=" + port
+
+            TESTS.append((cmd, lambda ip=ip, port=port: checkSocket(ip, port)))
 
 def auto():
     # Make temp directory
@@ -110,7 +183,14 @@ def auto():
         shutil.rmtree("testrun")
     except:
         pass
-    os.makedirs("testrun", exist_ok=True)
+    try:
+        os.makedirs("testrun", exist_ok=True)
+    except TypeError:
+        try:
+            os.makedirs("testrun")
+        except WindowsError:
+            pass
+
     os.chdir("testrun")
 
     # Load base px.ini
@@ -118,13 +198,23 @@ def auto():
     shutil.copy("../px.py", ".")
     shutil.copy("../dist/px.exe", ".")
 
-    # Test different versions of Python
-    pys = ["27", "35", "362"]
-    for py in pys:
-        runPxTest(("c:\\Miniconda\\envs\\%s\\python px.py --debug --proxy=" % py) + PROXY)
+    # Setup tests
+    socketTestSetup()
+    TESTS.append(("--proxy=" + PROXY, lambda: run(BASEURL)))
 
-    # Run px.exe
-    runPxTest("px --debug --proxy=" + PROXY)
+    count = 1
+    for test in TESTS:
+        # Test different versions of Python
+        pys = ["27", "35", "362"]
+        for py in pys:
+            print("Test %d: \"" % count + test[0] + "\" with Python " + py)
+            runPxTest(("c:\\Miniconda\\envs\\%s\\python px.py --debug " % py) + test[0], test[1])
+            count += 1
+
+        # Run px.exe
+        print("Test %d: \"" % count + test[0] + "\" with Px.exe ")
+        runPxTest("px --debug " + test[0], test[1])
+        count += 1
 
     os.chdir("..")
 

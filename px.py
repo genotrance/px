@@ -993,7 +993,7 @@ def attachConsole():
             pid = -1
             break
 
-        if p.cmdline()[0] == "cmd":
+        if os.path.basename(p.cmdline()[0]).lower() in ["cmd", "cmd.exe"]:
             # Found it
             break
 

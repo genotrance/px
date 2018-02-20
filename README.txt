@@ -20,7 +20,7 @@ without having to supply and maintain the credentials within Px.
 The following link from Microsoft provides a good starting point to understand how NTLM
 authentication works:
 
-	https://msdn.microsoft.com/en-us/library/dd925287.aspx
+  https://msdn.microsoft.com/en-us/library/dd925287.aspx
 
 Installation
 
@@ -135,25 +135,26 @@ Configuration:
 
 Examples
 
-	Use proxyserver.com:80 and allow requests from localhost only
-	px --proxy=proxyserver.com:80
+  Use proxyserver.com:80 and allow requests from localhost only
+  px --proxy=proxyserver.com:80
 
-	Don't use any forward proxy at all, just log what's going on
-	px --proxy=dummy.com:80 --noproxy=0.0.0.0/0 --debug
+  Don't use any forward proxy at all, just log what's going on
+  px --proxy=dummy.com:80 --noproxy=0.0.0.0/0 --debug
 
-	Allow requests from localhost and from your own IP address. This is very useful for Docker
-	for Windows, because in a bridged Docker network, all requests from containers will originate
-	from your host's IP.
-	px --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
+  Allow requests from localhost and from your own IP address. This is very useful for Docker
+  for Windows, because in a bridged Docker network, all requests from containers will originate
+  from your host's IP.
+  px --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
 
-	Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
-	px --proxy=proxyserver.com:80 --gateway
+  Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
+  px --proxy=proxyserver.com:80 --gateway
 
-NOTE: In Docker for Windows you need to set your proxy to http://<your ip>:3128 (or actual port
-      Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
+NOTE:
+  In Docker for Windows you need to set your proxy to http://<your ip>:3128 (or actual port
+  Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
 
-      Workaround: docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg
-                  https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile
+  Workaround: docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg
+              https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile
 
 Dependencies
 
@@ -161,11 +162,11 @@ Px doesn't have any GUI and runs completely in the background. It is distributed
 Python 3.x and PyInstaller to have a self-contained executable but can also be run using a
 Python distribution with the following additional packages.
 
-	netaddr, psutil, pywin32 OR winkerberos
-	futures on Python 2.x
+  netaddr, psutil, pywin32 OR winkerberos
+  futures on Python 2.x
 
-	NOTE: winkerberos is required on Python 3.6+ since pywin32 SSPI is broken.
-		  https://github.com/genotrance/px/issues/9
+NOTE: winkerberos is required on Python 3.6+ since pywin32 SSPI is broken.
+      https://github.com/genotrance/px/issues/9
 
 In order to make Px a capable proxy server, it is designed to run in multiple processes. The
 number of parallel workers or processes is configurable. However, this only works on Python

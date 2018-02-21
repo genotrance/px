@@ -88,7 +88,9 @@ Configuration:
   Specify config file. Valid file path, default: px.ini in working directory
 
   --proxy=  --server=  proxy:server= in INI file
-  NTLM server to connect through. IP:port, hostname:port, required
+  NTLM server(s) to connect through. IP:port, hostname:port, required
+    Multiple proxies can be specified comma separated
+    Px will iterate through and use the one that works
 
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
@@ -127,6 +129,9 @@ Configuration:
 
   --idle=  settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
+
+  --socktimeout= settings:socktimeout=
+  Timeout in seconds for connections before giving up. Valid integer, default: 5
 
   --debug  settings:log=
   Enable debug logging. default: 0

@@ -1,3 +1,12 @@
+TBD
+- Implemented #18 - support for multiple NTLM proxies that will be iterated
+  through if connection fails
+- Included fix for allowing parent proxy to resolve hostname if not resolvable
+  locally - #18
+- Added --socktimeout to configure maximum time to wait before giving up on
+  socket connections
+- Fixed #27 - Px does not exit with --quit
+
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug
 - Cleaned up loading module dependencies across Python versions

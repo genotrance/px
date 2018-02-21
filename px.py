@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 import base64
 import ctypes
@@ -98,7 +98,9 @@ Configuration:
   Specify config file. Valid file path, default: px.ini in working directory
 
   --proxy=  --server=  proxy:server= in INI file
-  NTLM server to connect through. IP:port, hostname:port, required
+  NTLM server(s) to connect through. IP:port, hostname:port, required
+    Multiple proxies can be specified comma separated
+    Px will iterate through and use the one that works
 
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
@@ -138,6 +140,10 @@ Configuration:
   --idle=  settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
+
+  --socktimeout= settings:socktimeout=
+  Timeout in seconds for connections before giving up. Valid integer, default: 5
+
   --debug  settings:log=
   Enable debug logging. default: 0
     Logs are written to working directory and over-written on startup
@@ -149,14 +155,13 @@ class State(object):
     exit = False
     logger = None
     noproxy = netaddr.IPSet([])
-    proxy_server = None
+    proxy_server = []
     stdout = None
     useragent = ""
 
     ini = "px.ini"
     max_disconnect = 3
     max_line = 65536 + 1
-    max_workers = 2
 
 class Log(object):
     def __init__(self, name, mode):
@@ -276,22 +281,39 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         #return socket.getfqdn(host)
         return host
 
-    def do_socket(self, xheaders=[], destination=None):
-        dprint("Entering")
-        if not destination:
-            destination = State.proxy_server
+    def do_socket_connect(self, destination=None):
+        if hasattr(self, "client_socket") and self.client_socket is not None:
+            return True
 
-        if not hasattr(self, "client_socket") or self.client_socket is None:
-            dprint("New connection")
+        dest = State.proxy_server
+        if destination is not None:
+            dest = [destination]
+
+        for i in range(len(dest)):
+            dprint("New connection: " + str(dest[0]))
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                self.client_socket.connect(destination)
+                self.client_socket.connect(dest[0])
+                break
             except:
-                traceback.print_exc(file=sys.stdout)
-                return 503, None, None
+                dprint("Connect failed")
+                dest.append(dest.pop(0))
+                self.client_socket = None
+
+        if self.client_socket is not None:
+            return True
+
+        return False
+
+    def do_socket(self, xheaders=[], destination=None):
+        dprint("Entering")
+
+        # Connect to proxy or destination
+        if not self.do_socket_connect(destination):
+            return 502, None, None
 
         # No chit chat on SSL
-        if destination != State.proxy_server and self.command == "CONNECT":
+        if destination is not None and self.command == "CONNECT":
             return  200, None, None
 
         cl = None
@@ -616,7 +638,12 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
             dprint(netloc)
             spl = netloc.split(":", 1)
-            addr = socket.getaddrinfo(spl[0], int(spl[1]))
+            try:
+                addr = socket.getaddrinfo(spl[0], int(spl[1]))
+            except socket.gaierror:
+                # Couldn't resolve, let parent proxy try, #18
+                dprint("Couldn't resolve host")
+                return None
             if len(addr) and len(addr[0]) == 5:
                 ipport = addr[0][4]
                 dprint("%s => %s + %s" % (self.path, ipport, path))
@@ -703,13 +730,23 @@ def runpool():
 ###
 # Parse settings and command line
 
-def parseproxy(proxystr):
-    State.proxy_server = proxystr.split(":")
-    if len(State.proxy_server) == 1:
-        State.proxy_server.append(80)
-    else:
-        State.proxy_server[1] = int(State.proxy_server[1])
-    State.proxy_server = tuple(State.proxy_server)
+def parseproxy(proxystrs):
+    for proxystr in [i.strip() for i in proxystrs.split(",")]:
+        pserver = [i.strip() for i in proxystr.split(":")]
+        if len(pserver) == 1:
+            pserver.append(80)
+        elif len(pserver) == 2:
+            try:
+                pserver[1] = int(pserver[1])
+            except ValueError:
+                print("Bad proxy server port: " + pserver[1])
+                sys.exit()
+        else:
+            print("Bad proxy server definition: " + proxystr)
+            sys.exit()
+
+        State.proxy_server.append(tuple(pserver))
+    dprint(State.proxy_server)
 
 def parseipranges(iprangesconfig):
     ipranges = netaddr.IPSet([])
@@ -828,6 +865,7 @@ def parsecli():
     cfg_int_init("settings", "workers", "2")
     cfg_int_init("settings", "threads", "5")
     cfg_int_init("settings", "idle", "30")
+    cfg_int_init("settings", "socktimeout", "5")
 
     cfg_int_init("settings", "log", "0" if State.logger is None else "1")
     if State.config.get("settings", "log") == "1" and State.logger is None:
@@ -850,7 +888,7 @@ def parsecli():
             elif "--useragent=" in sys.argv[i]:
                 cfg_str_init("proxy", "useragent", val, None, True)
             else:
-                for j in ["workers", "threads", "idle"]:
+                for j in ["workers", "threads", "idle", "socktimeout"]:
                     if "--" + j + "=" in sys.argv[i]:
                         cfg_int_init("settings", j, val, True)
 
@@ -867,7 +905,7 @@ def parsecli():
     elif "--save" in sys.argv:
         save()
 
-    if State.proxy_server is None:
+    if len(State.proxy_server) == 0:
         print("No proxy defined")
         sys.exit()
 
@@ -884,10 +922,12 @@ def parsecli():
     if getattr(sys, "frozen", False) != False:
         detachConsole()
 
+    socket.setdefaulttimeout(State.config.getint("settings", "socktimeout"))
+
 ###
 # Exit related
 
-def quit():
+def quit(force=False):
     count = 0
     mypids = [os.getpid(), os.getppid()]
     for pid in sorted(psutil.pids(), reverse=True):
@@ -897,15 +937,27 @@ def quit():
         try:
             p = psutil.Process(pid)
             if p.exe().lower() == sys.executable.lower():
-                p.send_signal(signal.CTRL_C_EVENT)
+                if force:
+                    p.kill()
+                else:
+                    p.send_signal(signal.CTRL_C_EVENT)
                 count += 1
         except:
             pass
 
     if count != 0:
-        print("Quiting Px")
+        if force:
+            sys.stdout.write(".")
+        else:
+            sys.stdout.write("Quitting Px ..")
+            time.sleep(4)
+        sys.stdout.flush()
+        quit(True)
     else:
-        print("Px is not running")
+        if force:
+            print(" DONE")
+        else:
+            print("Px is not running")
 
     sys.exit()
 

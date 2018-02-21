@@ -52,8 +52,8 @@ def write(data, file):
     with open(file, "w") as f:
         f.write(data)
 
-def check(url):
-    a = curl(url, proxy=PROXY, ntlm=True)
+def check(url, proxy):
+    a = curl(url, proxy=proxy, ntlm=True)
     b = curl(url, proxy="localhost:%d" % 3128)
 
     la = len(a)
@@ -79,13 +79,13 @@ def run(base):
 
     procs = []
     #urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', pop)
-    urls = re.findall("http[s]?://[a-zA-Z_./0-9]+", pop)
+    urls = re.findall("http[s]?://[a-zA-Z_./0-9-]+", pop)
     if len(urls) == 0:
         print("No urls found")
         return
 
     for url in set(urls):
-        p = multiprocessing.Process(target=check, args=(url,))
+        p = multiprocessing.Process(target=check, args=(url, PROXY))
         p.daemon = True
         p.start()
         procs.append(p)
@@ -199,8 +199,12 @@ def auto():
     shutil.copy("../dist/px.exe", ".")
 
     # Setup tests
-    socketTestSetup()
-    TESTS.append(("--proxy=" + PROXY, lambda: run(BASEURL)))
+    if "--nosock" not in sys.argv:
+        socketTestSetup()
+    if "--noproxy" not in sys.argv:
+        TESTS.append(("--workers=4 --proxy=" + PROXY, lambda: run(BASEURL)))
+    if "--nonoproxy" not in sys.argv:
+        TESTS.append(("--workers=4 --threads=30 --proxy=none --noproxy=*.*.*.*", lambda: run(BASEURL)))
 
     count = 1
     for test in TESTS:

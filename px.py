@@ -1045,7 +1045,7 @@ def attachConsole():
             pid = -1
             break
 
-        if os.path.basename(p.cmdline()[0]).lower() in ["cmd", "cmd.exe"]:
+        if os.path.basename(p.cmdline()[0]).lower() in ["cmd", "cmd.exe", "powershell", "powershell.exe"]:
             # Found it
             break
 
@@ -1054,6 +1054,7 @@ def attachConsole():
 
     # Not found, started without console
     if pid == -1:
+        dprint("No parent console to attach to")
         return
 
     dprint("Attaching to console " + str(pid))

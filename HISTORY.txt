@@ -6,6 +6,7 @@ TBD
 - Added --socktimeout to configure maximum time to wait before giving up on
   socket connections
 - Fixed #27 - Px does not exit with --quit
+- Fixed #26 - Px doesn't attach to powershell console
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

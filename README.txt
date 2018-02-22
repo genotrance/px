@@ -130,7 +130,7 @@ Configuration:
   --idle=  settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
-  --socktimeout= settings:socktimeout=
+  --socktimeout=  settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid integer, default: 5
 
   --debug  settings:log=

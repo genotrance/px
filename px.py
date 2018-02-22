@@ -69,6 +69,9 @@ except ImportError:
     import urlparse
     import _winreg as winreg
 
+    os.getppid = psutil.Process().ppid
+    PermissionError = WindowsError
+
 HELP = """Px v%s
 
 An HTTP proxy server to automatically authenticate through an NTLM proxy
@@ -180,7 +183,8 @@ class Log(object):
         except:
             pass
         self.file.flush()
-        self.stdout.write(data)
+        if self.stdout is not None:
+            self.stdout.write(data)
     def flush(self):
         self.file.flush()
 
@@ -817,7 +821,7 @@ def parsecli():
     if "--debug" in sys.argv:
         State.logger = Log(dfile(), "w")
 
-    if getattr(sys, "frozen", False) != False:
+    if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
         attachConsole()
 
     if "-h" in sys.argv or "--help" in sys.argv:
@@ -919,7 +923,7 @@ def parsecli():
         for option in State.config.options(section):
             dprint(section + ":" + option + " = " + State.config.get(section, option))
 
-    if getattr(sys, "frozen", False) != False:
+    if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
         detachConsole()
 
     socket.setdefaulttimeout(State.config.getint("settings", "socktimeout"))
@@ -937,13 +941,15 @@ def quit(force=False):
         try:
             p = psutil.Process(pid)
             if p.exe().lower() == sys.executable.lower():
+                count += 1
                 if force:
                     p.kill()
                 else:
                     p.send_signal(signal.CTRL_C_EVENT)
-                count += 1
-        except:
+        except (psutil.AccessDenied, PermissionError, SystemError):
             pass
+        except:
+            traceback.print_exc(file=sys.stdout)
 
     if count != 0:
         if force:

@@ -11,6 +11,7 @@ TBD
 - Fix Python 2.x crashes in quit()
 - Fixed issue #22 - support for Kerberos authentication
 - Removed pywin32 option since it doesn't work for Kerberos auth
+- Fixed issues with useragent header override functionality
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

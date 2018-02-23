@@ -130,7 +130,6 @@ Configuration:
   --idle=  settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
-
   --socktimeout= settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid integer, default: 5
 
@@ -292,9 +291,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             hlower = header.lower()
             if hlower == "user-agent" and State.useragent != "":
                 ua = True
-                self.headers[header] = State.useragent
+                h = ("%s: %s\r\n" % (header, State.useragent)).encode("utf-8")
+            else:
+                h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
 
-            h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
             self.client_socket.send(h)
             dprint("Sending %s" % h)
 
@@ -740,6 +740,9 @@ def parseallow(allow):
 def parsenoproxy(noproxy):
     State.noproxy = parseipranges(noproxy)
 
+def setuseragent(useragent):
+    State.useragent = useragent
+
 def cfg_int_init(section, name, default, override=False):
     val = default
     if not override:
@@ -820,7 +823,7 @@ def parsecli():
 
     cfg_str_init("proxy", "noproxy", "", parsenoproxy)
 
-    cfg_str_init("proxy", "useragent", "", parsenoproxy)
+    cfg_str_init("proxy", "useragent", "", setuseragent)
 
     # [settings] section
     if "settings" not in State.config.sections():
@@ -850,7 +853,7 @@ def parsecli():
             elif "--noproxy=" in sys.argv[i]:
                 cfg_str_init("proxy", "noproxy", val, parsenoproxy, True)
             elif "--useragent=" in sys.argv[i]:
-                cfg_str_init("proxy", "useragent", val, None, True)
+                cfg_str_init("proxy", "useragent", val, setuseragent, True)
             else:
                 for j in ["workers", "threads", "idle", "socktimeout"]:
                     if "--" + j + "=" in sys.argv[i]:

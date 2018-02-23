@@ -205,7 +205,7 @@ def auto():
     if "--noproxy" not in sys.argv:
         TESTS.append(("--workers=4 --proxy=" + PROXY, lambda: run(BASEURL)))
     if "--nonoproxy" not in sys.argv:
-        TESTS.append(("--workers=4 --threads=30 --proxy=none --noproxy=*.*.*.*", lambda: run(BASEURL)))
+        TESTS.append(("--workers=4 --threads=30 --noproxy=*.*.*.*", lambda: run(BASEURL)))
 
     count = 1
     for test in TESTS:

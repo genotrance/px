@@ -51,6 +51,8 @@ and exit immediately.
 The noproxy capability allows Px to connect to hosts in the configured subnets directly,
 bypassing the NTLM proxy altogether. This allows clients to connect to hosts within the
 intranet without requiring additional configuration for each client or at the NTLM proxy.
+If noproxy is defined, the NTLM proxy is optional - this allows Px to run as a regular
+proxy full time if required.
 
 There are a few other settings to tweak in the INI file but most are self-explanatory. All
 settings can be specified on the command line for convenience. The INI file can also be
@@ -88,9 +90,11 @@ Configuration:
   Specify config file. Valid file path, default: px.ini in working directory
 
   --proxy=  --server=  proxy:server= in INI file
-  NTLM server(s) to connect through. IP:port, hostname:port, required
-    Multiple proxies can be specified comma separated
-    Px will iterate through and use the one that works
+  NTLM server(s) to connect through. IP:port, hostname:port
+    Multiple proxies can be specified comma separated. Px will iterate through
+    and use the one that works. Required field unless --noproxy is defined. If
+    remote server is not in noproxy list and proxy is undefined, Px will reject
+    the request
 
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
@@ -132,6 +136,11 @@ Configuration:
 
   --socktimeout=  settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid integer, default: 5
+
+  --foreground  settings:foreground=
+  Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
+    Px will attach to the console and write to it even though the prompt is
+    available for further commands. CTRL-C in the console will exit Px
 
   --debug  settings:log=
   Enable debug logging. default: 0

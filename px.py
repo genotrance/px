@@ -88,9 +88,11 @@ Configuration:
   Specify config file. Valid file path, default: px.ini in working directory
 
   --proxy=  --server=  proxy:server= in INI file
-  NTLM server(s) to connect through. IP:port, hostname:port, required
-    Multiple proxies can be specified comma separated
-    Px will iterate through and use the one that works
+  NTLM server(s) to connect through. IP:port, hostname:port
+    Multiple proxies can be specified comma separated. Px will iterate through
+    and use the one that works. Required field unless --noproxy is defined. If
+    remote server is not in noproxy list and proxy is undefined, Px will reject
+    the request
 
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
@@ -132,6 +134,11 @@ Configuration:
 
   --socktimeout= settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid integer, default: 5
+
+  --foreground  settings:foreground=
+  Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
+    Px will attach to the console and write to it even though the prompt is
+    available for further commands. CTRL-C in the console will exit Px
 
   --debug  settings:log=
   Enable debug logging. default: 0
@@ -244,6 +251,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         #return socket.getfqdn(host)
         return host
 
+    def log_message(self, format, *args):
+        dprint(format % args)
+
     def do_socket_connect(self, destination=None):
         if hasattr(self, "client_socket") and self.client_socket is not None:
             return True
@@ -273,7 +283,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         # Connect to proxy or destination
         if not self.do_socket_connect(destination):
-            return 502, None, None
+            return 408, None, None
 
         # No chit chat on SSL
         if destination is not None and self.command == "CONNECT":
@@ -429,10 +439,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         dprint("Entering")
 
         ipport = self.get_destination()
-        if ipport != None:
+        if ipport not in [False, True]:
             dprint("Skipping NTLM proxying")
             resp, headers, body = self.do_socket(destination=ipport)
-        else:
+        elif ipport:
             # Check for NTLM auth
             ntlm = NtlmMessageGenerator()
             ntlm_resp = ntlm.get_response()
@@ -467,6 +477,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 return resp, None, None
             else:
                 dprint("No auth required")
+        else:
+            dprint("No proxy server specified and not in noproxy list")
+            return 501, None, None
 
         return resp, headers, body
 
@@ -601,13 +614,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     path = path + "?" + parse.query
 
             dprint(netloc)
+            addr = []
             spl = netloc.split(":", 1)
             try:
                 addr = socket.getaddrinfo(spl[0], int(spl[1]))
             except socket.gaierror:
                 # Couldn't resolve, let parent proxy try, #18
                 dprint("Couldn't resolve host")
-                return None
             if len(addr) and len(addr[0]) == 5:
                 ipport = addr[0][4]
                 dprint("%s => %s + %s" % (self.path, ipport, path))
@@ -616,7 +629,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     self.path = path
                     return ipport
 
-        return None
+        if not State.proxy_server:
+            return False
+
+        return True
 
 ###
 # Multi-processing and multi-threading
@@ -833,6 +849,7 @@ def parsecli():
     cfg_int_init("settings", "threads", "5")
     cfg_int_init("settings", "idle", "30")
     cfg_int_init("settings", "socktimeout", "5")
+    cfg_int_init("settings", "foreground", "0")
 
     cfg_int_init("settings", "log", "0" if State.logger is None else "1")
     if State.config.get("settings", "log") == "1" and State.logger is None:
@@ -863,6 +880,9 @@ def parsecli():
         State.config.set("proxy", "listen", "")
         State.config.set("proxy", "gateway", "1")
 
+    if "--foreground" in sys.argv:
+        State.config.set("settings", "foreground", "1")
+
     if "--install" in sys.argv:
         install()
     elif "--uninstall" in sys.argv:
@@ -872,8 +892,8 @@ def parsecli():
     elif "--save" in sys.argv:
         save()
 
-    if len(State.proxy_server) == 0:
-        print("No proxy defined")
+    if not State.proxy_server and not State.config.get("proxy", "noproxy"):
+        print("No proxy server or noproxy list defined")
         sys.exit()
 
     print("Serving at %s:%d proc %s" % (
@@ -887,7 +907,8 @@ def parsecli():
             dprint(section + ":" + option + " = " + State.config.get(section, option))
 
     if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
-        detachConsole()
+        if State.config.getint("settings", "foreground") == 0:
+            detachConsole()
 
     socket.setdefaulttimeout(State.config.getint("settings", "socktimeout"))
 
@@ -909,7 +930,7 @@ def quit(force=False):
                     p.kill()
                 else:
                     p.send_signal(signal.CTRL_C_EVENT)
-        except (psutil.AccessDenied, PermissionError, SystemError):
+        except (psutil.AccessDenied, psutil.NoSuchProcess, PermissionError, SystemError):
             pass
         except:
             traceback.print_exc(file=sys.stdout)

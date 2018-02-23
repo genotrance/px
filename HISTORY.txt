@@ -12,6 +12,9 @@ TBD
 - Fixed issue #22 - support for Kerberos authentication
 - Removed pywin32 option since it doesn't work for Kerberos auth
 - Fixed issues with useragent header override functionality
+- Allow Px to run in the foreground when frozen or run with pythonw.exe - #25
+- Make --proxy an optional setting if --noproxy is defined, reject connections
+  if remote server isn't in noproxy list and no proxy defined
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

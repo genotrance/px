@@ -36,24 +36,11 @@ except ImportError:
     print("Requires modules psutil")
     sys.exit()
 
-# Default to winkerberos for SSPI
-# Try pywin32 SSPI if winkerberos missing
-# - pywin32 known to fail in Python 3.6+ : https://github.com/genotrance/px/issues/9
 try:
     import winkerberos
 except ImportError:
-    if sys.version_info[0] > 2:
-        if sys.version_info[1] > 5:
-            print("Requires Python module winkerberos")
-            sys.exit()
-
-    # Less than 3.6, can use pywin32
-    try:
-        import pywintypes
-        import sspi
-    except ImportError:
-        print("Requires Python module pywin32 or winkerberos")
-        sys.exit()
+    print("Requires Python module winkerberos")
+    sys.exit()
 
 # Python 2.x vs 3.x support
 try:
@@ -220,36 +207,9 @@ def restore_stdout():
 
 class NtlmMessageGenerator:
     def __init__(self):
-        if "winkerberos" in sys.modules:
-            status, self.ctx = winkerberos.authGSSClientInit("NTLM", gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
-            self.get_response = self.get_response_wkb
-        else:
-            self.sspi_client = sspi.ClientAuth("NTLM", os.environ.get("USERNAME"), scflags=0)
-            self.get_response = self.get_response_sspi
+        status, self.ctx = winkerberos.authGSSClientInit(State.proxy_server[0][0], gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
 
-    def get_response_sspi(self, challenge=None):
-        dprint("pywin32 SSPI")
-        if challenge:
-            try:
-                challenge = base64.decodebytes(challenge.encode("utf-8"))
-            except AttributeError:
-                challenge = base64.decodestring(challenge)
-        output_buffer = None
-        try:
-            error_msg, output_buffer = self.sspi_client.authorize(challenge)
-        except pywintypes.error:
-            traceback.print_exc(file=sys.stdout)
-            return None
-
-        response_msg = output_buffer[0].Buffer
-        try:
-            response_msg = base64.encodebytes(response_msg.encode("utf-8"))
-        except AttributeError:
-            response_msg = base64.encodestring(response_msg)
-        response_msg = response_msg.decode("utf-8").replace('\012', '')
-        return response_msg
-
-    def get_response_wkb(self, challenge=""):
+    def get_response(self, challenge=""):
         dprint("winkerberos SSPI")
         try:
             winkerberos.authGSSClientStep(self.ctx, challenge)
@@ -480,13 +440,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Bad NTLM response")
                 return 503, None, None
             resp, headers, body = self.do_socket({
-                "Proxy-Authorization": "NTLM %s" % ntlm_resp
+                "Proxy-Authorization": "Negotiate %s" % ntlm_resp
             })
             if resp == 407:
                 dprint("Auth required")
                 ntlm_challenge = ""
                 for header in headers:
-                    if header[0] == "Proxy-Authenticate" and "NTLM" in header[1]:
+                    if header[0] == "Proxy-Authenticate" and "Negotiate" in header[1]:
                         ntlm_challenge = header[1].split()[1]
                         break
 
@@ -497,7 +457,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         dprint("Bad NTLM response")
                         return 503, None, None
                     resp, headers, body = self.do_socket({
-                        "Proxy-Authorization": "NTLM %s" % ntlm_resp
+                        "Proxy-Authorization": "Negotiate %s" % ntlm_resp
                     })
 
                     return resp, headers, body

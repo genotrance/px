@@ -93,9 +93,10 @@ def run(base):
         time.sleep(0.5)
 
     while len(procs):
-        for i in procs:
-            if not i.is_alive():
-                procs.pop(0)
+        for i in range(len(procs)):
+            if not procs[i].is_alive():
+                procs.pop(i)
+                break
         time.sleep(0.1)
 
     end = time.time()

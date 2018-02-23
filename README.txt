@@ -167,11 +167,8 @@ Px doesn't have any GUI and runs completely in the background. It is distributed
 Python 3.x and PyInstaller to have a self-contained executable but can also be run using a
 Python distribution with the following additional packages.
 
-  netaddr, psutil, pywin32 OR winkerberos
+  netaddr, psutil, winkerberos
   futures on Python 2.x
-
-NOTE: winkerberos is required on Python 3.6+ since pywin32 SSPI is broken.
-      https://github.com/genotrance/px/issues/9
 
 In order to make Px a capable proxy server, it is designed to run in multiple processes. The
 number of parallel workers or processes is configurable. However, this only works on Python

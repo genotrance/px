@@ -222,7 +222,9 @@ def restore_stdout():
 
 class NtlmMessageGenerator:
     def __init__(self):
-        status, self.ctx = winkerberos.authGSSClientInit(State.proxy_server[0][0], gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
+        status, self.ctx = winkerberos.authGSSClientInit(
+            "HTTP@" + State.proxy_server[0][0], gssflags=0,
+            mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
 
     def get_response(self, challenge=""):
         dprint("winkerberos SSPI")

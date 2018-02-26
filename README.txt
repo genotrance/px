@@ -106,9 +106,17 @@ Configuration:
   Allow remote machines to use proxy. 0 or 1, default: 0
     Overrides 'listen' and binds to all interfaces
 
+  --hostonly  proxy:hostonly=
+  Allow only local interfaces to use proxy. 0 or 1, default: 0
+    Px allows all IP addresses assigned to local interfaces to use the service.
+    This allows local apps as well as VM or container apps to use Px when in a
+    NAT config. Px does this by listening on all interfaces and overriding the
+    allow list.
+
   --allow=  proxy:allow=
   Allow connection from specific subnets. Comma separated, default: *.*.*.*
-    Whitelist which IPs can use the proxy
+    Whitelist which IPs can use the proxy. --hostonly overrides any definitions
+    unless --gateway mode is also specified
     127.0.0.1 - specific ip
     192.168.0.* - wildcards
     192.168.0.1-192.168.0.255 - ranges
@@ -153,14 +161,18 @@ Examples
   px --proxy=proxyserver.com:80
 
   Don't use any forward proxy at all, just log what's going on
-  px --proxy=dummy.com:80 --noproxy=0.0.0.0/0 --debug
+  px --noproxy=0.0.0.0/0 --debug
 
-  Allow requests from localhost and from your own IP address. This is very useful for Docker
-  for Windows, because in a bridged Docker network, all requests from containers will originate
-  from your host's IP.
-  px --proxy=proxyserver.com:80 --gateway --allow=127.0.0.1,<your ip>
+  Allow requests from localhost and all locally assigned IP addresses. This is
+  very useful for Docker for Windows and VMs in a NAT configuration because all
+  requests originate from the host's IP
+  px --proxy=proxyserver.com:80 --hostonly
 
-  Allow requests from everywhere. Be careful, every client will use your NTLM authentication.
+  Allow requests from localhost, locally assigned IP addresses and the IPs
+  specified in the allow list outside the host
+  px --proxy=proxyserver:80 --hostonly --gateway --allow=172.*.*.*
+
+  Allow requests from everywhere. Be careful, every client will use your login
   px --proxy=proxyserver.com:80 --gateway
 
 NOTE:

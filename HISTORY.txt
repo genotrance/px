@@ -15,6 +15,9 @@ TBD
 - Allow Px to run in the foreground when frozen or run with pythonw.exe - #25
 - Make --proxy an optional setting if --noproxy is defined, reject connections
   if remote server isn't in noproxy list and no proxy defined
+- Add --hostonly which only allows IP addresses assigned to local interfaces to
+  use Px. Disallow any external clients unless --gateway specified along with a
+  restrictive --allow definition - PR20
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

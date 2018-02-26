@@ -126,10 +126,10 @@ def getips():
 
     return localips
 
-# Test --listen and --port
-def checkSocket(ip, port):
-    if ip == "":
-        ip = "127.0.0.1"
+# Test --listen and --port, --hostonly, --gateway and --allow
+def checkCommon(ips, port, checkProc):
+    if ips == [""]:
+        ips = ["127.0.0.1"]
 
     if port == "":
         port = "3128"
@@ -139,7 +139,7 @@ def checkSocket(ip, port):
     retry = 10
     while True:
         try:
-            socket.create_connection((ip, port), 2)
+            socket.create_connection((ips[0], port), 2)
             break
         except (socket.timeout, ConnectionRefusedError):
             time.sleep(1)
@@ -152,31 +152,73 @@ def checkSocket(ip, port):
     for lip in localips:
         for pport in set([3128, port]):
             sys.stdout.write("  Checking: " + lip + ":" + str(pport) + " = ")
-            ret = True
-            try:
-                socket.create_connection((lip, pport), 2)
-            except (socket.timeout, ConnectionRefusedError):
-                ret = False
+            ret = checkProc(lip, pport)
 
             sys.stdout.write(str(ret) + ": ")
-            if ((lip != ip or port != pport) and ret is False) or (lip == ip and port == pport and ret is True):
+            if ((lip not in ips or port != pport) and ret is False) or (lip in ips and port == pport and ret is True):
                 print("Passed")
             else:
                 print("Failed")
                 sys.exit()
 
-def socketTestSetup():
-    localips = getips()
-    localips.insert(0, "")
-    for ip in localips[:3]:
-        for port in ["", "3129"]:
-            cmd = "--proxy=" + PROXY
-            if ip != "":
-                cmd += " --listen=" + ip
-            if port != "":
-                cmd += " --port=" + port
+def checkSocket(ips, port):
+    def checkProc(lip, pport):
+        try:
+            socket.create_connection((lip, pport), 2)
+        except (socket.timeout, ConnectionRefusedError):
+            return False
 
-            TESTS.append((cmd, lambda ip=ip, port=port: checkSocket(ip, port)))
+        return True
+
+    return checkCommon(ips, port, checkProc)
+
+def checkFilter(ips, port):
+    def checkProc(lip, port):
+        rcode = subprocess.call("curl --proxy " + lip + ":" + str(port) + " http://google.com",
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sys.stdout.write(str(rcode) + " ")
+        if rcode == 0:
+            return True
+        elif rcode in [7, 52, 56]:
+            return False
+        else:
+            print("Weird curl return " + str(rcode))
+            sys.exit()
+
+    return checkCommon(ips, port, checkProc)
+
+def socketTestSetup():
+    if "--nohostonly" not in sys.argv:
+        TESTS.append(("--proxy=" + PROXY + " --port=3129 --hostonly",
+            lambda ips=getips(), port=3129: (checkSocket(ips, port), input("  Remote connections should FAIL, please verify ..."))))
+
+    if "--nogateway" not in sys.argv:
+        TESTS.append(("--proxy=" + PROXY + " --port=3129 --gateway",
+            lambda ips=getips(), port=3129: (checkSocket(ips, port), input("  Remote connections should PASS, please verify ..."))))
+
+    if "--noallow" not in sys.argv:
+        TESTS.append(("--proxy=" + PROXY + " --port=3129 --gateway --allow=127.*.*.*",
+            lambda ips=[""], port=3129: checkFilter(ips, port)))
+
+        TESTS.append(("--proxy=" + PROXY + " --port=3129 --gateway --allow=169.*.*.*",
+            lambda ips=list(filter(lambda x: "169" in x, getips())), port=3129: checkFilter(ips, port)))
+
+        TESTS.append(("--proxy=" + PROXY + " --port=3129 --gateway --allow=192.*.*.*",
+            lambda ips=list(filter(lambda x: "192" in x, getips())), port=3129: checkFilter(ips, port)))
+
+    if "--nolisten" not in sys.argv:
+        localips = getips()
+        localips.insert(0, "")
+        localips.remove("127.0.0.1")
+        for ip in localips[:3]:
+            for port in ["", "3129"]:
+                cmd = "--proxy=" + PROXY
+                if ip != "":
+                    cmd += " --listen=" + ip
+                if port != "":
+                    cmd += " --port=" + port
+
+                TESTS.append((cmd, lambda ip=ip, port=port: checkSocket([ip], port)))
 
 def auto():
     # Make temp directory
@@ -200,8 +242,7 @@ def auto():
     shutil.copy("../dist/px.exe", ".")
 
     # Setup tests
-    if "--nosock" not in sys.argv:
-        socketTestSetup()
+    socketTestSetup()
     if "--noproxy" not in sys.argv:
         TESTS.append(("--workers=4 --proxy=" + PROXY, lambda: run(BASEURL)))
     if "--nonoproxy" not in sys.argv:

@@ -104,9 +104,17 @@ Configuration:
   Allow remote machines to use proxy. 0 or 1, default: 0
     Overrides 'listen' and binds to all interfaces
 
+  --hostonly  proxy:hostonly=
+  Allow only local interfaces to use proxy. 0 or 1, default: 0
+    Px allows all IP addresses assigned to local interfaces to use the service.
+    This allows local apps as well as VM or container apps to use Px when in a
+    NAT config. Px does this by listening on all interfaces and overriding the
+    allow list.
+
   --allow=  proxy:allow=
   Allow connection from specific subnets. Comma separated, default: *.*.*.*
-    Whitelist which IPs can use the proxy
+    Whitelist which IPs can use the proxy. --hostonly overrides any definitions
+    unless --gateway mode is also specified
     127.0.0.1 - specific ip
     192.168.0.* - wildcards
     192.168.0.1-192.168.0.255 - ranges
@@ -149,6 +157,7 @@ class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
     config = None
     exit = False
+    hostonly = False
     logger = None
     noproxy = netaddr.IPSet([])
     proxy_server = []
@@ -637,6 +646,12 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 ###
 # Multi-processing and multi-threading
 
+def get_host_ips():
+    localips = [ip[4][0] for ip in socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)]
+    localips.insert(0, "127.0.0.1")
+
+    return localips
+
 class PoolMixIn(socketserver.ThreadingMixIn):
     def process_request(self, request, client_address):
         self.pool.submit(self.process_request_thread, request, client_address)
@@ -644,6 +659,10 @@ class PoolMixIn(socketserver.ThreadingMixIn):
     def verify_request(self, request, client_address):
         dprint("Client address: %s" % client_address[0])
         if client_address[0] in State.allow:
+            return True
+
+        if State.hostonly and client_address[0] in get_host_ips():
+            dprint("Host-only IP allowed")
             return True
 
         dprint("Client not allowed: %s" % client_address[0])
@@ -711,6 +730,9 @@ def runpool():
 # Parse settings and command line
 
 def parseproxy(proxystrs):
+    if not proxystrs:
+        return
+
     for proxystr in [i.strip() for i in proxystrs.split(",")]:
         pserver = [i.strip() for i in proxystr.split(":")]
         if len(pserver) == 1:
@@ -784,7 +806,7 @@ def cfg_str_init(section, name, default, proc=None, override=False):
 
     State.config.set(section, name, val)
 
-    if proc != None and val != "":
+    if proc != None:
         proc(val)
 
 def save():
@@ -834,8 +856,8 @@ def parsecli():
     cfg_str_init("proxy", "allow", "*.*.*.*", parseallow)
 
     cfg_int_init("proxy", "gateway", "0")
-    if State.config.getint("proxy", "gateway") == 1:
-        State.config.set("proxy", "listen", "")
+
+    cfg_int_init("proxy", "hostonly", "0")
 
     cfg_str_init("proxy", "noproxy", "", parsenoproxy)
 
@@ -877,11 +899,36 @@ def parsecli():
                         cfg_int_init("settings", j, val, True)
 
     if "--gateway" in sys.argv:
-        State.config.set("proxy", "listen", "")
-        State.config.set("proxy", "gateway", "1")
+        cfg_int_init("proxy", "gateway", "1", True)
+
+    if "--hostonly" in sys.argv:
+        cfg_int_init("proxy", "hostonly", "1", True)
 
     if "--foreground" in sys.argv:
-        State.config.set("settings", "foreground", "1")
+        cfg_int_init("settings", "foreground", "1", True)
+
+    ###
+    # Dependency propagation
+
+    # If gateway mode
+    if State.config.getint("proxy", "gateway") == 1:
+        # Listen on all interfaces
+        cfg_str_init("proxy", "listen", "", None, True)
+
+    # If hostonly mode
+    if State.config.getint("proxy", "hostonly") == 1:
+        State.hostonly = True
+
+        # Listen on all interfaces
+        cfg_str_init("proxy", "listen", "", None, True)
+
+        # If not gateway mode or gateway with default allow rules
+        if (State.config.getint("proxy", "gateway") == 0 or
+                (State.config.getint("proxy", "gateway") == 1 and
+                 State.config.get("proxy", "allow") in ["*.*.*.*", "0.0.0.0/0"])):
+            # Purge allow rules
+            dprint("Turning allow off")
+            cfg_str_init("proxy", "allow", "", parseallow, True)
 
     if "--install" in sys.argv:
         install()

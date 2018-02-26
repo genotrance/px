@@ -143,7 +143,7 @@ Configuration:
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
   --socktimeout=  settings:socktimeout=
-  Timeout in seconds for connections before giving up. Valid integer, default: 5
+  Timeout in seconds for connections before giving up. Valid float, default: 5
 
   --foreground  settings:foreground=
   Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0

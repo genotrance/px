@@ -141,7 +141,7 @@ Configuration:
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
   --socktimeout= settings:socktimeout=
-  Timeout in seconds for connections before giving up. Valid integer, default: 5
+  Timeout in seconds for connections before giving up. Valid float, default: 5
 
   --foreground  settings:foreground=
   Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
@@ -798,6 +798,21 @@ def cfg_int_init(section, name, default, override=False):
 
     State.config.set(section, name, str(val))
 
+def cfg_float_init(section, name, default, override=False):
+    val = default
+    if not override:
+        try:
+            val = State.config.get(section, name).strip()
+        except configparser.NoOptionError:
+            pass
+
+    try:
+        val = float(val)
+    except ValueError:
+        print("Invalid float value for " + section + ":" + name)
+
+    State.config.set(section, name, str(val))
+
 def cfg_str_init(section, name, default, proc=None, override=False):
     val = default
     if not override:
@@ -872,7 +887,7 @@ def parsecli():
     cfg_int_init("settings", "workers", "2")
     cfg_int_init("settings", "threads", "5")
     cfg_int_init("settings", "idle", "30")
-    cfg_int_init("settings", "socktimeout", "5")
+    cfg_float_init("settings", "socktimeout", "5.0")
     cfg_int_init("settings", "foreground", "0")
 
     cfg_int_init("settings", "log", "0" if State.logger is None else "1")
@@ -896,9 +911,13 @@ def parsecli():
             elif "--useragent=" in sys.argv[i]:
                 cfg_str_init("proxy", "useragent", val, setuseragent, True)
             else:
-                for j in ["workers", "threads", "idle", "socktimeout"]:
+                for j in ["workers", "threads", "idle"]:
                     if "--" + j + "=" in sys.argv[i]:
                         cfg_int_init("settings", j, val, True)
+
+                for j in ["socktimeout"]:
+                    if "--" + j + "=" in sys.argv[i]:
+                        cfg_float_init("settings", j, val, True)
 
     if "--gateway" in sys.argv:
         cfg_int_init("proxy", "gateway", "1", True)
@@ -959,7 +978,7 @@ def parsecli():
         if State.config.getint("settings", "foreground") == 0:
             detachConsole()
 
-    socket.setdefaulttimeout(State.config.getint("settings", "socktimeout"))
+    socket.setdefaulttimeout(State.config.getfloat("settings", "socktimeout"))
 
 ###
 # Exit related

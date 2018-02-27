@@ -48,12 +48,14 @@ try:
     import http.server as httpserver
     import socketserver
     import urllib.parse as urlparse
+    import urllib.request as urlrequest
     import winreg
 except ImportError:
     import ConfigParser as configparser
     import SimpleHTTPServer as httpserver
     import SocketServer as socketserver
     import urlparse
+    import urllib as urlrequest
     import _winreg as winreg
 
     os.getppid = psutil.Process().ppid
@@ -694,7 +696,7 @@ def serve_forever(httpd):
     httpd.shutdown()
 
 def start_worker(pipeout):
-    parsecli()
+    parse_config()
     httpd = ThreadedTCPServer(
         (State.config.get("proxy", "listen").strip(), State.config.getint("proxy", "port")),
         Proxy, bind_and_activate=False
@@ -704,7 +706,7 @@ def start_worker(pipeout):
 
     serve_forever(httpd)
 
-def runpool():
+def run_pool():
     try:
         httpd = ThreadedTCPServer(
             (State.config.get("proxy", "listen").strip(), State.config.getint("proxy", "port")), Proxy
@@ -731,7 +733,7 @@ def runpool():
 ###
 # Parse settings and command line
 
-def parseproxy(proxystrs):
+def parse_proxy(proxystrs):
     if not proxystrs:
         return
 
@@ -752,7 +754,7 @@ def parseproxy(proxystrs):
         State.proxy_server.append(tuple(pserver))
     dprint(State.proxy_server)
 
-def parseipranges(iprangesconfig):
+def parse_ip_ranges(iprangesconfig):
     ipranges = netaddr.IPSet([])
 
     iprangessplit = [i.strip() for i in iprangesconfig.split(",")]
@@ -774,13 +776,13 @@ def parseipranges(iprangesconfig):
             sys.exit()
     return ipranges
 
-def parseallow(allow):
-    State.allow = parseipranges(allow)
+def parse_allow(allow):
+    State.allow = parse_ip_ranges(allow)
 
-def parsenoproxy(noproxy):
-    State.noproxy = parseipranges(noproxy)
+def parse_noproxy(noproxy):
+    State.noproxy = parse_ip_ranges(noproxy)
 
-def setuseragent(useragent):
+def set_useragent(useragent):
     State.useragent = useragent
 
 def cfg_int_init(section, name, default, override=False):
@@ -835,12 +837,12 @@ def save():
 
     sys.exit()
 
-def parsecli():
+def parse_config():
     if "--debug" in sys.argv:
         State.logger = Log(dfile(), "w")
 
     if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
-        attachConsole()
+        attach_console()
 
     if "-h" in sys.argv or "--help" in sys.argv:
         print(HELP)
@@ -864,21 +866,21 @@ def parsecli():
     if "proxy" not in State.config.sections():
         State.config.add_section("proxy")
 
-    cfg_str_init("proxy", "server", "", parseproxy)
+    cfg_str_init("proxy", "server", "", parse_proxy)
 
     cfg_int_init("proxy", "port", "3128")
 
     cfg_str_init("proxy", "listen", "127.0.0.1")
 
-    cfg_str_init("proxy", "allow", "*.*.*.*", parseallow)
+    cfg_str_init("proxy", "allow", "*.*.*.*", parse_allow)
 
     cfg_int_init("proxy", "gateway", "0")
 
     cfg_int_init("proxy", "hostonly", "0")
 
-    cfg_str_init("proxy", "noproxy", "", parsenoproxy)
+    cfg_str_init("proxy", "noproxy", "", parse_noproxy)
 
-    cfg_str_init("proxy", "useragent", "", setuseragent)
+    cfg_str_init("proxy", "useragent", "", set_useragent)
 
     # [settings] section
     if "settings" not in State.config.sections():
@@ -899,17 +901,17 @@ def parsecli():
         if "=" in sys.argv[i]:
             val = sys.argv[i].split("=")[1]
             if "--proxy=" in sys.argv[i] or "--server=" in sys.argv[i]:
-                cfg_str_init("proxy", "server", val, parseproxy, True)
+                cfg_str_init("proxy", "server", val, parse_proxy, True)
             elif "--listen=" in sys.argv[i]:
                 cfg_str_init("proxy", "listen", val, None, True)
             elif "--port=" in sys.argv[i]:
                 cfg_int_init("proxy", "port", val, True)
             elif "--allow=" in sys.argv[i]:
-                cfg_str_init("proxy", "allow", val, parseallow, True)
+                cfg_str_init("proxy", "allow", val, parse_allow, True)
             elif "--noproxy=" in sys.argv[i]:
-                cfg_str_init("proxy", "noproxy", val, parsenoproxy, True)
+                cfg_str_init("proxy", "noproxy", val, parse_noproxy, True)
             elif "--useragent=" in sys.argv[i]:
-                cfg_str_init("proxy", "useragent", val, setuseragent, True)
+                cfg_str_init("proxy", "useragent", val, set_useragent, True)
             else:
                 for j in ["workers", "threads", "idle"]:
                     if "--" + j + "=" in sys.argv[i]:
@@ -949,7 +951,7 @@ def parsecli():
                  State.config.get("proxy", "allow") in ["*.*.*.*", "0.0.0.0/0"])):
             # Purge allow rules
             dprint("Turning allow off")
-            cfg_str_init("proxy", "allow", "", parseallow, True)
+            cfg_str_init("proxy", "allow", "", parse_allow, True)
 
     if "--install" in sys.argv:
         install()
@@ -976,7 +978,7 @@ def parsecli():
 
     if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
         if State.config.getint("settings", "foreground") == 0:
-            detachConsole()
+            detach_console()
 
     socket.setdefaulttimeout(State.config.getfloat("settings", "socktimeout"))
 
@@ -1088,7 +1090,7 @@ def uninstall():
 ###
 # Attach/detach console
 
-def attachConsole():
+def attach_console():
     if ctypes.windll.kernel32.GetConsoleWindow() != 0:
         dprint("Already attached to a console")
         return
@@ -1126,7 +1128,7 @@ def attachConsole():
 
     reopen_stdout()
 
-def detachConsole():
+def detach_console():
     if ctypes.windll.kernel32.GetConsoleWindow() == 0:
         return
 
@@ -1144,6 +1146,6 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
 
-    parsecli()
+    parse_config()
 
-    runpool()
+    run_pool()

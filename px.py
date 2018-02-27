@@ -21,25 +21,30 @@ import traceback
 try:
     import concurrent.futures
 except ImportError:
-    print("Requires modules futures")
+    print("Requires module futures")
     sys.exit()
 
 try:
     import netaddr
 except ImportError:
-    print("Requires modules netaddr")
+    print("Requires module netaddr")
     sys.exit()
+
+try:
+    import pypac
+except ImportError:
+    print("Missing module pypac, running without WPAD or PAC proxy support")
 
 try:
     import psutil
 except ImportError:
-    print("Requires modules psutil")
+    print("Requires module psutil")
     sys.exit()
 
 try:
     import winkerberos
 except ImportError:
-    print("Requires Python module winkerberos")
+    print("Requires module winkerberos")
     sys.exit()
 
 # Python 2.x vs 3.x support
@@ -162,6 +167,7 @@ class State(object):
     hostonly = False
     logger = None
     noproxy = netaddr.IPSet([])
+    pac = None
     proxy_server = []
     stdout = None
     useragent = ""
@@ -733,6 +739,19 @@ def run_pool():
 ###
 # Parse settings and command line
 
+def find_proxy():
+    # Return if proxies specified in Px config
+    if State.config.get("proxy", "server") != "":
+        return
+
+    # First use pypac for WPAD or PAC config
+    if "pypac" in sys.modules:
+        State.pac = pypac.get_pac()
+
+    # Fall back to any manual proxies defined in Internet Options
+    parse_proxy(",".join([urlparse.urlparse(i).netloc
+        for i in set(urlrequest.getproxies().values())]))
+
 def parse_proxy(proxystrs):
     if not proxystrs:
         return
@@ -751,7 +770,8 @@ def parse_proxy(proxystrs):
             print("Bad proxy server definition: " + proxystr)
             sys.exit()
 
-        State.proxy_server.append(tuple(pserver))
+        if tuple(pserver) not in State.proxy_server:
+            State.proxy_server.append(tuple(pserver))
     dprint(State.proxy_server)
 
 def parse_ip_ranges(iprangesconfig):
@@ -962,7 +982,8 @@ def parse_config():
     elif "--save" in sys.argv:
         save()
 
-    if not State.proxy_server and not State.config.get("proxy", "noproxy"):
+    find_proxy()
+    if not State.pac and not State.proxy_server and not State.config.get("proxy", "noproxy"):
         print("No proxy server or noproxy list defined")
         sys.exit()
 

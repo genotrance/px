@@ -226,7 +226,8 @@ https://github.com/mongodb-labs/winkerberos/issues/19
 https://www.tillett.info/2013/05/13/how-to-create-a-windows-program-that-works-as-both-as-a-gui-and-console-application/
 http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
 
-Thank you to the following contributors as well for their PRs:-
+Thank you to the following contributors for their PRs and all issue submitters.
 
 https://github.com/ccbur
 https://github.com/McBane87
+https://github.com/jpjoux

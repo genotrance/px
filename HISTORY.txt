@@ -23,6 +23,7 @@ TBD
   URL with PAC files, WPAD, or static proxy definition
 - Added --proxyreload flag to configure interval between rediscovery of proxy
   info
+- Merged PR32 to fix PAC proxy port detection
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

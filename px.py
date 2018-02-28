@@ -820,7 +820,10 @@ def find_proxy_for_url(netloc):
         for i in pypac.parser.parse_pac_value(
                 State.pac.find_proxy_for_url(netloc, netloc)):
             if i != "DIRECT":
-                pac_proxy.append(tuple(urlparse.urlparse(i).netloc.split(":")))
+                # Convert proxy port to int
+                proxy = urlparse.urlparse(i).netloc.split(":")
+                proxy[1] = int(proxy[1])
+                pac_proxy.append(tuple(proxy))
             else:
                 direct = count
             count += 1

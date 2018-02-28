@@ -147,8 +147,13 @@ Configuration:
   --idle=  settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
-  --socktimeout= settings:socktimeout=
+  --socktimeout=  settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid float, default: 5
+
+  --proxyreload=  settings:proxyreload=
+  Time interval in seconds before refreshing proxy info. Valid int, default: 60
+    Proxy info reloaded from a PAC file found via WPAD or AutoConfig URL, or
+    manual proxy info defined in Internet Options
 
   --foreground  settings:foreground=
   Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
@@ -160,6 +165,12 @@ Configuration:
     Logs are written to working directory and over-written on startup
     A log is automatically created if Px crashes for some reason""" % __version__
 
+# Proxy modes - source of proxy info
+MODE_NONE = 0
+MODE_CONFIG = 1
+MODE_PAC = 2
+MODE_MANUAL = 3
+
 class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
     config = None
@@ -168,6 +179,8 @@ class State(object):
     logger = None
     noproxy = netaddr.IPSet([])
     pac = None
+    proxy_mode = MODE_NONE
+    proxy_refresh = None
     proxy_server = []
     stdout = None
     useragent = ""
@@ -192,16 +205,19 @@ class Log(object):
             self.file.write(data)
         except:
             pass
-        self.file.flush()
         if self.stdout is not None:
             self.stdout.write(data)
+        self.flush()
     def flush(self):
         self.file.flush()
+        if self.stdout is not None:
+            self.stdout.flush()
 
 def dprint(*objs):
     if State.logger != None:
         print(multiprocessing.current_process().name + ": " + threading.current_thread().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
         print(*objs)
+        sys.stdout.flush()
 
 def dfile():
     return "debug-%s.log" % multiprocessing.current_process().name
@@ -610,29 +626,45 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         dprint("Done")
 
     def get_destination(self):
+        netloc = self.path
+        path = "/"
+        if self.command != "CONNECT":
+            parse = urlparse.urlparse(self.path, allow_fragments=False)
+            if parse.netloc:
+                netloc = parse.netloc
+            if ":" not in netloc:
+                port = parse.port
+                if not port:
+                    if parse.scheme == "http":
+                        port = 80
+                    elif parse.scheme == "https":
+                        port = 443
+                netloc = netloc + ":" + str(port)
+
+            path = parse.path or "/"
+            if parse.params:
+                path = path + ";" + parse.params
+            if parse.query:
+                path = path + "?" + parse.query
+        dprint(netloc)
+
+        if State.proxy_mode != MODE_CONFIG:
+            load_proxy()
+
+        direct = -1
+        if State.proxy_mode == MODE_PAC:
+            pac_proxy, direct = find_proxy_for_url(netloc)
+            if direct == 0:
+                ipport = netloc.split(":")
+                ipport[1] = int(ipport[1])
+                dprint("Direct connection from PAC")
+                return tuple(ipport)
+
+            if pac_proxy:
+                dprint("Proxy from PAC = " + str(pac_proxy))
+                State.proxy_server = pac_proxy
+
         if State.noproxy.size:
-            netloc = self.path
-            path = "/"
-            if self.command != "CONNECT":
-                parse = urlparse.urlparse(self.path, allow_fragments=False)
-                if parse.netloc:
-                    netloc = parse.netloc
-                if ":" not in netloc:
-                    port = parse.port
-                    if not port:
-                        if parse.scheme == "http":
-                            port = 80
-                        elif parse.scheme == "https":
-                            port = 443
-                    netloc = netloc + ":" + str(port)
-
-                path = parse.path or "/"
-                if parse.params:
-                    path = path + ";" + parse.params
-                if parse.query:
-                    path = path + "?" + parse.query
-
-            dprint(netloc)
             addr = []
             spl = netloc.split(":", 1)
             try:
@@ -739,18 +771,62 @@ def run_pool():
 ###
 # Parse settings and command line
 
-def find_proxy():
+def load_proxy():
     # Return if proxies specified in Px config
-    if State.config.get("proxy", "server") != "":
+    # Check if need to refresh
+    if (State.proxy_mode == MODE_CONFIG or
+        (State.proxy_refresh is not None and
+         time.time() - State.proxy_refresh < State.config.getint("settings", "proxyreload"))):
+        dprint("Skip proxy refresh")
         return
+
+    # Reset proxy server list
+    State.proxy_mode = MODE_NONE
+    State.proxy_server = []
 
     # First use pypac for WPAD or PAC config
     if "pypac" in sys.modules:
         State.pac = pypac.get_pac()
+        # Fallback for file:/// URLs
+        if State.pac is None:
+            acu = pypac.windows.autoconfig_url_from_registry()
+            if acu:
+                acu = acu.replace("file:///", "")
+                if ":" not in acu:
+                    acu = "c:\\" + acu
+                if os.path.isfile(acu):
+                    dprint("Loading " + acu)
+                    with open(acu, "r") as f:
+                        State.pac = pypac.parser.PACFile(f.read())
 
     # Fall back to any manual proxies defined in Internet Options
-    parse_proxy(",".join([urlparse.urlparse(i).netloc
-        for i in set(urlrequest.getproxies().values())]))
+    if State.pac is None:
+        parse_proxy(",".join([urlparse.urlparse(i).netloc
+            for i in set(urlrequest.getproxies().values())]))
+
+        if State.proxy_server:
+            State.proxy_mode = MODE_MANUAL
+    else:
+        State.proxy_mode = MODE_PAC
+
+    dprint("Proxy mode = " + str(State.proxy_mode))
+    State.proxy_refresh = time.time()
+
+def find_proxy_for_url(netloc):
+    pac_proxy = []
+    direct = -1
+    count = 0
+    if State.pac is not None:
+        for i in pypac.parser.parse_pac_value(
+                State.pac.find_proxy_for_url(netloc, netloc)):
+            if i != "DIRECT":
+                pac_proxy.append(tuple(urlparse.urlparse(i).netloc.split(":")))
+            else:
+                direct = count
+            count += 1
+        dprint("pypac = " + str(pac_proxy), str(direct))
+
+    return pac_proxy, direct
 
 def parse_proxy(proxystrs):
     if not proxystrs:
@@ -887,19 +963,12 @@ def parse_config():
         State.config.add_section("proxy")
 
     cfg_str_init("proxy", "server", "", parse_proxy)
-
     cfg_int_init("proxy", "port", "3128")
-
     cfg_str_init("proxy", "listen", "127.0.0.1")
-
     cfg_str_init("proxy", "allow", "*.*.*.*", parse_allow)
-
     cfg_int_init("proxy", "gateway", "0")
-
     cfg_int_init("proxy", "hostonly", "0")
-
     cfg_str_init("proxy", "noproxy", "", parse_noproxy)
-
     cfg_str_init("proxy", "useragent", "", set_useragent)
 
     # [settings] section
@@ -910,6 +979,7 @@ def parse_config():
     cfg_int_init("settings", "threads", "5")
     cfg_int_init("settings", "idle", "30")
     cfg_float_init("settings", "socktimeout", "5.0")
+    cfg_int_init("settings", "proxyreload", "60")
     cfg_int_init("settings", "foreground", "0")
 
     cfg_int_init("settings", "log", "0" if State.logger is None else "1")
@@ -933,7 +1003,7 @@ def parse_config():
             elif "--useragent=" in sys.argv[i]:
                 cfg_str_init("proxy", "useragent", val, set_useragent, True)
             else:
-                for j in ["workers", "threads", "idle"]:
+                for j in ["workers", "threads", "idle", "proxyreload"]:
                     if "--" + j + "=" in sys.argv[i]:
                         cfg_int_init("settings", j, val, True)
 
@@ -982,8 +1052,12 @@ def parse_config():
     elif "--save" in sys.argv:
         save()
 
-    find_proxy()
-    if not State.pac and not State.proxy_server and not State.config.get("proxy", "noproxy"):
+    if State.proxy_server:
+        State.proxy_mode = MODE_CONFIG
+    else:
+        load_proxy()
+
+    if State.proxy_mode == MODE_NONE and not State.config.get("proxy", "noproxy"):
         print("No proxy server or noproxy list defined")
         sys.exit()
 

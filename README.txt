@@ -1,24 +1,26 @@
-Px is a HTTP(s) proxy server that allows applications to authenticate through an NTLM proxy
-server, typically used in corporate deployments, without having to deal with the actual NTLM
-handshake. It is primarily designed to run on Windows systems and authenticates on behalf
-of the application using the currently logged in Windows user account.
+Px is a HTTP(s) proxy server that allows applications to authenticate through
+an NTLM proxy server, typically used in corporate deployments, without having
+to deal with the actual NTLM handshake. It is primarily designed to run on
+Windows systems and authenticates on behalf of the application using the
+currently logged in Windows user account.
 
 Px is very similar to "NTLM Authorization Proxy Server" (http://ntlmaps.sourceforge.net/)
-and Cntlm (http://cntlm.sourceforge.net/) in that it sits between the corporate proxy and
-applications and offloads the NTLM authentication. The primary difference in Px is to use
-the currently logged in user's credentials to log in automatically rather than requiring the
-user to provide the username, password (hash) and domain information. This is
-accomplished by using Microsoft SSPI to generate the tokens and signatures required to
-authenticate with the NTLM proxy.
+and Cntlm (http://cntlm.sourceforge.net/) in that it sits between the corporate
+proxy and applications and offloads the NTLM authentication. The primary
+difference in Px is to use the currently logged in user's credentials to log in
+automatically rather than requiring the user to provide the username, password
+(hash) and domain information. This is accomplished by using Microsoft SSPI to
+generate the tokens and signatures required to authenticate with the NTLM proxy.
 
-NTLMAps and Cntlm were designed for non-Windows users stuck behind a corporate proxy.
-As a result, they require the user to provide the correct credentials to authenticate. On
-Windows, the user has already logged in with his credentials so Px is designed for Windows
-users who would like to use tools that aren't designed to deal with NTLM authentication,
-without having to supply and maintain the credentials within Px.
+NTLMAps and Cntlm were designed for non-Windows users stuck behind a corporate
+proxy.  As a result, they require the user to provide the correct credentials
+to authenticate. On Windows, the user has already logged in with his credentials
+so Px is designed for Windows users who would like to use tools that aren't
+designed to deal with NTLM authentication, without having to supply and maintain
+the credentials within Px.
 
-The following link from Microsoft provides a good starting point to understand how NTLM
-authentication works:
+The following link from Microsoft provides a good starting point to understand
+how NTLM authentication works:
 
   https://msdn.microsoft.com/en-us/library/dd925287.aspx
 
@@ -39,30 +41,32 @@ Px can be obtained in multiple ways:-
 
 Running the source directly requires Python and all dependencies installed.
 
-Once downloaded, extract to a folder of choice and use the --save and --install commands
-as documented below.
+Once downloaded, extract to a folder of choice and use the --save and --install
+commands as documented below.
 
 Configuration
 
-Px requires only one piece of information in order to function - the server name and port of
-the NTLM proxy server. This needs to be configured in px.ini. Without this, Px will not work
-and exit immediately.
+Px requires only one piece of information in order to function - the server
+name and port of the NTLM proxy server. This needs to be configured in px.ini.
+If not specified, Px will check Internet Options for any proxy definitions and
+use them. Without this, Px will not work and exit immediately.
 
-The noproxy capability allows Px to connect to hosts in the configured subnets directly,
-bypassing the NTLM proxy altogether. This allows clients to connect to hosts within the
-intranet without requiring additional configuration for each client or at the NTLM proxy.
-If noproxy is defined, the NTLM proxy is optional - this allows Px to run as a regular
-proxy full time if required.
+The noproxy capability allows Px to connect to hosts in the configured subnets
+directly, bypassing the NTLM proxy altogether. This allows clients to connect
+to hosts within the intranet without requiring additional configuration for
+each client or at the NTLM proxy. If noproxy is defined, the NTLM proxy is
+optional - this allows Px to run as a regular proxy full time if required.
 
-There are a few other settings to tweak in the INI file but most are self-explanatory. All
-settings can be specified on the command line for convenience. The INI file can also be
-created or updated from the command line using --save.
+There are a few other settings to tweak in the INI file but most are obvious.
+All settings can be specified on the command line for convenience. The INI file
+can also be created or updated from the command line using --save.
 
-The binary distribution of Px runs in the background once started and can be quit by
-running "px --quit". When run directly using Python, use CTRL-C to quit.
+The binary distribution of Px runs in the background once started and can be
+quit by running "px --quit". When run directly using Python, use CTRL-C to quit.
 
-Px can also be setup to automatically run on startup with the --install flag. This is done
-by adding an entry into the Window registry which can be removed with --uninstall.
+Px can also be setup to automatically run on startup with the --install flag.
+This is done by adding an entry into the Window registry which can be removed
+with --uninstall.
 
 Usage
 
@@ -145,6 +149,11 @@ Configuration:
   --socktimeout=  settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid float, default: 5
 
+  --proxyreload=  settings:proxyreload=
+  Time interval in seconds before reloading proxy info. Valid int, default: 60
+    Proxy info is reloaded from a PAC file found via WPAD or AutoConfig URL, or
+    manual proxy info defined in Internet Options
+
   --foreground  settings:foreground=
   Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
@@ -176,7 +185,7 @@ Examples
   px --proxy=proxyserver.com:80 --gateway
 
 NOTE:
-  In Docker for Windows you need to set your proxy to http://<your ip>:3128 (or actual port
+  In Docker for Windows you need to set your proxy to http://<your ip>:3128 (oractual port
   Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
 
   Workaround: docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg
@@ -184,24 +193,25 @@ NOTE:
 
 Dependencies
 
-Px doesn't have any GUI and runs completely in the background. It is distributed using
-Python 3.x and PyInstaller to have a self-contained executable but can also be run using a
-Python distribution with the following additional packages.
+Px doesn't have any GUI and runs completely in the background. It is distributed
+using Python 3.x and PyInstaller to have a self-contained executable but can
+also be run using a Python distribution with the following additional packages.
 
-  netaddr, psutil, winkerberos
+  netaddr, psutil, pypac, winkerberos
   futures on Python 2.x
 
-In order to make Px a capable proxy server, it is designed to run in multiple processes. The
-number of parallel workers or processes is configurable. However, this only works on Python
-3.3+ since that's when support was added to share sockets across processes in Windows. On
-older versions of Python, Px will run multi-threaded but in a single process. The number of
-threads per process is also configurable.
+In order to make Px a capable proxy server, it is designed to run in multiple
+processes. The number of parallel workers or processes is configurable. However,
+this only works on Python 3.3+ since that's when support was added to share
+sockets across processes in Windows. On older versions of Python, Px will run
+multi-threaded but in a single process. The number of threads per process is
+also configurable.
 
 Feedback
 
-Px is definitely a work in progress and any feedback or suggestions are welcome. It is hosted
-on GitHub (https://github.com/genotrance/px) with an MIT license so issues, forks and PRs are
-most appreciated.
+Px is definitely a work in progress and any feedback or suggestions are welcome.
+It is hosted on GitHub (https://github.com/genotrance/px) with an MIT license
+so issues, forks and PRs are most appreciated.
 
 Credits
 

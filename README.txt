@@ -225,6 +225,7 @@ https://github.com/fl4re/curl/blob/master/lib/curl_sasl_sspi.c
 https://github.com/mongodb-labs/winkerberos/issues/19
 https://www.tillett.info/2013/05/13/how-to-create-a-windows-program-that-works-as-both-as-a-gui-and-console-application/
 http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
+https://stackoverflow.com/questions/42108978/what-is-the-priority-mechanism-in-proxy-settings-of-internet-explorer-browser
 
 Thank you to the following contributors for their PRs and all issue submitters.
 

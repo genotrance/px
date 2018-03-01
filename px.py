@@ -182,6 +182,7 @@ class State(object):
     proxy_mode = MODE_NONE
     proxy_refresh = None
     proxy_server = []
+    proxy_type = {}
     stdout = None
     useragent = ""
 
@@ -245,10 +246,10 @@ def restore_stdout():
 # NTLM support
 
 class NtlmMessageGenerator:
-    def __init__(self):
+    def __init__(self, proxy_type):
+        spn = "NTLM" if proxy_type == "NTLM" else "HTTP@" + State.proxy_server[0][0]
         status, self.ctx = winkerberos.authGSSClientInit(
-            "HTTP@" + State.proxy_server[0][0], gssflags=0,
-            mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
+            spn, gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
 
     def get_response(self, challenge=""):
         dprint("winkerberos SSPI")
@@ -290,7 +291,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         dprint(format % args)
 
     def do_socket_connect(self, destination=None):
-        if hasattr(self, "client_socket") and self.client_socket is not None:
+        if hasattr(self, "proxy_socket") and self.proxy_socket is not None:
             return True
 
         dest = State.proxy_server
@@ -299,16 +300,17 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         for i in range(len(dest)):
             dprint("New connection: " + str(dest[0]))
-            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                self.client_socket.connect(dest[0])
+                self.proxy_socket.connect(dest[0])
+                self.proxy_address = dest[0]
                 break
             except:
                 dprint("Connect failed")
                 dest.append(dest.pop(0))
-                self.client_socket = None
+                self.proxy_socket = None
 
-        if self.client_socket is not None:
+        if self.proxy_socket is not None:
             return True
 
         return False
@@ -330,7 +332,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         keepalive = False
         ua = False
         cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
-        self.client_socket.send(cmdstr)
+        self.proxy_socket.send(cmdstr)
         dprint(cmdstr)
         for header in self.headers:
             hlower = header.lower()
@@ -340,7 +342,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             else:
                 h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
 
-            self.client_socket.send(h)
+            self.proxy_socket.send(h)
             dprint("Sending %s" % h)
 
             if hlower == "content-length":
@@ -361,9 +363,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         for header in xheaders:
             h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
-            self.client_socket.send(h)
+            self.proxy_socket.send(h)
             dprint("Sending extra %s" % h)
-        self.client_socket.send(b"\r\n")
+        self.proxy_socket.send(b"\r\n")
 
         if self.command in ["POST", "PUT", "PATCH"]:
             if not hasattr(self, "body"):
@@ -374,9 +376,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     self.body = self.rfile.read()
 
             dprint("Sending body for POST/PUT/PATCH: %d = %d" % (cl or -1, len(self.body)))
-            self.client_socket.send(self.body)
+            self.proxy_socket.send(self.body)
 
-        self.client_fp = self.client_socket.makefile("rb")
+        self.client_fp = self.proxy_socket.makefile("rb")
 
         resp = 503
         nobody = False
@@ -470,6 +472,36 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         return resp, headers, body
 
+    def do_proxy_type(self):
+        # Connect to proxy
+        if not hasattr(self, "proxy_address"):
+            if not self.do_socket_connect():
+                return 408, None, None
+
+        # New proxy, don't know type yet
+        if self.proxy_address not in State.proxy_type:
+            dprint("Searching proxy type")
+            resp, headers, body = self.do_socket()
+
+            proxy_auth = ""
+            for header in headers:
+                if header[0] == "Proxy-Authenticate":
+                    proxy_auth += header[1] + " "
+
+            if "NTLM" in proxy_auth.upper():
+                State.proxy_type[self.proxy_address] = "NTLM"
+            elif "KERBEROS" in proxy_auth.upper():
+                State.proxy_type[self.proxy_address] = "KERBEROS"
+            elif "NEGOTIATE" in proxy_auth.upper():
+                State.proxy_type[self.proxy_address] = "NEGOTIATE"
+
+            dprint("Auth mechanisms: " + proxy_auth)
+            dprint("Selected: " + str(State.proxy_type))
+
+            return resp, headers, body
+
+        return 407, None, None
+
     def do_transaction(self):
         dprint("Entering")
 
@@ -478,38 +510,51 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             dprint("Skipping NTLM proxying")
             resp, headers, body = self.do_socket(destination=ipport)
         elif ipport:
-            # Check for NTLM auth
-            ntlm = NtlmMessageGenerator()
-            ntlm_resp = ntlm.get_response()
-            if ntlm_resp is None:
-                dprint("Bad NTLM response")
-                return 503, None, None
-            resp, headers, body = self.do_socket({
-                "Proxy-Authorization": "Negotiate %s" % ntlm_resp
-            })
+            # Get proxy type if not already
+            resp, headers, body = self.do_proxy_type()
             if resp == 407:
-                dprint("Auth required")
-                ntlm_challenge = ""
-                for header in headers:
-                    if header[0] == "Proxy-Authenticate" and "Negotiate" in header[1]:
-                        ntlm_challenge = header[1].split()[1]
-                        break
-
-                if ntlm_challenge:
-                    dprint("Challenged")
-                    ntlm_resp = ntlm.get_response(ntlm_challenge)
-                    if ntlm_resp is None:
-                        dprint("Bad NTLM response")
-                        return 503, None, None
-                    resp, headers, body = self.do_socket({
-                        "Proxy-Authorization": "Negotiate %s" % ntlm_resp
-                    })
-
+                # Unknown auth mechanism
+                if self.proxy_address not in State.proxy_type:
+                    dprint("Unknown auth mechanism expected")
                     return resp, headers, body
+
+                # Generate auth message
+                proxy_type = State.proxy_type[self.proxy_address]
+                ntlm = NtlmMessageGenerator(proxy_type)
+                ntlm_resp = ntlm.get_response()
+                if ntlm_resp is None:
+                    dprint("Bad NTLM response")
+                    return 503, None, None
+
+                # Send auth message
+                resp, headers, body = self.do_socket({
+                    "Proxy-Authorization": proxy_type + " " + ntlm_resp
+                })
+                if resp == 407:
+                    dprint("Auth required")
+                    ntlm_challenge = ""
+                    for header in headers:
+                        if header[0] == "Proxy-Authenticate" and proxy_type in header[1].upper():
+                            ntlm_challenge = header[1].split()[1]
+                            break
+
+                    if ntlm_challenge:
+                        dprint("Challenged")
+                        ntlm_resp = ntlm.get_response(ntlm_challenge)
+                        if ntlm_resp is None:
+                            dprint("Bad NTLM response")
+                            return 503, None, None
+
+                        # Reply to challenge
+                        resp, headers, body = self.do_socket({
+                            "Proxy-Authorization": proxy_type + " " + ntlm_resp
+                        })
+
+                        return resp, headers, body
+                    else:
+                        dprint("Didn't get challenge, not NTLM proxy")
                 else:
-                    dprint("Didn't get challenge, not NTLM proxy")
-            elif resp > 400:
-                return resp, None, None
+                    dprint("No auth required cached")
             else:
                 dprint("No auth required")
         else:
@@ -579,7 +624,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             self.send_header("Proxy-Agent", self.version_string())
             self.end_headers()
 
-            rlist = [self.connection, self.client_socket]
+            rlist = [self.connection, self.proxy_socket]
             wlist = []
             count = 0
             max_idle = State.config.getint("settings", "idle")
@@ -590,10 +635,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     break
                 if ins:
                     for i in ins:
-                        if i is self.client_socket:
+                        if i is self.proxy_socket:
                             out = self.connection
                         else:
-                            out = self.client_socket
+                            out = self.proxy_socket
 
                         data = i.recv(4096)
                         if data:

@@ -24,6 +24,8 @@ TBD
 - Added --proxyreload flag to configure interval between rediscovery of proxy
   info
 - Merged PR32 to fix PAC proxy port detection
+- Implemented fix for #29 - discover proxy type instead of assuming Negotiate
+  will work across the board
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

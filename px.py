@@ -378,7 +378,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             dprint("Sending body for POST/PUT/PATCH: %d = %d" % (cl or -1, len(self.body)))
             self.proxy_socket.send(self.body)
 
-        self.client_fp = self.proxy_socket.makefile("rb")
+        self.proxy_fp = self.proxy_socket.makefile("rb")
 
         resp = 503
         nobody = False
@@ -391,9 +391,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Response code
         for i in range(2):
             dprint("Reading response code")
-            line = self.client_fp.readline(State.max_line)
+            line = self.proxy_fp.readline(State.max_line)
             if line == b"\r\n":
-                line = self.client_fp.readline(State.max_line)
+                line = self.proxy_fp.readline(State.max_line)
             try:
                 resp = int(line.split()[1])
             except ValueError:
@@ -412,11 +412,15 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Headers
         cl = None
         chk = False
+        close = False
         dprint("Reading response headers")
         while not State.exit:
-            line = self.client_fp.readline(State.max_line).decode("utf-8")
+            line = self.proxy_fp.readline(State.max_line).decode("utf-8")
             if line == b"":
-                dprint("Client closed connection: %s" % resp)
+                if self.proxy_socket:
+                    self.proxy_socket.close()
+                    self.proxy_socket = None
+                dprint("Proxy closed connection: %s" % resp)
                 return 444, None, None
             if line == "\r\n":
                 break
@@ -435,17 +439,19 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     nobody = True
             elif name.lower() == "transfer-encoding" and value.lower() == "chunked":
                 chk = True
+            elif name.lower() == "proxy-connection" and value.lower() == "close":
+                close = True
 
         # Data
         dprint("Reading response data")
         if not nobody:
             if cl:
                 dprint("Content length %d" % cl)
-                body = self.client_fp.read(cl)
+                body = self.proxy_fp.read(cl)
             elif chk:
                 dprint("Chunked encoding")
                 while not State.exit:
-                    line = self.client_fp.readline(State.max_line).decode("utf-8").strip()
+                    line = self.proxy_fp.readline(State.max_line).decode("utf-8").strip()
                     try:
                         csize = int(line.strip(), 16)
                         dprint("Chunk size %d" % csize)
@@ -455,7 +461,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     if csize == 0:
                         dprint("No more chunks")
                         break
-                    d = self.client_fp.read(csize)
+                    d = self.proxy_fp.read(csize)
                     if len(d) < csize:
                         dprint("Chunk doesn't match data")
                         break
@@ -465,10 +471,15 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Not sure how much")
                 while not State.exit:
                     time.sleep(0.1)
-                    d = self.client_fp.read(1024)
+                    d = self.proxy_fp.read(1024)
                     if len(d) < 1024:
                         break
                     body += d
+
+        if close and self.proxy_socket:
+            dprint("Close proxy connection per header")
+            self.proxy_socket.close()
+            self.proxy_socket = None
 
         return resp, headers, body
 
@@ -528,7 +539,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                 # Send auth message
                 resp, headers, body = self.do_socket({
-                    "Proxy-Authorization": proxy_type + " " + ntlm_resp
+                    "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
                 })
                 if resp == 407:
                     dprint("Auth required")
@@ -547,7 +558,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                         # Reply to challenge
                         resp, headers, body = self.do_socket({
-                            "Proxy-Authorization": proxy_type + " " + ntlm_resp
+                            "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
                         })
 
                         return resp, headers, body

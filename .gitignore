@@ -50,3 +50,4 @@ debug-*
 *.pyc
 .vscode
 testrun
+*.egg-info

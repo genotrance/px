@@ -20,13 +20,16 @@ TBD
   restrictive --allow definition - PR20
 - Changed --socktimeout from int to float
 - Added support to discover proxy info from Internet Options - Automatic Config
-  URL with PAC files, WPAD, or static proxy definition
+  URL with PAC files, WPAD, or static proxy definition - #30
 - Added --proxyreload flag to configure interval between rediscovery of proxy
   info
 - Merged PR32 to fix PAC proxy port detection
 - Implemented fix for #29 - discover proxy type instead of assuming Negotiate
   will work across the board
 - Close proxy socket if it returns "Proxy-Connection: close" header
+- Improved memory and disk usage which had increased drastically after adding
+  PAC support - #30
+- Added setup.py to install Px using pip - #24
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

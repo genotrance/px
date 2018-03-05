@@ -31,11 +31,6 @@ except ImportError:
     sys.exit()
 
 try:
-    import pypac
-except ImportError:
-    print("Missing module pypac, running without WPAD or PAC proxy support")
-
-try:
     import psutil
 except ImportError:
     print("Requires module psutil")
@@ -53,14 +48,12 @@ try:
     import http.server as httpserver
     import socketserver
     import urllib.parse as urlparse
-    import urllib.request as urlrequest
     import winreg
 except ImportError:
     import ConfigParser as configparser
     import SimpleHTTPServer as httpserver
     import SocketServer as socketserver
     import urlparse
-    import urllib as urlrequest
     import _winreg as winreg
 
     os.getppid = psutil.Process().ppid
@@ -168,8 +161,9 @@ Configuration:
 # Proxy modes - source of proxy info
 MODE_NONE = 0
 MODE_CONFIG = 1
-MODE_PAC = 2
-MODE_MANUAL = 3
+MODE_AUTO = 2
+MODE_PAC = 3
+MODE_MANUAL = 4
 
 class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
@@ -178,7 +172,8 @@ class State(object):
     hostonly = False
     logger = None
     noproxy = netaddr.IPSet([])
-    pac = None
+    noproxy_hosts = []
+    pac = ""
     proxy_mode = MODE_NONE
     proxy_refresh = None
     proxy_server = []
@@ -333,7 +328,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         ua = False
         cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
         self.proxy_socket.send(cmdstr)
-        dprint(cmdstr)
+        dprint(cmdstr.strip())
         for header in self.headers:
             hlower = header.lower()
             if hlower == "user-agent" and State.useragent != "":
@@ -343,7 +338,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
 
             self.proxy_socket.send(h)
-            dprint("Sending %s" % h)
+            dprint("Sending %s" % h.strip())
 
             if hlower == "content-length":
                 cl = int(self.headers[header])
@@ -364,7 +359,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         for header in xheaders:
             h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
             self.proxy_socket.send(h)
-            dprint("Sending extra %s" % h)
+            dprint("Sending extra %s" % h.strip())
         self.proxy_socket.send(b"\r\n")
 
         if self.command in ["POST", "PUT", "PATCH"]:
@@ -581,10 +576,36 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         dprint("Done")
 
+    def do_PAC(self):
+        resp = 404
+        headers = None
+        body = None
+        if State.proxy_mode == MODE_PAC and "file://" in State.pac:
+            pac = file_url_to_local_path(State.pac)
+            dprint(pac)
+            try:
+                resp = 200
+                with open(pac) as p:
+                    body = p.read().encode("utf-8")
+                headers = [
+                    ("Content-Length", len(body)),
+                    ("Content-Type", "application/x-ns-proxy-autoconfig")
+                ]
+            except:
+                traceback.print_exc(file=sys.stdout)
+                pass
+
+        return resp, headers, body
+
     def do_GET(self):
         dprint("Entering")
 
-        resp, headers, body = self.do_transaction()
+        dprint("Path = " + self.path)
+        if self.path == "/PACFile.pac":
+            resp, headers, body = self.do_PAC()
+        else:
+            resp, headers, body = self.do_transaction()
+
         if resp >= 400:
             dprint("Error %d" % resp)
             self.send_error(resp)
@@ -707,18 +728,18 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         if State.proxy_mode != MODE_CONFIG:
             load_proxy()
 
-        direct = -1
-        if State.proxy_mode == MODE_PAC:
-            pac_proxy, direct = find_proxy_for_url(netloc)
-            if direct == 0:
+        if State.proxy_mode in [MODE_AUTO, MODE_PAC]:
+            proxy_str = find_proxy_for_url(
+                ("https://" if "://" not in self.path else "") + self.path)
+            if proxy_str == "DIRECT":
                 ipport = netloc.split(":")
                 ipport[1] = int(ipport[1])
                 dprint("Direct connection from PAC")
                 return tuple(ipport)
 
-            if pac_proxy:
-                dprint("Proxy from PAC = " + str(pac_proxy))
-                State.proxy_server = pac_proxy
+            if proxy_str:
+                dprint("Proxy from PAC = " + str(proxy_str))
+                parse_proxy(proxy_str)
 
         if State.noproxy.size:
             addr = []
@@ -825,7 +846,100 @@ def run_pool():
     serve_forever(httpd)
 
 ###
-# Parse settings and command line
+# Proxy detection
+
+class WINHTTP_CURRENT_USER_IE_PROXY_CONFIG(ctypes.Structure):
+    _fields_ = [("fAutoDetect", ctypes.wintypes.BOOL), # "Automatically detect settings"
+                ("lpszAutoConfigUrl", ctypes.wintypes.LPWSTR), # "Use automatic configuration script, Address"
+                ("lpszProxy", ctypes.wintypes.LPWSTR), # "1.2.3.4:5" if "Use the same proxy server for all protocols",
+                                                       # else advanced "ftp=1.2.3.4:5;http=1.2.3.4:5;https=1.2.3.4:5;socks=1.2.3.4:5"
+                ("lpszProxyBypass", ctypes.wintypes.LPWSTR), # ";"-separated list, "Bypass proxy server for local addresses" adds "<local>"
+                ]
+
+class WINHTTP_AUTOPROXY_OPTIONS(ctypes.Structure):
+    _fields_ = [("dwFlags", ctypes.wintypes.DWORD),
+                ("dwAutoDetectFlags", ctypes.wintypes.DWORD),
+                ("lpszAutoConfigUrl", ctypes.wintypes.LPCWSTR),
+                ("lpvReserved", ctypes.c_void_p),
+                ("dwReserved", ctypes.wintypes.DWORD),
+                ("fAutoLogonIfChallenged", ctypes.wintypes.BOOL), ]
+
+class WINHTTP_PROXY_INFO(ctypes.Structure):
+    _fields_ = [("dwAccessType", ctypes.wintypes.DWORD),
+                ("lpszProxy", ctypes.wintypes.LPCWSTR),
+                ("lpszProxyBypass", ctypes.wintypes.LPCWSTR), ]
+
+# Parameters for WinHttpOpen, http://msdn.microsoft.com/en-us/library/aa384098(VS.85).aspx
+WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0
+WINHTTP_NO_PROXY_NAME = 0
+WINHTTP_NO_PROXY_BYPASS = 0
+WINHTTP_FLAG_ASYNC = 0x10000000
+
+# dwFlags values
+WINHTTP_AUTOPROXY_AUTO_DETECT = 0x00000001
+WINHTTP_AUTOPROXY_CONFIG_URL = 0x00000002
+
+# dwAutoDetectFlags values
+WINHTTP_AUTO_DETECT_TYPE_DHCP = 0x00000001
+WINHTTP_AUTO_DETECT_TYPE_DNS_A = 0x00000002
+
+# dwAccessType values
+WINHTTP_ACCESS_TYPE_NO_PROXY = 1
+WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3
+WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
+
+def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=True):
+    hInternet = ctypes.windll.winhttp.WinHttpOpen(ctypes.wintypes.LPCWSTR("Px"),
+        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC)
+    if not hInternet:
+        dprint("WinHttpOpen failed: " + str(ctypes.GetLastError()))
+        return ""
+
+    autoproxy_options = WINHTTP_AUTOPROXY_OPTIONS()
+    if pac_url:
+        autoproxy_options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL
+        autoproxy_options.dwAutoDetectFlags = 0
+        autoproxy_options.lpszAutoConfigUrl = pac_url
+    elif autodetect:
+        autoproxy_options.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT
+        autoproxy_options.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
+        autoproxy_options.lpszAutoConfigUrl = 0
+    else:
+        return ""
+    autoproxy_options.fAutoLogonIfChallenged = autologon
+
+    proxy_info = WINHTTP_PROXY_INFO()
+
+    ok = ctypes.windll.winhttp.WinHttpGetProxyForUrl(hInternet, ctypes.wintypes.LPCWSTR(url),
+            ctypes.byref(autoproxy_options), ctypes.byref(proxy_info))
+    if not ok:
+        error = ctypes.GetLastError()
+        dprint("WinHttpGetProxyForUrl error %s" % error)
+        return ""
+
+    if proxy_info.dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY:
+        # Note: proxy_info.lpszProxyBypass makes no sense here!
+        if not proxy_info.lpszProxy:
+            dprint('WinHttpGetProxyForUrl named proxy without name')
+            return ""
+        return proxy_info.lpszProxy.replace(' ', ',') # Note: We only see the first!
+    if proxy_info.dwAccessType == WINHTTP_ACCESS_TYPE_NO_PROXY:
+        return "DIRECT"
+
+    # WinHttpCloseHandle()
+    dprint("WinHttpGetProxyForUrl accesstype %s" % (proxy_info.dwAccessType,))
+    return ""
+
+def file_url_to_local_path(file_url):
+    parts = urlparse.urlparse(file_url)
+    path = urlparse.unquote(parts.path)
+    if path.startswith('/') and not path.startswith('//'):
+        if len(parts.netloc) == 2 and parts.netloc[1] == ':':
+            return parts.netloc + path
+        return 'C:' + path
+    if len(path) > 2 and path[1] == ':':
+        return path
 
 def load_proxy():
     # Return if proxies specified in Px config
@@ -840,52 +954,67 @@ def load_proxy():
     State.proxy_mode = MODE_NONE
     State.proxy_server = []
 
-    # First use pypac for WPAD or PAC config
-    if "pypac" in sys.modules:
-        State.pac = pypac.get_pac()
-        # Fallback for file:/// URLs
-        if State.pac is None:
-            acu = pypac.windows.autoconfig_url_from_registry()
-            if acu:
-                acu = acu.replace("file:///", "")
-                if ":" not in acu:
-                    acu = "c:\\" + acu
-                if os.path.isfile(acu):
-                    dprint("Loading " + acu)
-                    with open(acu, "r") as f:
-                        State.pac = pypac.parser.PACFile(f.read())
-
-    # Fall back to any manual proxies defined in Internet Options
-    if State.pac is None:
-        parse_proxy(",".join([urlparse.urlparse(i).netloc
-            for i in set(urlrequest.getproxies().values())]))
-
-        if State.proxy_server:
-            State.proxy_mode = MODE_MANUAL
+    # Get proxy info from Internet Options
+    ie_proxy_config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG()
+    ok = ctypes.windll.winhttp.WinHttpGetIEProxyConfigForCurrentUser(ctypes.byref(ie_proxy_config))
+    if not ok:
+        dprint(ctypes.GetLastError())
     else:
-        State.proxy_mode = MODE_PAC
+        if ie_proxy_config.fAutoDetect:
+            State.proxy_mode = MODE_AUTO
+        elif ie_proxy_config.lpszAutoConfigUrl:
+            State.pac = ie_proxy_config.lpszAutoConfigUrl
+            State.proxy_mode = MODE_PAC
+            dprint("AutoConfigURL = " + State.pac)
+        else:
+            # Manual proxy
+            proxies = []
+            proxies_str = ie_proxy_config.lpszProxy or ""
+            for proxy_str in proxies_str.lower().replace(' ', ';').split(';'):
+                if '=' in proxy_str:
+                    scheme, proxy = proxy_str.split('=', 1)
+                    if scheme.strip() != "ftp":
+                        proxies.append(proxy)
+                elif proxy_str:
+                    proxies.append(proxy_str)
+            if proxies:
+                parse_proxy(",".join(proxies))
+                State.proxy_mode = MODE_MANUAL
+
+            # Proxy exceptions into noproxy
+            bypass_str = ie_proxy_config.lpszProxyBypass or "" # FIXME: Handle "<local>"
+            bypasses = [h.strip() for h in bypass_str.lower().replace(' ', ';').split(';')]
+            for bypass in bypasses:
+                try:
+                    ipns = netaddr.IPGlob(bypass)
+                    State.noproxy.add(ipns)
+                    dprint("Noproxy += " + bypass)
+                except:
+                    State.noproxy_hosts.append(bypass)
+                    dprint("Noproxy hostname += " + bypass)
 
     dprint("Proxy mode = " + str(State.proxy_mode))
     State.proxy_refresh = time.time()
 
-def find_proxy_for_url(netloc):
-    pac_proxy = []
-    direct = -1
-    count = 0
-    if State.pac is not None:
-        for i in pypac.parser.parse_pac_value(
-                State.pac.find_proxy_for_url(netloc, netloc)):
-            if i != "DIRECT":
-                # Convert proxy port to int
-                proxy = urlparse.urlparse(i).netloc.split(":")
-                proxy[1] = int(proxy[1])
-                pac_proxy.append(tuple(proxy))
-            else:
-                direct = count
-            count += 1
-        dprint("pypac = " + str(pac_proxy), str(direct))
+def find_proxy_for_url(url):
+    proxy_str = ""
+    if State.proxy_mode == MODE_AUTO:
+        proxy_str = winhttp_find_proxy_for_url(url, autodetect=True)
 
-    return pac_proxy, direct
+    elif State.proxy_mode == MODE_PAC:
+        pac = State.pac
+        if "file://" in State.pac:
+            host = State.config.get("proxy", "listen") or "localhost"
+            port = State.config.getint("proxy", "port")
+            pac = "http://%s:%d/PACFile.pac" % (host, port)
+            dprint("PAC URL is local: " + pac)
+        proxy_str = winhttp_find_proxy_for_url(url, pac_url=pac)
+
+    dprint("Proxy found: " + proxy_str)
+    return proxy_str
+
+###
+# Parse settings and command line
 
 def parse_proxy(proxystrs):
     if not proxystrs:
@@ -1296,10 +1425,13 @@ def detach_console():
 ###
 # Startup
 
-if __name__ == "__main__":
+def main():
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
 
     parse_config()
 
     run_pool()
+
+if __name__ == "__main__":
+    main()

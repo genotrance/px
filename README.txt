@@ -28,10 +28,15 @@ Installation
 
 Px can be obtained in multiple ways:-
 
-- Download the latest binary ZIP from the releases page:
+Download the latest binary ZIP from the releases page:
     https://github.com/genotrance/px/releases
 
-- Download a source ZIP of the latest release from above link.
+Once downloaded, extract to a folder of choice and use the --save and --install
+commands as documented below.
+
+If Python is already available, Px can be run from source:-
+
+- Download a source ZIP of the latest release from above link
 
 - Clone the latest source:
     git clone https://github.com/genotrance/px
@@ -39,10 +44,20 @@ Px can be obtained in multiple ways:-
 - Download the latest source ZIP:
     https://github.com/genotrance/px/archive/master.zip
 
-Running the source directly requires Python and all dependencies installed.
+Running from source requires a few dependencies installed. Px along with all
+dependencies can be installed to the standard Python location using:-
+    python setup.py install
 
-Once downloaded, extract to a folder of choice and use the --save and --install
-commands as documented below.
+After installation, Px can be run on the command line like an executable and
+the --save and --install commands can be used per usual.
+    px --install
+
+If installed as above, Px can be uninstalled using pip:-
+    pip uninstall px-proxy
+
+Alternatively, all dependencies can be installed manually using pip and Px can
+be run as a standard Python script.
+    python px.py --help
 
 Configuration
 
@@ -197,8 +212,11 @@ Px doesn't have any GUI and runs completely in the background. It is distributed
 using Python 3.x and PyInstaller to have a self-contained executable but can
 also be run using a Python distribution with the following additional packages.
 
-  netaddr, psutil, pypac, winkerberos
+  netaddr, psutil, winkerberos
   futures on Python 2.x
+
+Px is tested with the latest releases of Python 2.7, 3.4, 3.5 and 3.6 using the
+Miniconda distribution.
 
 In order to make Px a capable proxy server, it is designed to run in multiple
 processes. The number of parallel workers or processes is configurable. However,
@@ -226,6 +244,8 @@ https://github.com/mongodb-labs/winkerberos/issues/19
 https://www.tillett.info/2013/05/13/how-to-create-a-windows-program-that-works-as-both-as-a-gui-and-console-application/
 http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
 https://stackoverflow.com/questions/42108978/what-is-the-priority-mechanism-in-proxy-settings-of-internet-explorer-browser
+https://gist.github.com/mgeeky/8960f4fa3f9462ae7bcd6db4ce42a8d3
+https://github.com/pypa/sampleproject/
 
 Thank you to the following contributors for their PRs and all issue submitters.
 

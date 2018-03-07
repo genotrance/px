@@ -10,13 +10,19 @@ with open(os.path.join(here, "px.py")) as f:
             version = line.strip().replace('"', '').split()[-1]
             break
 
+long_description = ""
+with open(os.path.join(here, "README.txt")) as f:
+    long_description = f.read().split("\n\n")[0].replace("\n", " ")
+
 setup(
     name = "px-proxy",
     version = version,
     description = "An HTTP proxy server to automatically authenticate through an NTLM proxy",
+    long_description = long_description,
     url = "https://github.com/genotrance/px",
     author = "Ganesh Viswanathan",
     author_email = "dev@genotrance.com",
+    platforms = "Windows",
     classifiers = [
         "Development Status :: 4 - Beta",
         "Environment :: Win32 (MS Windows)",
@@ -34,9 +40,14 @@ setup(
     ],
     keywords = "proxy ntlm kerberos",
     py_modules = ["px"],
-    install_requires = ["futures", "netaddr", "psutil", "winkerberos"],
+    install_requires = [
+        'futures;python_version<"3.0"',
+        "netaddr",
+        "psutil",
+        "winkerberos"
+    ],
     data_files = [
-        ("px-proxy", [
+        ("lib/site-packages/px-proxy", [
             "HISTORY.txt",
             "LICENSE.txt",
             "README.txt",

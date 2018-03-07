@@ -30,6 +30,7 @@ TBD
 - Improved memory and disk usage which had increased drastically after adding
   PAC support - #30
 - Added setup.py to install Px using pip - #24
+- Fixed bug where Px crashes on Windows startup - #31
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

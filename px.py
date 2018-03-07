@@ -17,29 +17,36 @@ import threading
 import time
 import traceback
 
+# Print if possible
+def pprint(*objs):
+    try:
+        pprint(objs)
+    except:
+        pass
+
 # Dependencies
 try:
     import concurrent.futures
 except ImportError:
-    print("Requires module futures")
+    pprint("Requires module futures")
     sys.exit()
 
 try:
     import netaddr
 except ImportError:
-    print("Requires module netaddr")
+    pprint("Requires module netaddr")
     sys.exit()
 
 try:
     import psutil
 except ImportError:
-    print("Requires module psutil")
+    pprint("Requires module psutil")
     sys.exit()
 
 try:
     import winkerberos
 except ImportError:
-    print("Requires module winkerberos")
+    pprint("Requires module winkerberos")
     sys.exit()
 
 # Python 2.x vs 3.x support
@@ -827,7 +834,7 @@ def run_pool():
             (State.config.get("proxy", "listen").strip(), State.config.getint("proxy", "port")), Proxy
         )
     except OSError as exc:
-        print(exc)
+        pprint(exc)
         return
 
     mainsock = httpd.socket
@@ -1028,10 +1035,10 @@ def parse_proxy(proxystrs):
             try:
                 pserver[1] = int(pserver[1])
             except ValueError:
-                print("Bad proxy server port: " + pserver[1])
+                pprint("Bad proxy server port: " + pserver[1])
                 sys.exit()
         else:
-            print("Bad proxy server definition: " + proxystr)
+            pprint("Bad proxy server definition: " + proxystr)
             sys.exit()
 
         if tuple(pserver) not in State.proxy_server:
@@ -1056,7 +1063,7 @@ def parse_ip_ranges(iprangesconfig):
                 ipns = netaddr.IPNetwork(iprange)
             ipranges.add(ipns)
         except:
-            print("Bad IP definition: %s" % iprangesconfig)
+            pprint("Bad IP definition: %s" % iprangesconfig)
             sys.exit()
     return ipranges
 
@@ -1080,7 +1087,7 @@ def cfg_int_init(section, name, default, override=False):
     try:
         val = int(val)
     except ValueError:
-        print("Invalid integer value for " + section + ":" + name)
+        pprint("Invalid integer value for " + section + ":" + name)
 
     State.config.set(section, name, str(val))
 
@@ -1095,7 +1102,7 @@ def cfg_float_init(section, name, default, override=False):
     try:
         val = float(val)
     except ValueError:
-        print("Invalid float value for " + section + ":" + name)
+        pprint("Invalid float value for " + section + ":" + name)
 
     State.config.set(section, name, str(val))
 
@@ -1115,7 +1122,7 @@ def cfg_str_init(section, name, default, proc=None, override=False):
 def save():
     with open(State.ini, "w") as cfgfile:
         State.config.write(cfgfile)
-    print("Saved config to " + State.ini + "\n")
+    pprint("Saved config to " + State.ini + "\n")
     with open(State.ini, "r") as cfgfile:
         sys.stdout.write(cfgfile.read())
 
@@ -1129,7 +1136,7 @@ def parse_config():
         attach_console()
 
     if "-h" in sys.argv or "--help" in sys.argv:
-        print(HELP)
+        pprint(HELP)
         sys.exit()
 
     # Load configuration file
@@ -1141,7 +1148,7 @@ def parse_config():
             if "--config=" in sys.argv[i]:
                 State.ini = val
                 if not os.path.exists(val) and "--save" not in sys.argv:
-                    print("Could not find config file: " + val)
+                    pprint("Could not find config file: " + val)
                     sys.exit()
     if os.path.exists(State.ini):
         State.config.read(State.ini)
@@ -1246,10 +1253,10 @@ def parse_config():
         load_proxy()
 
     if State.proxy_mode == MODE_NONE and not State.config.get("proxy", "noproxy"):
-        print("No proxy server or noproxy list defined")
+        pprint("No proxy server or noproxy list defined")
         sys.exit()
 
-    print("Serving at %s:%d proc %s" % (
+    pprint("Serving at %s:%d proc %s" % (
         State.config.get("proxy", "listen").strip(),
         State.config.getint("proxy", "port"),
         multiprocessing.current_process().name)
@@ -1298,9 +1305,9 @@ def quit(force=False):
         quit(True)
     else:
         if force:
-            print(" DONE")
+            pprint(" DONE")
         else:
-            print("Px is not running")
+            pprint("Px is not running")
 
     sys.exit()
 
@@ -1310,7 +1317,7 @@ def handle_exceptions(type, value, tb):
     tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % ("".join(lst[:-1]), lst[-1])
 
     if State.logger != None:
-        print(tracelog)
+        pprint(tracelog)
     else:
         sys.stderr.write(tracelog)
 
@@ -1353,9 +1360,9 @@ def install():
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_WRITE)
         winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ, get_script_cmd())
         winreg.CloseKey(runkey)
-        print("Px installed successfully")
+        pprint("Px installed successfully")
     else:
-        print("Px already installed")
+        pprint("Px already installed")
 
     sys.exit()
 
@@ -1364,9 +1371,9 @@ def uninstall():
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_WRITE)
         winreg.DeleteValue(runkey, "Px")
         winreg.CloseKey(runkey)
-        print("Px uninstalled successfully")
+        pprint("Px uninstalled successfully")
     else:
-        print("Px is not installed")
+        pprint("Px is not installed")
 
     sys.exit()
 

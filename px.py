@@ -317,7 +317,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         return False
 
-    def do_socket(self, xheaders=[], destination=None):
+    def do_socket(self, xheaders={}, destination=None):
         dprint("Entering")
 
         # Connect to proxy or destination

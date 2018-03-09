@@ -353,11 +353,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             hlower = header.lower()
             if hlower == "user-agent" and State.useragent != "":
                 ua = True
-                h = ("%s: %s\r\n" % (header, State.useragent)).encode("utf-8")
+                h = "%s: %s\r\n" % (header, State.useragent)
             else:
-                h = ("%s: %s\r\n" % (header, self.headers[header])).encode("utf-8")
+                h = "%s: %s\r\n" % (header, self.headers[header])
 
-            self.proxy_socket.send(h)
+            self.proxy_socket.send(h.encode("utf-8"))
             dprint("Sending %s" % h.strip())
 
             if hlower == "content-length":
@@ -379,7 +379,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         for header in xheaders:
             h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
             self.proxy_socket.send(h)
-            dprint("Sending extra %s" % h.strip())
+            if header.lower() != "proxy-authorization":
+                dprint("Sending extra %s" % h.strip())
+            else:
+                dprint("Sending extra %s: sanitized len(%d)" % (header, len(xheaders[header])))
         self.proxy_socket.send(b"\r\n")
 
         if self.command in ["POST", "PUT", "PATCH"]:
@@ -446,7 +449,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             name = nv[0].strip()
             value = nv[1].strip()
             headers.append((name, value))
-            dprint("Received header %s = %s" % (name, value))
+            if name.lower() != "proxy-authenticate":
+                dprint("Received %s: %s" % (name, value))
+            else:
+                dprint("Received %s: sanitized (%d)" % (name, len(value)))
 
             if name.lower() == "content-length":
                 cl = int(value)

@@ -19,7 +19,7 @@ import traceback
 # Print if possible
 def pprint(*objs):
     try:
-        print(objs)
+        print(*objs)
     except:
         pass
 

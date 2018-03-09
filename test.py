@@ -154,9 +154,9 @@ def runTest(test, python, count):
     cmd = "px "
     if python:
         port = getPyversion(python) * 10
-        cmd = python + " px.py --debug "
+        cmd = python + " px.py "
 
-    cmd += test[0] + " --port=" + str(port)
+    cmd += "--debug --uniqlog " + test[0] + " --port=" + str(port)
     testproc = test[1]
     ips = test[2]
 

@@ -162,7 +162,12 @@ Configuration:
   --debug  settings:log=
   Enable debug logging. default: 0
     Logs are written to working directory and over-written on startup
-    A log is automatically created if Px crashes for some reason""" % __version__
+    A log is automatically created if Px crashes for some reason
+
+  --uniqlog
+  Generate unique log file names
+    Prevents logs from being overwritten on subsequent runs. Also useful if
+    running multiple instances of Px""" % __version__
 
 # Proxy modes - source of proxy info
 MODE_NONE = 0
@@ -228,6 +233,8 @@ def dfile():
     name = multiprocessing.current_process().name
     if "--quit" in sys.argv:
         name = "quit"
+    if "--uniqlog" in sys.argv:
+        name = "%s-%f" % (name, time.time())
     logfile = os.path.join(os.path.dirname(get_script_path()), "debug-%s.log" % name)
     return logfile
 

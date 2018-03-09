@@ -183,6 +183,11 @@ Configuration:
     Logs are written to working directory and over-written on startup
     A log is automatically created if Px crashes for some reason
 
+  --uniqlog
+  Generate unique log file names
+    Prevents logs from being overwritten on subsequent runs. Also useful if
+    running multiple instances of Px
+
 Examples
 
   Use proxyserver.com:80 and allow requests from localhost only

@@ -34,6 +34,8 @@ TBD
 - Fixed issue of no debug output - #36
 - Ensure logs are generated where Px is instead of working directory and flushed
   immediately, quit should log in separate file and not overwrite MainProcess
+- Added --uniqlog to allow multiple instances of Px to run with separate log
+  destinations or to prevent overwriting logs on subsequent runs.
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

@@ -4,7 +4,6 @@ from __future__ import print_function
 
 __version__ = "0.4.0"
 
-import base64
 import ctypes
 import ctypes.wintypes
 import multiprocessing
@@ -20,7 +19,7 @@ import traceback
 # Print if possible
 def pprint(*objs):
     try:
-        pprint(objs)
+        print(objs)
     except:
         pass
 
@@ -218,7 +217,9 @@ class Log(object):
 
 def dprint(*objs):
     if State.logger != None:
-        print(multiprocessing.current_process().name + ": " + threading.current_thread().name + ": " + str(int(time.time())) + ": " + sys._getframe(1).f_code.co_name + ": ", end="")
+        print(multiprocessing.current_process().name + ": " +
+              threading.current_thread().name + ": " + str(int(time.time())) +
+              ": " + sys._getframe(1).f_code.co_name + ": ", end="")
         print(*objs)
         sys.stdout.flush()
 
@@ -250,7 +251,7 @@ def restore_stdout():
 class NtlmMessageGenerator:
     def __init__(self, proxy_type):
         spn = "NTLM" if proxy_type == "NTLM" else "HTTP@" + State.proxy_server[0][0]
-        status, self.ctx = winkerberos.authGSSClientInit(
+        _, self.ctx = winkerberos.authGSSClientInit(
             spn, gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
 
     def get_response(self, challenge=""):
@@ -799,13 +800,17 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
-        socketserver.TCPServer.__init__(self, server_address, RequestHandlerClass, bind_and_activate)
+        socketserver.TCPServer.__init__(self, server_address,
+                                        RequestHandlerClass, bind_and_activate)
 
         try:
             # Workaround bad thread naming code in Python 3.6+, fixed in master
-            self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=State.config.getint("settings", "threads"), thread_name_prefix="Thread")
+            self.pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=State.config.getint("settings", "threads"),
+                thread_name_prefix="Thread")
         except:
-            self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=State.config.getint("settings", "threads"))
+            self.pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=State.config.getint("settings", "threads"))
 
 def serve_forever(httpd):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -830,9 +835,8 @@ def start_worker(pipeout):
 
 def run_pool():
     try:
-        httpd = ThreadedTCPServer(
-            (State.config.get("proxy", "listen").strip(), State.config.getint("proxy", "port")), Proxy
-        )
+        httpd = ThreadedTCPServer((State.config.get("proxy", "listen").strip(),
+                                   State.config.getint("proxy", "port")), Proxy)
     except OSError as exc:
         pprint(exc)
         return
@@ -861,7 +865,7 @@ class WINHTTP_CURRENT_USER_IE_PROXY_CONFIG(ctypes.Structure):
                 ("lpszProxy", ctypes.wintypes.LPWSTR), # "1.2.3.4:5" if "Use the same proxy server for all protocols",
                                                        # else advanced "ftp=1.2.3.4:5;http=1.2.3.4:5;https=1.2.3.4:5;socks=1.2.3.4:5"
                 ("lpszProxyBypass", ctypes.wintypes.LPWSTR), # ";"-separated list, "Bypass proxy server for local addresses" adds "<local>"
-                ]
+               ]
 
 class WINHTTP_AUTOPROXY_OPTIONS(ctypes.Structure):
     _fields_ = [("dwFlags", ctypes.wintypes.DWORD),
@@ -896,7 +900,8 @@ WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3
 WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
 
 def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=True):
-    hInternet = ctypes.windll.winhttp.WinHttpOpen(ctypes.wintypes.LPCWSTR("Px"),
+    hInternet = ctypes.windll.winhttp.WinHttpOpen(
+        ctypes.wintypes.LPCWSTR("Px"),
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC)
     if not hInternet:
@@ -1311,9 +1316,9 @@ def quit(force=False):
 
     sys.exit()
 
-def handle_exceptions(type, value, tb):
+def handle_exceptions(extype, value, tb):
     # Create traceback log
-    lst = traceback.format_tb(tb, None) + traceback.format_exception_only(type, value)
+    lst = traceback.format_tb(tb, None) + traceback.format_exception_only(extype, value)
     tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % ("".join(lst[:-1]), lst[-1])
 
     if State.logger != None:
@@ -1333,9 +1338,9 @@ def get_script_path():
     if getattr(sys, "frozen", False) is False:
         # Script mode
         return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
-    else:
-        # Frozen mode
-        return sys.executable
+
+    # Frozen mode
+    return sys.executable
 
 def get_script_cmd():
     spath = get_script_path()
@@ -1348,7 +1353,7 @@ def check_installed():
     ret = True
     runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
     try:
-        value = winreg.QueryValueEx(runkey, "Px")
+        winreg.QueryValueEx(runkey, "Px")
     except:
         ret = False
     winreg.CloseKey(runkey)

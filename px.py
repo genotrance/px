@@ -346,8 +346,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         expect = False
         keepalive = False
         ua = False
-        cmdstr = ("%s %s %s\r\n" % (self.command, self.path, self.request_version)).encode("utf-8")
-        self.proxy_socket.send(cmdstr)
+        cmdstr = "%s %s %s\r\n" % (self.command, self.path, self.request_version)
+        self.proxy_socket.send(cmdstr.encode("utf-8"))
         dprint(cmdstr.strip())
         for header in self.headers:
             hlower = header.lower()
@@ -567,8 +567,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     ntlm_challenge = ""
                     for header in headers:
                         if header[0] == "Proxy-Authenticate" and proxy_type in header[1].upper():
-                            ntlm_challenge = header[1].split()[1]
-                            break
+                            h = header[1].split()
+                            if len(h) == 2:
+                                ntlm_challenge = h[1]
+                                break
 
                     if ntlm_challenge:
                         dprint("Challenged")
@@ -584,7 +586,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                         return resp, headers, body
                     else:
-                        dprint("Didn't get challenge, not NTLM proxy")
+                        dprint("Didn't get challenge, auth didn't work")
                 else:
                     dprint("No auth required cached")
             else:

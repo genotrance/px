@@ -212,6 +212,7 @@ class Log(object):
         self.flush()
     def flush(self):
         self.file.flush()
+        os.fsync(self.file.fileno())
         if self.stdout is not None:
             self.stdout.flush()
 
@@ -224,7 +225,11 @@ def dprint(*objs):
         sys.stdout.flush()
 
 def dfile():
-    return "debug-%s.log" % multiprocessing.current_process().name
+    name = multiprocessing.current_process().name
+    if "--quit" in sys.argv:
+        name = "quit"
+    logfile = os.path.join(os.path.dirname(get_script_path()), "debug-%s.log" % name)
+    return logfile
 
 def reopen_stdout():
     clrstr = "\r" + " " * 80 + "\r"

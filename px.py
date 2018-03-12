@@ -1420,7 +1420,7 @@ def attach_console():
             pid = -1
             break
 
-        if os.path.basename(p.cmdline()[0]).lower() in ["cmd", "cmd.exe", "powershell", "powershell.exe"]:
+        if os.path.basename(p.name()).lower() in ["cmd", "cmd.exe", "powershell", "powershell.exe"]:
             # Found it
             break
 

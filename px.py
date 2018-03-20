@@ -414,7 +414,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 line = self.proxy_fp.readline(State.max_line)
             try:
                 resp = int(line.split()[1])
-            except ValueError:
+            except (ValueError, IndexError):
                 if line == b"":
                     dprint("Client closed connection")
                     return 444, nobody
@@ -744,6 +744,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         port = 80
                     elif parse.scheme == "https":
                         port = 443
+                    elif parse.scheme == "ftp":
+                        port = 21
                 netloc = netloc + ":" + str(port)
 
             path = parse.path or "/"

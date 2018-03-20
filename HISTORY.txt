@@ -38,6 +38,8 @@ TBD
   destinations or to prevent overwriting logs on subsequent runs
 - Sanitize auth exchanges in generated logs for easy sharing in issues
 - Handle NTLM auth failure instead of crashing - #34
+- Add FTP port 21 for ftp:// requests - #39
+- Catch exception for issue #38
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

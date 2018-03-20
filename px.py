@@ -415,10 +415,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             try:
                 resp = int(line.split()[1])
             except (ValueError, IndexError):
+                dprint("Bad response %s" % line)
                 if line == b"":
                     dprint("Client closed connection")
-                    return 444, nobody
-                dprint("Bad response %s" % line)
+                    return 444, None, None
             if b"connection established" in line.lower() or resp == 204 or resp == 304:
                 nobody = True
             dprint("Response code: %d " % resp + str(nobody))

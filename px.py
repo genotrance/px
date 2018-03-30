@@ -460,7 +460,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     nobody = True
             elif name.lower() == "transfer-encoding" and value.lower() == "chunked":
                 chk = True
-            elif name.lower() == "proxy-connection" and value.lower() == "close":
+            elif name.lower() in ["proxy-connection", "connection"] and value.lower() == "close":
                 close = True
 
         # Data

@@ -219,22 +219,34 @@ Px is definitely a work in progress and any feedback or suggestions are welcome.
 
 ## Credits
 
-Px is based on code from all over the internet and especially acknowledges these sources:-
+Px is based on code from all over the internet and especially acknowledges these sources:
 
 http://stackoverflow.com/questions/2969481/ntlm-authentication-in-python
+
 http://www.oki-osk.jp/esc/python/proxy/
+
 http://stupidpythonideas.blogspot.com/2014/09/sockets-and-multiprocessing.html
+
 https://curl.haxx.se/mail/lib-2014-09/0070.html
+
 https://github.com/fl4re/curl/blob/master/lib/curl_sasl_sspi.c
+
 https://github.com/mongodb-labs/winkerberos/issues/19
+
 https://www.tillett.info/2013/05/13/how-to-create-a-windows-program-that-works-as-both-as-a-gui-and-console-application/
+
 http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
+
 https://stackoverflow.com/questions/42108978/what-is-the-priority-mechanism-in-proxy-settings-of-internet-explorer-browser
+
 https://gist.github.com/mgeeky/8960f4fa3f9462ae7bcd6db4ce42a8d3
+
 https://github.com/pypa/sampleproject/
 
 Thank you to the following contributors for their PRs and all issue submitters.
 
 https://github.com/ccbur
+
 https://github.com/McBane87
+
 https://github.com/jpjoux

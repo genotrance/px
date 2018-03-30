@@ -28,13 +28,16 @@ Once downloaded, extract to a folder of choice and use the `--save` and `--insta
 
 If Python is already available, Px can be run from source:
 
-- Install with pip - the Python package manager. This will download and install Px along with all dependencies. `pip install px-proxy`
+- Install with pip - the Python package manager. This will download and install Px along with all dependencies. 
+`pip install px-proxy`
 
 - Download a source ZIP of the latest release from above releases link
 
-- Clone the latest source: `git clone https://github.com/genotrance/px`
+- Clone the latest source:
+`git clone https://github.com/genotrance/px`
 
-- Download the latest source ZIP: `https://github.com/genotrance/px/archive/master.zip`
+- Download the latest source ZIP:
+`https://github.com/genotrance/px/archive/master.zip`
 
 Running from source requires a few dependencies installed. Px along with all
 dependencies can be installed to the standard Python location using: 

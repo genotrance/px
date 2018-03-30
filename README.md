@@ -69,7 +69,7 @@ There are a few other settings to tweak in the INI file but most are obvious.
 All settings can be specified on the command line for convenience. The INI file can also be created or updated from the command line using `--save`.
 
 The binary distribution of Px runs in the background once started and can be
-quit by running `px --quit`. When run directly using Python, use CTRL-C to quit.
+quit by running `px --quit`. When run directly using Python, use `CTRL-C` to quit.
 
 Px can also be setup to automatically run on startup with the --install flag.
 This is done by adding an entry into the Window registry which can be removed

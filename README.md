@@ -206,6 +206,7 @@ NOTE:
 Px doesn't have any GUI and runs completely in the background. It is distributed using Python 3.x and PyInstaller to have a self-contained executable but can also be run using a Python distribution with the following additional packages.
 
   `netaddr`, `psutil`, `winkerberos`
+  
   `futures` on Python 2.x
 
 Px is tested with the latest releases of Python 2.7, 3.4, 3.5 and 3.6 using the Miniconda distribution.

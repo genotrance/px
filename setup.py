@@ -11,8 +11,8 @@ with open(os.path.join(here, "px.py")) as f:
             break
 
 long_description = ""
-with open(os.path.join(here, "README.txt")) as f:
-    long_description = f.read().split("\n\n")[0].replace("\n", " ")
+with open(os.path.join(here, "README.md")) as f:
+    long_description = f.read().split("\n\n")[1].replace("\n", " ").split("? ")[1]
 
 setup(
     name = "px-proxy",
@@ -50,7 +50,7 @@ setup(
         ("lib/site-packages/px-proxy", [
             "HISTORY.txt",
             "LICENSE.txt",
-            "README.txt",
+            "README.md",
             "px.ico",
             "px.ini"
         ])

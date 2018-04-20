@@ -40,6 +40,7 @@ TBD
 - Handle NTLM auth failure instead of crashing - #34
 - Add FTP port 21 for ftp:// requests - #39
 - Catch exception for issue #38
+- Fix issue #44 - move from README.txt to README.md
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

@@ -1044,6 +1044,9 @@ def find_proxy_for_url(url):
             dprint("PAC URL is local: " + pac)
         proxy_str = winhttp_find_proxy_for_url(url, pac_url=pac)
 
+    # return the first one if we get a list back from the pac
+    proxy_str = proxy_str.split(';')[0]
+
     dprint("Proxy found: " + proxy_str)
     return proxy_str
 

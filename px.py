@@ -1051,6 +1051,11 @@ def find_proxy_for_url(url):
     # remove any fallback direct values as these won't work with parse_proxy later
     proxy_str = proxy_str.replace(',DIRECT','')
 
+    # handle edge case if the result is a list that starts with DIRECT just assume 
+    # everything should be direct as the string DIRECT is tested explicitly in get_destination
+    if proxy_str.startswith("DIRECT,"):
+        proxy_str = "DIRECT"
+
     dprint("Proxy found: " + proxy_str)
     return proxy_str
 

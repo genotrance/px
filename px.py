@@ -1048,6 +1048,9 @@ def find_proxy_for_url(url):
     # and later code uses commas
     proxy_str = proxy_str.replace(';',',')
 
+    # remove any fallback direct values as these won't work with parse_proxy later
+    proxy_str = proxy_str.replace(',DIRECT','')
+
     dprint("Proxy found: " + proxy_str)
     return proxy_str
 

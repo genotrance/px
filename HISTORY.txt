@@ -41,6 +41,10 @@ TBD
 - Add FTP port 21 for ftp:// requests - #39
 - Catch exception for issue #38
 - Fix issue #44 - move from README.txt to README.md
+- Fix issue #43 - fix PAC support using WINHTTP
+- Added documentation for #46
+- Include PR #48 to enable support for failover proxies received from PAC
+- Fix issue #51 - support for Windows 8 and below
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

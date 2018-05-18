@@ -2,14 +2,30 @@
 
 ## What is Px?
 Px is a HTTP(s) proxy server that allows applications to authenticate through
-an NTLM or Windows Kerberos authenticated proxy server, typically used in corporate deployments, without having to deal with the actual handshake. It is primarily designed to run on Windows systems and authenticates on behalf of the application using the currently logged in Windows user account.
+an NTLM or Windows Kerberos authenticated proxy server, typically used in
+corporate deployments, without having to deal with the actual handshake. It is
+primarily designed to run on Windows systems and authenticates on behalf of the
+application using the currently logged in Windows user account.
 
-Px is very similar to "NTLM Authorization Proxy Server" (http://ntlmaps.sourceforge.net/) and CNTLM (http://cntlm.sourceforge.net/) in that it sits between the corporate proxy and applications and offloads the authentication. The primary difference in Px is to use the currently logged in user's credentials to log in automatically rather than requiring the user to provide the username, password (hash) and domain information. This is accomplished by using Microsoft SSPI to generate the tokens and signatures required to authenticate with the proxy. The other advantage
-is that Px supports Kerberos authentication as well, which NTLMAPS and CNTLM do not.
+Px is very similar to "NTLM Authorization Proxy Server" [NTLMAPS](http://ntlmaps.sourceforge.net/)
+and [CNTLM](http://cntlm.sourceforge.net/) in that it sits between the corporate
+proxy and applications and offloads the authentication. The primary difference
+in Px is to use the currently logged in user's credentials to log in
+automatically rather than requiring the user to provide the username, password
+(hash) and domain information. This is accomplished by using Microsoft SSPI to
+generate the tokens and signatures required to authenticate with the proxy. The
+other advantage is that Px supports Kerberos authentication as well, which
+NTLMAPS and CNTLM do not.
 
-NTLMAPS and CNTLM were designed for non-Windows users stuck behind a corporate proxy. As a result, they require the user to provide the correct credentials to authenticate. On Windows, the user has already logged in with his credentials so Px is designed for Windows users who would like to use tools that aren't designed to deal with proxy authentication, without having to supply and maintain the credentials within Px.
+NTLMAPS and CNTLM were designed for non-Windows users stuck behind a corporate
+proxy. As a result, they require the user to provide the correct credentials to
+authenticate. On Windows, the user has already logged in with his credentials
+so Px is designed for Windows users who would like to use tools that aren't
+designed to deal with proxy authentication, without having to supply and
+maintain the credentials within Px.
 
-The following link from Microsoft provides a good starting point to understand how NTLM authentication works:
+The following link from Microsoft provides a good starting point to understand
+how NTLM authentication works:
 
   https://msdn.microsoft.com/en-us/library/dd925287.aspx
 
@@ -24,20 +40,25 @@ Px can be obtained in multiple ways:-
 Download the latest binary ZIP from the releases page:
 https://github.com/genotrance/px/releases
 
-Once downloaded, extract to a folder of choice and use the `--save` and `--install` commands as documented below.
+Once downloaded, extract to a folder of choice and use the `--save` and `--install`
+commands as documented below.
 
 If Python is already available, Px can be run from source:
 
-- Install with pip - the Python package manager. This will download and install Px along with all dependencies. 
-`pip install px-proxy`
+- Install with pip - the Python package manager. This will download and install
+  Px along with all dependencies. 
+
+  `pip install px-proxy`
 
 - Download a source ZIP of the latest release from above releases link
 
 - Clone the latest source:
-`git clone https://github.com/genotrance/px`
+
+  `git clone https://github.com/genotrance/px`
 
 - Download the latest source ZIP:
-`https://github.com/genotrance/px/archive/master.zip`
+
+  `https://github.com/genotrance/px/archive/master.zip`
 
 Running from source requires a few dependencies installed. Px along with all
 dependencies can be installed to the standard Python location using: 
@@ -47,26 +68,47 @@ dependencies can be installed to the standard Python location using:
 After installation, Px can be run on the command line like an executable and
 the `--save` and `--install` commands can be used per usual.
 
-`px --install`
+```
+px --proxy=proxy.server.com --save
+px --install
+````
 
-If installed as above, Px can be uninstalled using pip:
+NOTE: Command line parameters passed with `--install` are not saved for use on
+startup. The `--save` flag or manual editing of `px.ini` is required to provide
+configuration to Px on startup.
 
-`pip uninstall px-proxy`
+If installed, Px can be uninstalled using pip:
 
-Alternatively, all dependencies can be installed manually using pip and Px can be run as a standard Python script.
+```
+px --uninstall
+pip uninstall px-proxy
+```
 
-`python px.py --help`
+Alternatively, all dependencies can be installed manually using pip and Px can
+be run as a standard Python script.
+
+```
+pip install netaddr psutil winkerberos futures
+
+python px.py --help
+```
 
 ## Configuration
 
 Px requires only one piece of information in order to function - the server
-name and port of the proxy server. This needs to be configured in px.ini.
-If not specified, Px will check Internet Options for any proxy definitions and use them. Without this, Px will not work and exit immediately.
+name and port of the proxy server. This needs to be configured in px.ini. If not
+specified, Px will check Internet Options for any proxy definitions and use them.
+Without this, Px will not work and exit immediately.
 
-The noproxy capability allows Px to connect to hosts in the configured subnets directly, bypassing the proxy altogether. This allows clients to connect to hosts within the intranet without requiring additional configuration for each client or at the proxy. If noproxy is defined, the proxy is optional - this allows Px to run as a regular proxy full time if required.
+The noproxy capability allows Px to connect to hosts in the configured subnets
+directly, bypassing the proxy altogether. This allows clients to connect to
+hosts within the intranet without requiring additional configuration for each
+client or at the proxy. If noproxy is defined, the proxy is optional - this
+allows Px to run as a regular proxy full time if required.
 
 There are a few other settings to tweak in the INI file but most are obvious.
-All settings can be specified on the command line for convenience. The INI file can also be created or updated from the command line using `--save`.
+All settings can be specified on the command line for convenience. The INI file
+can also be created or updated from the command line using `--save`.
 
 The binary distribution of Px runs in the background once started and can be
 quit by running `px --quit`. When run directly using Python, use `CTRL-C` to quit.

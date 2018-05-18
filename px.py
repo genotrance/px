@@ -169,6 +169,13 @@ Configuration:
     Prevents logs from being overwritten on subsequent runs. Also useful if
     running multiple instances of Px""" % __version__
 
+# Windows version
+#  6.1 = Windows 7
+#  6.2 = Windows 8
+#  6.3 = Windows 8.1
+# 10.0 = Windows 10
+WIN_VERSION = float(str(sys.getwindowsversion().major) + "." + str(sys.getwindowsversion().minor))
+
 # Proxy modes - source of proxy info
 MODE_NONE = 0
 MODE_CONFIG = 1
@@ -903,7 +910,6 @@ class WINHTTP_PROXY_INFO(ctypes.Structure):
                 ("lpszProxyBypass", ctypes.wintypes.LPCWSTR), ]
 
 # Parameters for WinHttpOpen, http://msdn.microsoft.com/en-us/library/aa384098(VS.85).aspx
-WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0
 WINHTTP_NO_PROXY_NAME = 0
 WINHTTP_NO_PROXY_BYPASS = 0
 WINHTTP_FLAG_ASYNC = 0x10000000
@@ -917,14 +923,21 @@ WINHTTP_AUTO_DETECT_TYPE_DHCP = 0x00000001
 WINHTTP_AUTO_DETECT_TYPE_DNS_A = 0x00000002
 
 # dwAccessType values
+WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0
 WINHTTP_ACCESS_TYPE_NO_PROXY = 1
 WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3
 WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
 
 def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=True):
+    # Fix issue #51
+    ACCESS_TYPE = WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
+    if WIN_VERSION < 6.3:
+        ACCESS_TYPE = WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+
+    ctypes.windll.winhttp.WinHttpOpen.restype = ctypes.c_void_p
     hInternet = ctypes.windll.winhttp.WinHttpOpen(
         ctypes.wintypes.LPCWSTR("Px"),
-        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+        ACCESS_TYPE, WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC)
     if not hInternet:
         dprint("WinHttpOpen failed: " + str(ctypes.GetLastError()))
@@ -945,6 +958,10 @@ def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=Tr
 
     proxy_info = WINHTTP_PROXY_INFO()
 
+    # Fix issue #43
+    ctypes.windll.winhttp.WinHttpGetProxyForUrl.argtypes = [ctypes.c_void_p,
+        ctypes.wintypes.LPCWSTR, ctypes.POINTER(WINHTTP_AUTOPROXY_OPTIONS),
+        ctypes.POINTER(WINHTTP_PROXY_INFO)]
     ok = ctypes.windll.winhttp.WinHttpGetProxyForUrl(hInternet, ctypes.wintypes.LPCWSTR(url),
             ctypes.byref(autoproxy_options), ctypes.byref(proxy_info))
     if not ok:
@@ -957,7 +974,7 @@ def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=Tr
         if not proxy_info.lpszProxy:
             dprint('WinHttpGetProxyForUrl named proxy without name')
             return ""
-        return proxy_info.lpszProxy.replace(' ', ',') # Note: We only see the first!
+        return proxy_info.lpszProxy.replace(" ", ",").replace(";", ",").replace(",DIRECT", "") # Note: We only see the first!
     if proxy_info.dwAccessType == WINHTTP_ACCESS_TYPE_NO_PROXY:
         return "DIRECT"
 
@@ -1044,15 +1061,9 @@ def find_proxy_for_url(url):
             dprint("PAC URL is local: " + pac)
         proxy_str = winhttp_find_proxy_for_url(url, pac_url=pac)
 
-    # change it to comma seperated as pac returns semicolon seperated
-    # and later code uses commas
-    proxy_str = proxy_str.replace(';',',')
-
-    # remove any fallback direct values as these won't work with parse_proxy later
-    proxy_str = proxy_str.replace(',DIRECT','')
-
-    # handle edge case if the result is a list that starts with DIRECT just assume 
-    # everything should be direct as the string DIRECT is tested explicitly in get_destination
+    # Handle edge case if the result is a list that starts with DIRECT. Assume
+    # everything should be direct as the string DIRECT is tested explicitly in
+    # get_destination
     if proxy_str.startswith("DIRECT,"):
         proxy_str = "DIRECT"
 

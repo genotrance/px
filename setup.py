@@ -44,6 +44,7 @@ setup(
         'futures;python_version<"3.0"',
         "netaddr",
         "psutil",
+        "pywin32",
         "winkerberos"
     ],
     data_files = [

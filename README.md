@@ -88,7 +88,7 @@ Alternatively, all dependencies can be installed manually using pip and Px can
 be run as a standard Python script.
 
 ```
-pip install netaddr psutil winkerberos futures
+pip install netaddr psutil pywin32 winkerberos futures
 
 python px.py --help
 ```

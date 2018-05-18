@@ -4,6 +4,7 @@ from __future__ import print_function
 
 __version__ = "0.4.0"
 
+import base64
 import ctypes
 import ctypes.wintypes
 import multiprocessing
@@ -40,6 +41,13 @@ try:
     import psutil
 except ImportError:
     pprint("Requires module psutil")
+    sys.exit()
+
+try:
+    import pywintypes
+    import sspi
+except ImportError:
+    pprint("Requires module pywin32")
     sys.exit()
 
 try:
@@ -269,11 +277,37 @@ def restore_stdout():
 
 class NtlmMessageGenerator:
     def __init__(self, proxy_type):
-        spn = "NTLM" if proxy_type == "NTLM" else "HTTP@" + State.proxy_server[0][0]
-        _, self.ctx = winkerberos.authGSSClientInit(
-            spn, gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
+        if proxy_type == "NTLM":
+            self.ctx = sspi.ClientAuth("NTLM", os.environ.get("USERNAME"), scflags=0)
+            self.get_response = self.get_response_sspi
+        else:
+            _, self.ctx = winkerberos.authGSSClientInit("HTTP@" + State.proxy_server[0][0],
+                gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
+            self.get_response = self.get_response_wkb
 
-    def get_response(self, challenge=""):
+    def get_response_sspi(self, challenge=None):
+        dprint("pywin32 SSPI")
+        if challenge:
+            try:
+                challenge = base64.decodebytes(challenge.encode("utf-8"))
+            except AttributeError:
+                challenge = base64.decodestring(challenge)
+        output_buffer = None
+        try:
+            error_msg, output_buffer = self.ctx.authorize(challenge)
+        except pywintypes.error:
+            traceback.print_exc(file=sys.stdout)
+            return None
+
+        response_msg = output_buffer[0].Buffer
+        try:
+            response_msg = base64.encodebytes(response_msg.encode("utf-8"))
+        except AttributeError:
+            response_msg = base64.encodestring(response_msg)
+        response_msg = response_msg.decode("utf-8").replace('\012', '')
+        return response_msg
+
+    def get_response_wkb(self, challenge=""):
         dprint("winkerberos SSPI")
         try:
             winkerberos.authGSSClientStep(self.ctx, challenge)

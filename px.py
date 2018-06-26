@@ -1359,7 +1359,7 @@ def parse_config():
     if "proxy" not in State.config.sections():
         State.config.add_section("proxy")
 
-    cfg_str_init("proxy", "server", "", parse_proxy)
+    cfg_str_init("proxy", "server", "")
     cfg_int_init("proxy", "port", "3128")
     cfg_str_init("proxy", "listen", "127.0.0.1")
     cfg_str_init("proxy", "allow", "*.*.*.*", parse_allow)
@@ -1388,7 +1388,7 @@ def parse_config():
         if "=" in sys.argv[i]:
             val = sys.argv[i].split("=")[1]
             if "--proxy=" in sys.argv[i] or "--server=" in sys.argv[i]:
-                cfg_str_init("proxy", "server", val, parse_proxy, True)
+                cfg_str_init("proxy", "server", val, None, True)
             elif "--listen=" in sys.argv[i]:
                 cfg_str_init("proxy", "listen", val, None, True)
             elif "--port=" in sys.argv[i]:
@@ -1439,6 +1439,8 @@ def parse_config():
             # Purge allow rules
             dprint("Turning allow off")
             cfg_str_init("proxy", "allow", "", parse_allow, True)
+
+    State.proxy_server = parse_proxy(State.config.get("proxy", "server"))
 
     if "--install" in sys.argv:
         install()

@@ -370,7 +370,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             return True
 
         self.proxy_socket = None
-        dests = self.proxy_servers if destination is None else [destination]
+        dests = list(self.proxy_servers) if destination is None else [destination]
         for dest in dests:
             dprint("New connection: " + str(dest))
             proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -381,6 +381,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 break
             except Exception as e:
                 dprint("Connect failed: %s" % e)
+                # move a non reachable proxy to the end of the proxy list;
+                if len(self.proxy_servers) > 1:
+                    # append first and then remove, this should ensure thread safety with
+                    # manual configurated proxies (in this case self.proxy_servers references the
+                    # shared State.proxy_server)
+                    self.proxy_servers.append(dest)
+                    self.proxy_servers.remove(dest)
 
         if self.proxy_socket is not None:
             return True

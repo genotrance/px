@@ -915,6 +915,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 ipport = netloc.split(":")
                 ipport[1] = int(ipport[1])
                 dprint("Direct connection from PAC")
+                self.path = path
                 return tuple(ipport)
 
             if proxy_str:

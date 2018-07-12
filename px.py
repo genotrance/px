@@ -251,9 +251,7 @@ def dprint(*objs):
         try:
             print(multiprocessing.current_process().name + ": " +
                   threading.current_thread().name + ": " + str(int(time.time())) +
-                  ": " + sys._getframe(1).f_code.co_name + ": ", end="")
-            print(*objs)
-            sys.stdout.flush()
+                  ": " + sys._getframe(1).f_code.co_name + ": ", *objs, flush=True)
         finally:
             State.logger_lock.release()
 
@@ -572,13 +570,16 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Connect to proxy
         if not hasattr(self, "proxy_address"):
             if not self.do_socket_connect():
-                return 408, None, None
+                return 408, None, None, None
 
-        # New proxy, don't know type yet
-        # Do locking to avoid updating State.proxy_type simultaneously by multiple threads
         State.proxy_type_lock.acquire()
         try:
-            if self.proxy_address not in State.proxy_type:
+            # Read State.proxy_type only once and use value for function return if it is not None;
+            # State.proxy_type should only be read here to avoid getting None after successfully
+            # identifying the proxy type if another thread clears it with load_proxy
+            proxy_type = State.proxy_type.get(self.proxy_address)
+            if proxy_type is None:
+                # New proxy, don't know type yet
                 dprint("Searching proxy type")
                 resp, headers, body = self.do_socket()
 
@@ -587,21 +588,26 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     if header[0] == "Proxy-Authenticate":
                         proxy_auth += header[1] + " "
 
-                if "NTLM" in proxy_auth.upper():
-                    State.proxy_type[self.proxy_address] = "NTLM"
-                elif "KERBEROS" in proxy_auth.upper():
-                    State.proxy_type[self.proxy_address] = "KERBEROS"
-                elif "NEGOTIATE" in proxy_auth.upper():
-                    State.proxy_type[self.proxy_address] = "NEGOTIATE"
+                    if "NTLM" in proxy_auth.upper():
+                        proxy_type = "NTLM"
+                    elif "KERBEROS" in proxy_auth.upper():
+                        proxy_type = "KERBEROS"
+                    elif "NEGOTIATE" in proxy_auth.upper():
+                        proxy_type = "NEGOTIATE"
+
+                if proxy_type is not None:
+                    # Writing State.proxy_type only once but use local variable as return value to avoid
+                    # losing the query result (for the current request) by clearing State.proxy_type in load_proxy
+                    State.proxy_type[self.proxy_address] = proxy_type
 
                 dprint("Auth mechanisms: " + proxy_auth)
-                dprint("Selected: " + str(State.proxy_type))
+                dprint("Selected: " + str(self.proxy_address) + ": " + str(proxy_type))
 
-                return resp, headers, body
+                return resp, headers, body, proxy_type
+
+            return 407, None, None, proxy_type
         finally:
             State.proxy_type_lock.release()
-
-        return 407, None, None
 
     def do_transaction(self):
         dprint("Entering")
@@ -611,11 +617,12 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             dprint("Skipping NTLM proxying")
             resp, headers, body = self.do_socket(destination=ipport)
         elif ipport:
-            # Get proxy type if not already
-            resp, headers, body = self.do_proxy_type()
+            # Get proxy type directly from do_proxy_type instead by accessing State.proxy_type do avoid
+            # a race condition with clearing State.proxy_type in load_proxy which sometimes led to a proxy type
+            # of None (clearing State.proxy_type in one thread was done after another thread's do_proxy_type but
+            # before accessing State.proxy_type in the second thread)
+            resp, headers, body, proxy_type = self.do_proxy_type()
             if resp == 407:
-                # Access globally shared variable State.proxy_type only once -> no locking required
-                proxy_type = State.proxy_type.get(self.proxy_address)
                 # Unknown auth mechanism
                 if proxy_type is None:
                     dprint("Unknown auth mechanism expected")
@@ -790,8 +797,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                             data = i.recv(4096)
                             if data:
-                                dlen = len(data)
-                                cl += dlen
+                                cl += len(data)
                                 # Prepare data to send it later in the outs section
                                 wdata.append(data)
                                 if out not in outs:
@@ -1192,12 +1198,7 @@ def load_proxy():
         State.proxy_server = proxy_servers
 
         # Clear proxy types on proxy server update
-        # As proxy types are updated in another method too locking is needed
-        State.proxy_type_lock.acquire()
-        try:
-            State.proxy_type = {}
-        finally:
-            State.proxy_type_lock.release()
+        State.proxy_type = {}
 
     finally:
         State.proxy_mode_lock.release()

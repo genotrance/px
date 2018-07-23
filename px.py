@@ -251,7 +251,9 @@ def dprint(*objs):
         try:
             print(multiprocessing.current_process().name + ": " +
                   threading.current_thread().name + ": " + str(int(time.time())) +
-                  ": " + sys._getframe(1).f_code.co_name + ": ", *objs, flush=True)
+                  ": " + sys._getframe(1).f_code.co_name + ": ", end="")
+            print(*objs)
+            sys.stdout.flush()
         finally:
             State.logger_lock.release()
 

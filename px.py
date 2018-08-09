@@ -1564,7 +1564,7 @@ def get_script_path():
 
 def get_script_cmd():
     spath = get_script_path()
-    if spath != sys.executable:
+    if os.path.splitext(spath)[1].lower() == ".py":
         return sys.executable + ' "%s"' % spath
 
     return spath

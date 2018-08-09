@@ -47,6 +47,8 @@ TBD
 - Fix issue #51 - support for Windows 8 and below
 - Fix issue #34 by using pywin32 for NTLM and winkerberos for Kerberos since the
   latter doesn't work consistently for NTLM
+- Pulled threading improvements from PR #56
+- Improve message for issue #5
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

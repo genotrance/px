@@ -129,7 +129,10 @@ def run(base, port):
 
     return ret
 
-def runPxTest(cmd, testproc, ips, port):
+def runPxTest(cmd, testproc, ips, port, proxy):
+    global PROXY
+    PROXY = proxy
+
     pipe = subprocess.Popen("cmd /k start /wait /min " + cmd + " --port=" + str(port), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     ret = testproc(ips, port)
@@ -161,7 +164,7 @@ def runTest(test, python, count):
     ips = test[2]
 
     print("Test %d: \"" % count + test[0] + "\" on port " + str(port))
-    p = multiprocessing.Process(target=runPxTest, args=(cmd, testproc, ips, port))
+    p = multiprocessing.Process(target=runPxTest, args=(cmd, testproc, ips, port, PROXY))
     p.start()
 
     return p

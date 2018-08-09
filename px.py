@@ -1003,6 +1003,12 @@ def start_worker(pipeout):
     mainsock = socket.fromshare(pipeout.recv())
     httpd.socket = mainsock
 
+    pprint("Serving at %s:%d proc %s" % (
+        State.config.get("proxy", "listen").strip(),
+        State.config.getint("proxy", "port"),
+        multiprocessing.current_process().name)
+    )
+
     serve_forever(httpd)
 
 def run_pool():
@@ -1010,10 +1016,19 @@ def run_pool():
         httpd = ThreadedTCPServer((State.config.get("proxy", "listen").strip(),
                                    State.config.getint("proxy", "port")), Proxy)
     except OSError as exc:
-        pprint(exc)
+        if "attempt was made" in str(exc):
+            print("Px failed to start - port in use")
+        else:
+            pprint(exc)
         return
 
     mainsock = httpd.socket
+
+    pprint("Serving at %s:%d proc %s" % (
+        State.config.get("proxy", "listen").strip(),
+        State.config.getint("proxy", "port"),
+        multiprocessing.current_process().name)
+    )
 
     if hasattr(socket, "fromshare"):
         workers = State.config.getint("settings", "workers")
@@ -1471,11 +1486,6 @@ def parse_config():
         pprint("No proxy server or noproxy list defined")
         sys.exit()
 
-    pprint("Serving at %s:%d proc %s" % (
-        State.config.get("proxy", "listen").strip(),
-        State.config.getint("proxy", "port"),
-        multiprocessing.current_process().name)
-    )
 
     for section in State.config.sections():
         for option in State.config.options(section):

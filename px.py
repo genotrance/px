@@ -212,11 +212,25 @@ class State(object):
     max_line = 65536 + 1
 
     # Locks for thread synchronization;
-    # multiprocess sync isn't neccessary because State object is only shared by threads
-    # but every process has it's own State object
-    logger_lock = threading.Lock()
+    # multiprocess sync isn't neccessary because State object is only shared by
+    # threads but every process has it's own State object
     proxy_type_lock = threading.Lock()
     proxy_mode_lock = threading.Lock()
+
+class Response(object):
+    __slots__ = ["code", "length", "headers", "data", "body", "chunked", "close"]
+
+    def __init__(self, code=503):
+        self.code = code
+
+        self.length = 0
+
+        self.headers = []
+        self.data = None
+
+        self.body = False
+        self.chunked = False
+        self.close = False
 
 class Log(object):
     def __init__(self, name, mode):
@@ -243,19 +257,14 @@ class Log(object):
         if self.stdout is not None:
             self.stdout.flush()
 
-def dprint(*objs):
+def dprint(msg):
     if State.logger is not None:
         # Do locking to avoid mixing the output of different threads as there are
         # two calls to print which could otherwise interleave
-        State.logger_lock.acquire()
-        try:
-            print(multiprocessing.current_process().name + ": " +
-                  threading.current_thread().name + ": " + str(int(time.time())) +
-                  ": " + sys._getframe(1).f_code.co_name + ": ", end="")
-            print(*objs)
-            sys.stdout.flush()
-        finally:
-            State.logger_lock.release()
+        sys.stdout.write(
+            multiprocessing.current_process().name + ": " +
+            threading.current_thread().name + ": " + str(int(time.time())) +
+            ": " + sys._getframe(1).f_code.co_name + ": " + msg + "\n")
 
 def dfile():
     name = multiprocessing.current_process().name
@@ -399,13 +408,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         # Connect to proxy or destination
         if not self.do_socket_connect(destination):
-            return 408, None, None
+            return Response(408)
 
         # No chit chat on SSL
         if destination is not None and self.command == "CONNECT":
-            return  200, None, None
+            return Response(200)
 
-        cl = None
+        cl = 0
         chk = False
         expect = False
         keepalive = False
@@ -452,7 +461,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         if self.command in ["POST", "PUT", "PATCH"]:
             if not hasattr(self, "body"):
                 dprint("Getting body for POST/PUT/PATCH")
-                if cl != None:
+                if cl:
                     self.body = self.rfile.read(cl)
                 else:
                     self.body = self.rfile.read()
@@ -462,13 +471,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         self.proxy_fp = self.proxy_socket.makefile("rb")
 
-        resp = 503
-        nobody = False
-        headers = []
-        body = b""
+        resp = Response()
 
-        if self.command == "HEAD":
-            nobody = True
+        if self.command != "HEAD":
+            resp.body = True
 
         # Response code
         for i in range(2):
@@ -477,24 +483,22 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             if line == b"\r\n":
                 line = self.proxy_fp.readline(State.max_line)
             try:
-                resp = int(line.split()[1])
+                resp.code = int(line.split()[1])
             except (ValueError, IndexError):
                 dprint("Bad response %s" % line)
                 if line == b"":
                     dprint("Client closed connection")
-                    return 444, None, None
-            if b"connection established" in line.lower() or resp == 204 or resp == 304:
-                nobody = True
-            dprint("Response code: %d " % resp + str(nobody))
+                    return Response(444)
+            if (b"connection established" in line.lower() or
+                    resp.code == 204 or resp.code == 304):
+                resp.body = False
+            dprint("Response code: %d " % resp.code + str(resp.body))
 
             # Get response again if 100-Continue
-            if not (expect and resp == 100):
+            if not (expect and resp.code == 100):
                 break
 
         # Headers
-        cl = None
-        chk = False
-        close = False
         dprint("Reading response headers")
         while not State.exit:
             line = self.proxy_fp.readline(State.max_line).decode("utf-8")
@@ -502,8 +506,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 if self.proxy_socket:
                     self.proxy_socket.close()
                     self.proxy_socket = None
-                dprint("Proxy closed connection: %s" % resp)
-                return 444, None, None
+                dprint("Proxy closed connection: %s" % resp.code)
+                return Response(444)
             if line == "\r\n":
                 break
             nv = line.split(":", 1)
@@ -512,67 +516,29 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 continue
             name = nv[0].strip()
             value = nv[1].strip()
-            headers.append((name, value))
+            resp.headers.append((name, value))
             if name.lower() != "proxy-authenticate":
                 dprint("Received %s: %s" % (name, value))
             else:
                 dprint("Received %s: sanitized (%d)" % (name, len(value)))
 
             if name.lower() == "content-length":
-                cl = int(value)
-                if not cl:
-                    nobody = True
+                resp.length = int(value)
+                if not resp.length:
+                    resp.body = False
             elif name.lower() == "transfer-encoding" and value.lower() == "chunked":
-                chk = True
+                resp.chunked = True
+                resp.body = True
             elif name.lower() in ["proxy-connection", "connection"] and value.lower() == "close":
-                close = True
+                resp.close = True
 
-        # Data
-        dprint("Reading response data")
-        if not nobody:
-            if cl:
-                dprint("Content length %d" % cl)
-                body = self.proxy_fp.read(cl)
-            elif chk:
-                dprint("Chunked encoding")
-                while not State.exit:
-                    line = self.proxy_fp.readline(State.max_line).decode("utf-8").strip()
-                    try:
-                        csize = int(line.strip(), 16)
-                        dprint("Chunk size %d" % csize)
-                    except ValueError:
-                        dprint("Bad chunk size '%s'" % line)
-                        continue
-                    if csize == 0:
-                        dprint("No more chunks")
-                        break
-                    d = self.proxy_fp.read(csize)
-                    if len(d) < csize:
-                        dprint("Chunk doesn't match data")
-                        break
-                    body += d
-                headers.append(("Content-Length", str(len(body))))
-            else:
-                dprint("Not sure how much")
-                while not State.exit:
-                    time.sleep(0.1)
-                    d = self.proxy_fp.read(1024)
-                    if len(d) < 1024:
-                        break
-                    body += d
-
-        if close and self.proxy_socket:
-            dprint("Close proxy connection per header")
-            self.proxy_socket.close()
-            self.proxy_socket = None
-
-        return resp, headers, body
+        return resp
 
     def do_proxy_type(self):
         # Connect to proxy
         if not hasattr(self, "proxy_address"):
             if not self.do_socket_connect():
-                return 408, None, None, None
+                return Response(408), None
 
         State.proxy_type_lock.acquire()
         try:
@@ -583,10 +549,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             if proxy_type is None:
                 # New proxy, don't know type yet
                 dprint("Searching proxy type")
-                resp, headers, body = self.do_socket()
+                resp = self.do_socket()
 
                 proxy_auth = ""
-                for header in headers:
+                for header in resp.headers:
                     if header[0] == "Proxy-Authenticate":
                         proxy_auth += header[1] + " "
 
@@ -605,9 +571,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Auth mechanisms: " + proxy_auth)
                 dprint("Selected: " + str(self.proxy_address) + ": " + str(proxy_type))
 
-                return resp, headers, body, proxy_type
+                return resp, proxy_type
 
-            return 407, None, None, proxy_type
+            return Response(407), proxy_type
         finally:
             State.proxy_type_lock.release()
 
@@ -617,34 +583,36 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         ipport = self.get_destination()
         if ipport not in [False, True]:
             dprint("Skipping NTLM proxying")
-            resp, headers, body = self.do_socket(destination=ipport)
+            resp = self.do_socket(destination=ipport)
         elif ipport:
             # Get proxy type directly from do_proxy_type instead by accessing State.proxy_type do avoid
             # a race condition with clearing State.proxy_type in load_proxy which sometimes led to a proxy type
             # of None (clearing State.proxy_type in one thread was done after another thread's do_proxy_type but
             # before accessing State.proxy_type in the second thread)
-            resp, headers, body, proxy_type = self.do_proxy_type()
-            if resp == 407:
+            resp, proxy_type = self.do_proxy_type()
+            if resp.code == 407:
                 # Unknown auth mechanism
                 if proxy_type is None:
                     dprint("Unknown auth mechanism expected")
-                    return resp, headers, body
+                    return resp
 
                 # Generate auth message
                 ntlm = NtlmMessageGenerator(proxy_type, self.proxy_address[0])
                 ntlm_resp = ntlm.get_response()
                 if ntlm_resp is None:
                     dprint("Bad NTLM response")
-                    return 503, None, None
+                    return Response(503)
+
+                self.fwd_data(resp, flush=True)
 
                 # Send auth message
-                resp, headers, body = self.do_socket({
+                resp = self.do_socket({
                     "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
                 })
-                if resp == 407:
+                if resp.code == 407:
                     dprint("Auth required")
                     ntlm_challenge = ""
-                    for header in headers:
+                    for header in resp.headers:
                         if header[0] == "Proxy-Authenticate" and proxy_type in header[1].upper():
                             h = header[1].split()
                             if len(h) == 2:
@@ -656,14 +624,14 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         ntlm_resp = ntlm.get_response(ntlm_challenge)
                         if ntlm_resp is None:
                             dprint("Bad NTLM response")
-                            return 503, None, None
+                            return Response(503)
+
+                        self.fwd_data(resp, flush=True)
 
                         # Reply to challenge
-                        resp, headers, body = self.do_socket({
+                        resp = self.do_socket({
                             "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
                         })
-
-                        return resp, headers, body
                     else:
                         dprint("Didn't get challenge, auth didn't work")
                 else:
@@ -672,9 +640,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("No auth required")
         else:
             dprint("No proxy server specified and not in noproxy list")
-            return 501, None, None
+            return Response(501)
 
-        return resp, headers, body
+        return resp
 
     def do_HEAD(self):
         dprint("Entering")
@@ -684,40 +652,38 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         dprint("Done")
 
     def do_PAC(self):
-        resp = 404
-        headers = None
-        body = None
+        resp = Response(404)
         if State.proxy_mode == MODE_PAC and "file://" in State.pac:
             pac = file_url_to_local_path(State.pac)
             dprint(pac)
             try:
-                resp = 200
+                resp.code = 200
                 with open(pac) as p:
-                    body = p.read().encode("utf-8")
-                headers = [
-                    ("Content-Length", len(body)),
+                    resp.data = p.read().encode("utf-8")
+                    resp.body = True
+                resp.headers = [
+                    ("Content-Length", len(resp.data)),
                     ("Content-Type", "application/x-ns-proxy-autoconfig")
                 ]
             except:
                 traceback.print_exc(file=sys.stdout)
-                pass
 
-        return resp, headers, body
+        return resp
 
     def do_GET(self):
         dprint("Entering")
 
         dprint("Path = " + self.path)
         if self.path == "/PACFile.pac":
-            resp, headers, body = self.do_PAC()
+            resp = self.do_PAC()
         else:
-            resp, headers, body = self.do_transaction()
+            resp = self.do_transaction()
 
-        if resp >= 400:
-            dprint("Error %d" % resp)
-            self.send_error(resp)
+        if resp.code >= 400:
+            dprint("Error %d" % resp.code)
+            self.send_error(resp.code)
         else:
-            self.fwd_resp(resp, headers, body)
+            self.fwd_resp(resp)
 
         dprint("Done")
 
@@ -754,10 +720,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         cl = 0
         cs = 0
-        resp, headers, body = self.do_transaction()
-        if resp >= 400:
-            dprint("Error %d" % resp)
-            self.send_error(resp)
+        resp = self.do_transaction()
+        if resp.code >= 400:
+            dprint("Error %d" % resp.code)
+            self.send_error(resp.code)
         else:
             # Proxy connection may be already closed due to header (Proxy-)Connection: close
             # received from proxy -> forward this to the client
@@ -854,27 +820,78 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             dprint("Cleanup proxy connection")
             self.proxy_socket.close()
             self.proxy_socket = None
-        self.close_connection = True;
+        self.close_connection = True
 
         dprint("%d bytes read, %d bytes written" % (cl, cs))
 
         dprint("Done")
 
-    def fwd_resp(self, resp, headers, body):
-        dprint("Entering")
-        self.send_response(resp)
+    def fwd_data(self, resp, flush=False):
+        cl = resp.length
+        dprint("Reading response data")
+        if resp.body:
+            if cl:
+                dprint("Content length %d" % cl)
+                while cl > 0:
+                    if cl > 4096:
+                        l = 4096
+                        cl -= l
+                    else:
+                        l = cl
+                        cl = 0
+                    d = self.proxy_fp.read(l)
+                    if not flush:
+                        self.wfile.write(d)
+            elif resp.chunked:
+                dprint("Chunked encoding")
+                while not State.exit:
+                    line = self.proxy_fp.readline(State.max_line).decode("utf-8")
+                    if not flush:
+                        self.wfile.write(line)
+                    try:
+                        csize = int(line.strip(), 16)
+                    except ValueError:
+                        dprint("Bad chunk size '%s'" % line.strip())
+                        continue
+                    if csize == 0:
+                        dprint("No more chunks")
+                        break
+                    if not flush:
+                        d = self.proxy_fp.read(csize)
+                    self.wfile.write(d)
+                    if len(d) < csize:
+                        dprint("Chunk doesn't match data")
+                        break
+            elif resp.data is not None:
+                dprint("Sending data string")
+                if not flush:
+                    self.wfile.write(resp.data)
+            else:
+                dprint("Not sure how much")
+                while not State.exit:
+                    time.sleep(0.1)
+                    d = self.proxy_fp.read(1024)
+                    if not flush:
+                        self.wfile.write(d)
+                    if len(d) < 1024:
+                        break
 
-        for header in headers:
-            if header[0].lower() != "transfer-encoding":
-                dprint("Returning %s: %s" % (header[0], header[1]))
-                self.send_header(header[0], header[1])
+        if resp.close and self.proxy_socket:
+            dprint("Close proxy connection per header")
+            self.proxy_socket.close()
+            self.proxy_socket = None
+
+    def fwd_resp(self, resp):
+        dprint("Entering")
+        self.send_response(resp.code)
+
+        for header in resp.headers:
+            dprint("Returning %s: %s" % (header[0], header[1]))
+            self.send_header(header[0], header[1])
 
         self.end_headers()
 
-        try:
-            self.wfile.write(body)
-        except:
-            pass
+        self.fwd_data(resp)
 
         dprint("Done")
 
@@ -903,7 +920,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 path = path + "?" + parse.query
         dprint(netloc)
 
-        # Check destination for noproxy first, before doing any expensive stuff possibly involving connections
+        # Check destination for noproxy first, before doing any expensive stuff
+        # possibly involving connections
         if State.noproxy.size:
             addr = []
             spl = netloc.split(":", 1)
@@ -921,7 +939,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     self.path = path
                     return ipport
 
-        # Get proxy mode and servers straight from load_proxy to avoid threading issues
+        # Get proxy mode and servers straight from load_proxy to avoid
+        # threading issues
         (proxy_mode, self.proxy_servers) = load_proxy()
         if proxy_mode in [MODE_AUTO, MODE_PAC]:
             proxy_str = find_proxy_for_url(
@@ -984,6 +1003,21 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
             self.pool = concurrent.futures.ThreadPoolExecutor(
                 max_workers=State.config.getint("settings", "threads"))
 
+def print_banner():
+    pprint("Serving at %s:%d proc %s" % (
+        State.config.get("proxy", "listen").strip(),
+        State.config.getint("proxy", "port"),
+        multiprocessing.current_process().name)
+    )
+
+    if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
+        if State.config.getint("settings", "foreground") == 0:
+            detach_console()
+
+    for section in State.config.sections():
+        for option in State.config.options(section):
+            dprint(section + ":" + option + " = " + State.config.get(section, option))
+
 def serve_forever(httpd):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     try:
@@ -1003,11 +1037,7 @@ def start_worker(pipeout):
     mainsock = socket.fromshare(pipeout.recv())
     httpd.socket = mainsock
 
-    pprint("Serving at %s:%d proc %s" % (
-        State.config.get("proxy", "listen").strip(),
-        State.config.getint("proxy", "port"),
-        multiprocessing.current_process().name)
-    )
+    print_banner()
 
     serve_forever(httpd)
 
@@ -1024,11 +1054,7 @@ def run_pool():
 
     mainsock = httpd.socket
 
-    pprint("Serving at %s:%d proc %s" % (
-        State.config.get("proxy", "listen").strip(),
-        State.config.getint("proxy", "port"),
-        multiprocessing.current_process().name)
-    )
+    print_banner()
 
     if hasattr(socket, "fromshare"):
         workers = State.config.getint("settings", "workers")
@@ -1150,20 +1176,23 @@ def file_url_to_local_path(file_url):
     if len(path) > 2 and path[1] == ':':
         return path
 
-def load_proxy():
+def load_proxy(quiet=False):
     # Return if proxies specified in Px config
     if State.proxy_mode == MODE_CONFIG:
         return (State.proxy_mode, State.proxy_server)
 
-    # Do locking to avoid updating globally shared State object by multiple threads simultaneously
+    # Do locking to avoid updating globally shared State object by multiple
+    # threads simultaneously
     State.proxy_mode_lock.acquire()
     try:
         proxy_mode = State.proxy_mode
         proxy_servers = State.proxy_server
         # Check if need to refresh
         if (State.proxy_refresh is not None and
-             time.time() - State.proxy_refresh < State.config.getint("settings", "proxyreload")):
-            dprint("Skip proxy refresh")
+                time.time() - State.proxy_refresh <
+                State.config.getint("settings", "proxyreload")):
+            if not quiet:
+                dprint("Skip proxy refresh")
             return (proxy_mode, proxy_servers)
 
         # Start with clean proxy mode and server list
@@ -1174,14 +1203,16 @@ def load_proxy():
         ie_proxy_config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG()
         ok = ctypes.windll.winhttp.WinHttpGetIEProxyConfigForCurrentUser(ctypes.byref(ie_proxy_config))
         if not ok:
-            dprint(ctypes.GetLastError())
+            if not quiet:
+                dprint(ctypes.GetLastError())
         else:
             if ie_proxy_config.fAutoDetect:
                 proxy_mode = MODE_AUTO
             elif ie_proxy_config.lpszAutoConfigUrl:
                 State.pac = ie_proxy_config.lpszAutoConfigUrl
                 proxy_mode = MODE_PAC
-                dprint("AutoConfigURL = " + State.pac)
+                if not quiet:
+                    dprint("AutoConfigURL = " + State.pac)
             else:
                 # Manual proxy
                 proxies = []
@@ -1204,13 +1235,16 @@ def load_proxy():
                     try:
                         ipns = netaddr.IPGlob(bypass)
                         State.noproxy.add(ipns)
-                        dprint("Noproxy += " + bypass)
+                        if not quiet:
+                            dprint("Noproxy += " + bypass)
                     except:
                         State.noproxy_hosts.append(bypass)
-                        dprint("Noproxy hostname += " + bypass)
+                        if not quiet:
+                            dprint("Noproxy hostname += " + bypass)
 
         State.proxy_refresh = time.time()
-        dprint("Proxy mode = " + str(proxy_mode))
+        if not quiet:
+            dprint("Proxy mode = " + str(proxy_mode))
         State.proxy_mode = proxy_mode
         State.proxy_server = proxy_servers
 
@@ -1269,8 +1303,7 @@ def parse_proxy(proxystrs):
 
         if tuple(pserver) not in servers:
             servers.append(tuple(pserver))
-            
-    dprint(servers)
+
     return servers
 
 def parse_ip_ranges(iprangesconfig):
@@ -1463,7 +1496,6 @@ def parse_config():
                 (State.config.getint("proxy", "gateway") == 1 and
                  State.config.get("proxy", "allow") in ["*.*.*.*", "0.0.0.0/0"])):
             # Purge allow rules
-            dprint("Turning allow off")
             cfg_str_init("proxy", "allow", "", parse_allow, True)
 
     State.proxy_server = parse_proxy(State.config.get("proxy", "server"))
@@ -1480,20 +1512,11 @@ def parse_config():
     if State.proxy_server:
         State.proxy_mode = MODE_CONFIG
     else:
-        load_proxy()
+        load_proxy(quiet=True)
 
     if State.proxy_mode == MODE_NONE and not State.config.get("proxy", "noproxy"):
         pprint("No proxy server or noproxy list defined")
         sys.exit()
-
-
-    for section in State.config.sections():
-        for option in State.config.options(section):
-            dprint(section + ":" + option + " = " + State.config.get(section, option))
-
-    if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
-        if State.config.getint("settings", "foreground") == 0:
-            detach_console()
 
     socket.setdefaulttimeout(State.config.getfloat("settings", "socktimeout"))
 

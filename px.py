@@ -845,22 +845,28 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             elif resp.chunked:
                 dprint("Chunked encoding")
                 while not State.exit:
-                    line = self.proxy_fp.readline(State.max_line).decode("utf-8")
+                    line = self.proxy_fp.readline(State.max_line)
                     if not flush:
                         self.wfile.write(line)
-                    try:
-                        csize = int(line.strip(), 16)
-                    except ValueError:
-                        dprint("Bad chunk size '%s'" % line.strip())
-                        continue
-                    if csize == 0:
+                    line = line.decode("utf-8").strip()
+                    if not len(line):
+                        dprint("Blank chunk size")
+                        break
+                    else:
+                        try:
+                            csize = int(line, 16) + 2
+                            dprint("Chunk of size %d" % csize)
+                        except ValueError:
+                            dprint("Bad chunk size '%s'" % line)
+                            continue
+                    d = self.proxy_fp.read(csize)
+                    if not flush:
+                        self.wfile.write(d)
+                    if csize == 2:
                         dprint("No more chunks")
                         break
-                    if not flush:
-                        d = self.proxy_fp.read(csize)
-                    self.wfile.write(d)
                     if len(d) < csize:
-                        dprint("Chunk doesn't match data")
+                        dprint("Chunk size doesn't match data")
                         break
             elif resp.data is not None:
                 dprint("Sending data string")

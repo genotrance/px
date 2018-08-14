@@ -1,3 +1,5 @@
+[![Chat on Gitter](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/genotrance/px)
+
 # Px
 
 ## What is Px?
@@ -24,45 +26,36 @@ so Px is designed for Windows users who would like to use tools that aren't
 designed to deal with proxy authentication, without having to supply and
 maintain the credentials within Px.
 
-The following link from Microsoft provides a good starting point to understand
-how NTLM authentication works:
-
-  https://msdn.microsoft.com/en-us/library/dd925287.aspx
-
-And similarly for Kerberos (warning: long!)
-
-[https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc772815(v=ws.10)](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc772815(v=ws.10))
+Microsoft provides a good starting point to understand how NTLM [authentication](https://msdn.microsoft.com/en-us/library/dd925287.aspx)
+works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc772815(v=ws.10)) (warning: long!)
 
 ## Installation
 
 Px can be obtained in multiple ways:-
 
-Download the latest binary ZIP from the releases page:
-https://github.com/genotrance/px/releases
+- Download the latest binary ZIP from the [releases](https://github.com/genotrance/px/releases)
+  page. Once downloaded, extract to a folder of choice and use the `--save`
+  and `--install` commands as documented below.
 
-Once downloaded, extract to a folder of choice and use the `--save` and `--install`
-commands as documented below.
-
-If Python is already available, Px can be easily installed using the Python package
-manager `pip`:
-
-- This will download and install Px along with all dependencies.
+- If Python is already available, Px can be easily installed using the Python
+  package manager `pip`. This will download and install Px along with all
+  dependencies.
 
   - Latest: `pip install git+https://github.com/genotrance/px`
 
   - Stable: `pip install px-proxy`
 
-Px can also be run from source if Python is available:
+- Px can also be run from source if Python is available.
 
-- Download a source ZIP of the latest release from above releases link
+  - Download a source ZIP of the latest release from above releases link
 
-- Clone the latest source:
+  - Clone the latest source:
 
-  `git clone https://github.com/genotrance/px`
+    `git clone https://github.com/genotrance/px`
 
-- Download the latest source ZIP:
+  - Download the latest source ZIP:
 
-  `https://github.com/genotrance/px/archive/master.zip`
+    `https://github.com/genotrance/px/archive/master.zip`
 
 Running from source requires a few dependencies installed. Px along with all
 dependencies can be installed to the standard Python location using:
@@ -226,44 +219,66 @@ Configuration:
 
 ## Examples
 
-  Use `proxyserver.com:80` and allow requests from localhost only:
+Use `proxyserver.com:80` and allow requests from localhost only:
+
   `px --proxy=proxyserver.com:80`
 
-  Don't use any forward proxy at all, just log what's going on:
+Don't use any forward proxy at all, just log what's going on:
+
   `px --noproxy=0.0.0.0/0 --debug`
 
-  Allow requests from `localhost` and all locally assigned IP addresses. This is very useful for Docker for Windows and VMs in a NAT configuration because all requests originate from the host's IP:
+Allow requests from `localhost` and all locally assigned IP addresses. This
+is very useful for Docker for Windows and VMs in a NAT configuration because
+all requests originate from the host's IP:
+
   `px --proxy=proxyserver.com:80 --hostonly`
 
-  Allow requests from `localhost`, locally assigned IP addresses and the IPs
-  specified in the allow list outside the host:
+Allow requests from `localhost`, locally assigned IP addresses and the IPs
+specified in the allow list outside the host:
+
   `px --proxy=proxyserver:80 --hostonly --gateway --allow=172.*.*.*`
 
-  Allow requests from everywhere. Be careful, every client will use your login:
+Allow requests from everywhere. Be careful, every client will use your login:
+
   `px --proxy=proxyserver.com:80 --gateway`
 
-NOTE:
-  In Docker for Windows you need to set your proxy to `http://<your_ip>:3128` (or actual port Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
+NOTE: In Docker for Windows you need to set your proxy to `http://<your_ip>:3128`
+(or actual port Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
 
-  Workaround: `docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile`
+Workaround:
+
+`docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile`
 
 ## Dependencies
 
-Px doesn't have any GUI and runs completely in the background. It is distributed using Python 3.x and PyInstaller to have a self-contained executable but can also be run using a Python distribution with the following additional packages.
+Px doesn't have any GUI and runs completely in the background. It is distributed
+using Python 3.x and PyInstaller to have a self-contained executable but can
+also be run using a Python distribution with the following additional packages.
 
   `netaddr`, `psutil`, `winkerberos`
 
   `futures` on Python 2.x
 
-Px is tested with the latest releases of Python 2.7, 3.4, 3.5 and 3.6 using the Miniconda distribution.
+Px is tested with the latest releases of Python 2.7, 3.4, 3.5 and 3.6 using the
+Miniconda distribution.
 
-In order to make Px a capable proxy server, it is designed to run in multiple processes. The number of parallel workers or processes is configurable. However, this only works on Python 3.3+ since that's when support was added to share sockets across processes in Windows. On older versions of Python, Px will run multi-threaded but in a single process. The number of threads per process is also configurable.
+In order to make Px a capable proxy server, it is designed to run in multiple
+processes. The number of parallel workers or processes is configurable. However,
+this only works on Python 3.3+ since that's when support was added to share
+sockets across processes in Windows. On older versions of Python, Px will run
+multi-threaded but in a single process. The number of threads per process is
+also configurable.
 
 ## Feedback
 
-Px is definitely a work in progress and any feedback or suggestions are welcome. It is hosted on GitHub (https://github.com/genotrance/px) with an MIT license so issues, forks and PRs are most appreciated.
+Px is definitely a work in progress and any feedback or suggestions are welcome.
+It is hosted on [GitHub](https://github.com/genotrance/px) with an MIT license
+so issues, forks and PRs are most appreciated. Also join us on [Gitter](https://gitter.im/genotrance/px)
+to chat about Px.
 
 ## Credits
+
+Thank you to all [contributors](https://github.com/genotrance/px/graphs/contributors) for their PRs and all issue submitters.
 
 Px is based on code from all over the internet and especially acknowledges these sources:
 
@@ -288,11 +303,3 @@ https://stackoverflow.com/questions/42108978/what-is-the-priority-mechanism-in-p
 https://gist.github.com/mgeeky/8960f4fa3f9462ae7bcd6db4ce42a8d3
 
 https://github.com/pypa/sampleproject/
-
-Thank you to the following contributors for their PRs and all issue submitters.
-
-https://github.com/ccbur
-
-https://github.com/McBane87
-
-https://github.com/jpjoux

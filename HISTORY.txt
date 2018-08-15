@@ -52,6 +52,7 @@ TBD
 - Fix issue #57 - handle pip shim scenario during --install
 - Fix issue #47 and #52 by forwarding data as received
 - Fix issue #60 - chunked encoding transfer broken
+- Increasing default socktimeout to 20 seconds
 
 v0.3.0 - 2018-02-19
 - Fixed issue 9 - Added support for winkerberos to workaround pywin32 bug

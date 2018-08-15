@@ -155,7 +155,7 @@ Configuration:
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
   --socktimeout=  settings:socktimeout=
-  Timeout in seconds for connections before giving up. Valid float, default: 5
+  Timeout in seconds for connections before giving up. Valid float, default: 20
 
   --proxyreload=  settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60
@@ -1440,7 +1440,7 @@ def parse_config():
     cfg_int_init("settings", "workers", "2")
     cfg_int_init("settings", "threads", "5")
     cfg_int_init("settings", "idle", "30")
-    cfg_float_init("settings", "socktimeout", "5.0")
+    cfg_float_init("settings", "socktimeout", "20.0")
     cfg_int_init("settings", "proxyreload", "60")
     cfg_int_init("settings", "foreground", "0")
 

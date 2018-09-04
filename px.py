@@ -349,6 +349,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
     # Contains the proxy servers responsible for the url this Proxy instance (aka thread) serves
     proxy_servers = []
+    proxy_socket = None
 
     def handle_one_request(self):
         try:
@@ -375,10 +376,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
     def do_socket_connect(self, destination=None):
         # Already connected?
-        if hasattr(self, "proxy_socket") and self.proxy_socket is not None:
+        if self.proxy_socket is not None:
             return True
 
-        self.proxy_socket = None
         dests = list(self.proxy_servers) if destination is None else [destination]
         for dest in dests:
             dprint("New connection: " + str(dest))

@@ -1,4 +1,4 @@
-TBD
+v0.4.0 - 2018-09-04
 - Implemented #18 - support for multiple NTLM proxies that will be iterated
   through if connection fails
 - Included fix for allowing parent proxy to resolve hostname if not resolvable

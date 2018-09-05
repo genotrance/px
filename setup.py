@@ -12,7 +12,7 @@ with open(os.path.join(here, "px.py")) as f:
 
 long_description = ""
 with open(os.path.join(here, "README.md")) as f:
-    long_description = f.read().split("\n\n")[1].replace("\n", " ").split("? ")[1]
+    long_description = f.read().split("\n\n")[2].replace("\n", " ").split("? ")[1]
 
 setup(
     name = "px-proxy",

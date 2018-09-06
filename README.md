@@ -102,7 +102,7 @@ retrieved using Python keyring and needs to be setup directly in the backend.
 
 On Windows, Credential Manager is the backend and can be accessed as follows:
 
-    `Control Panel > User Accounts > Credential Manager > Windows Credentials`
+    Control Panel > User Accounts > Credential Manager > Windows Credentials
 
 Px looks for a generic credential with Px as the network address. More
 information on keyring backends can be found [here](https://pypi.org/project/keyring).

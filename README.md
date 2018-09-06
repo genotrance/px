@@ -4,27 +4,20 @@
 
 ## What is Px?
 Px is a HTTP(s) proxy server that allows applications to authenticate through
-an NTLM or Windows Kerberos authenticated proxy server, typically used in
-corporate deployments, without having to deal with the actual handshake. It is
-primarily designed to run on Windows systems and authenticates on behalf of the
-application using the currently logged in Windows user account.
+an NTLM or Kerberos proxy server, typically used in corporate deployments,
+without having to deal with the actual handshake. It is primarily designed to
+run on Windows systems and authenticates on behalf of the application using the
+currently logged in Windows user account.
 
-Px is very similar to "NTLM Authorization Proxy Server" [NTLMAPS](http://ntlmaps.sourceforge.net/)
-and [CNTLM](http://cntlm.sourceforge.net/) in that it sits between the corporate
-proxy and applications and offloads the authentication. The primary difference
-in Px is to use the currently logged in user's credentials to log in
-automatically rather than requiring the user to provide the username, password
-(hash) and domain information. This is accomplished by using Microsoft SSPI to
-generate the tokens and signatures required to authenticate with the proxy. The
-other advantage is that Px supports Kerberos authentication as well, which
-NTLMAPS and CNTLM do not.
+Px is similar to "NTLM Authorization Proxy Server" [NTLMAPS](http://ntlmaps.sourceforge.net/)
+and [Cntlm](http://cntlm.sourceforge.net/) in that it sits between the corporate
+proxy and applications and offloads authentication. The advantage is that Px is
+able to use the currently logged in user's credentials automatically without
+requiring any user supplied credentials. This is accomplished by using Microsoft
+SSPI to generate the tokens and signatures required to authenticate with the proxy.
 
-NTLMAPS and CNTLM were designed for non-Windows users stuck behind a corporate
-proxy. As a result, they require the user to provide the correct credentials to
-authenticate. On Windows, the user has already logged in with his credentials
-so Px is designed for Windows users who would like to use tools that aren't
-designed to deal with proxy authentication, without having to supply and
-maintain the credentials within Px.
+Px also supports Kerberos and works with user supplied credentials for cases
+where SSPI is not available.
 
 Microsoft provides a good starting point to understand how NTLM [authentication](https://msdn.microsoft.com/en-us/library/dd925287.aspx)
 works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc772815(v=ws.10)) (warning: long!)
@@ -85,7 +78,7 @@ Lastly, Px can be run as a standard Python script. Download the source as
 described above. Install all dependencies manually using pip and then run Px:
 
 ```
-pip install netaddr psutil pywin32 winkerberos futures
+pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos futures
 
 python px.py --help
 ```
@@ -102,6 +95,17 @@ directly, bypassing the proxy altogether. This allows clients to connect to
 hosts within the intranet without requiring additional configuration for each
 client or at the proxy. If noproxy is defined, the proxy is optional - this
 allows Px to run as a regular proxy full time if required.
+
+If SSPI is not available or not preferred, providing a `username` in `domain\username`
+format allows Px to authenticate as that user. The corresponding password is
+retrieved using Python keyring and needs to be setup directly in the backend.
+
+On Windows, Credential Manager is the backend and can be accessed as follows:
+
+    `Control Panel > User Accounts > Credential Manager > Windows Credentials`
+
+Px looks for a generic credential with Px as the network address. More
+information on keyring backends can be found [here](https://pypi.org/project/keyring).
 
 There are a few other settings to tweak in the INI file but most are obvious.
 All settings can be specified on the command line for convenience. The INI file
@@ -184,6 +188,16 @@ Configuration:
   --useragent=  proxy:useragent=
   Override or send User-Agent header on client's behalf
 
+  --username=  proxy:username=
+  Authentication to use when SSPI is unavailable. Format is domain\username
+  Service name "Px" and this username are used to retrieve the password using
+  Python keyring. Px only retrieves credentials and storage should be done
+  directly in the keyring backend.
+    On Windows, Credential Manager is the backed and can be accessed from
+    Control Panel > User Accounts > Credential Manager > Windows Credentials.
+    Create a generic credential with Px as the network address, this username
+    and corresponding password.
+
   --workers=  settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
 
@@ -255,7 +269,7 @@ Px doesn't have any GUI and runs completely in the background. It is distributed
 using Python 3.x and PyInstaller to have a self-contained executable but can
 also be run using a Python distribution with the following additional packages.
 
-  `netaddr`, `psutil`, `pywin32`, `winkerberos`
+  `keyring`, `netaddr`, `ntlm-auth`, `psutil`, `pywin32`, `winkerberos`
 
   `futures` on Python 2.x
 

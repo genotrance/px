@@ -56,6 +56,21 @@ except ImportError:
     pprint("Requires module winkerberos")
     sys.exit()
 
+try:
+    import ntlm_auth.ntlm
+except ImportError:
+    pprint("Requires module ntlm-auth")
+    sys.exit()
+
+try:
+    import keyring
+    import keyring.backends.Windows
+
+    keyring.set_keyring(keyring.backends.Windows.WinVaultKeyring())
+except ImportError:
+    pprint("Requires module keyring")
+    sys.exit()
+
 # Python 2.x vs 3.x support
 try:
     import configparser
@@ -145,6 +160,16 @@ Configuration:
   --useragent=  proxy:useragent=
   Override or send User-Agent header on client's behalf
 
+  --username=  proxy:username=
+  Authentication to use when SSPI is unavailable. Format is domain\\username
+  Service name "Px" and this username are used to retrieve the password using
+  Python keyring. Px only retrieves credentials and storage should be done
+  directly in the keyring backend.
+    On Windows, Credential Manager is the backed and can be accessed from
+    Control Panel > User Accounts > Credential Manager > Windows Credentials.
+    Create a generic credential with Px as the network address, this username
+    and corresponding password.
+
   --workers=  settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
 
@@ -194,6 +219,7 @@ MODE_MANUAL = 4
 class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
     config = None
+    domain = ""
     exit = False
     hostonly = False
     logger = None
@@ -206,6 +232,7 @@ class State(object):
     proxy_type = {}
     stdout = None
     useragent = ""
+    username = ""
 
     ini = "px.ini"
     max_disconnect = 3
@@ -297,24 +324,50 @@ def restore_stdout():
 ###
 # NTLM support
 
+def b64decode(val):
+    try:
+        return base64.decodebytes(val.encode("utf-8"))
+    except AttributeError:
+        return base64.decodestring(val)
+
+def b64encode(val):
+    try:
+        return base64.encodebytes(val.encode("utf-8"))
+    except AttributeError:
+        return base64.encodestring(val)
+
 class NtlmMessageGenerator:
     # use proxy server as parameter to use the one to which connecting was successful (doesn't need to be the first of the list)
     def __init__(self, proxy_type, proxy_server_address):
+        pwd = ""
+        if State.username:
+            pwd = keyring.get_password("Px", State.domain + "\\" + State.username)
+
         if proxy_type == "NTLM":
-            self.ctx = sspi.ClientAuth("NTLM", os.environ.get("USERNAME"), scflags=0)
-            self.get_response = self.get_response_sspi
+            if not pwd:
+                self.ctx = sspi.ClientAuth("NTLM", os.environ.get("USERNAME"), scflags=0)
+                self.get_response = self.get_response_sspi
+            else:
+                self.ctx = ntlm_auth.ntlm.NtlmContext(State.username, pwd, State.domain, "", ntlm_compatibility=3)
+                self.get_response = self.get_response_ntlm
         else:
+            principal = None
+            if pwd:
+                if State.domain:
+                    principal = (urlparse.quote(State.username) + "@" +
+                        urlparse.quote(State.domain) + ":" + urlparse.quote(pwd))
+                else:
+                    principal = urlparse.quote(State.username) + ":" + urlparse.quote(pwd)
+
             _, self.ctx = winkerberos.authGSSClientInit("HTTP@" + proxy_server_address,
-                gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
+                principal=principal, gssflags=0, mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
             self.get_response = self.get_response_wkb
+
 
     def get_response_sspi(self, challenge=None):
         dprint("pywin32 SSPI")
         if challenge:
-            try:
-                challenge = base64.decodebytes(challenge.encode("utf-8"))
-            except AttributeError:
-                challenge = base64.decodestring(challenge)
+            challenge = b64decode(challenge)
         output_buffer = None
         try:
             error_msg, output_buffer = self.ctx.authorize(challenge)
@@ -322,11 +375,7 @@ class NtlmMessageGenerator:
             traceback.print_exc(file=sys.stdout)
             return None
 
-        response_msg = output_buffer[0].Buffer
-        try:
-            response_msg = base64.encodebytes(response_msg.encode("utf-8"))
-        except AttributeError:
-            response_msg = base64.encodestring(response_msg)
+        response_msg = b64encode(output_buffer[0].Buffer)
         response_msg = response_msg.decode("utf-8").replace('\012', '')
         return response_msg
 
@@ -340,6 +389,14 @@ class NtlmMessageGenerator:
             return None
 
         return auth_req
+
+    def get_response_ntlm(self, challenge=""):
+        dprint("ntlm-auth")
+        if challenge:
+            challenge = b64decode(challenge)
+        response_msg = b64encode(self.ctx.step(challenge))
+        response_msg = response_msg.decode("utf-8").replace('\012', '')
+        return response_msg
 
 ###
 # Proxy handler
@@ -1343,6 +1400,14 @@ def parse_noproxy(noproxy):
 def set_useragent(useragent):
     State.useragent = useragent
 
+def set_username(username):
+    ud = username.split("\\")
+    if len(ud) == 2:
+        State.username = ud[1]
+        State.domain = ud[0]
+    else:
+        State.username = username
+
 def cfg_int_init(section, name, default, override=False):
     val = default
     if not override:
@@ -1432,6 +1497,7 @@ def parse_config():
     cfg_int_init("proxy", "hostonly", "0")
     cfg_str_init("proxy", "noproxy", "", parse_noproxy)
     cfg_str_init("proxy", "useragent", "", set_useragent)
+    cfg_str_init("proxy", "username", "", set_username)
 
     # [settings] section
     if "settings" not in State.config.sections():
@@ -1464,6 +1530,8 @@ def parse_config():
                 cfg_str_init("proxy", "noproxy", val, parse_noproxy, True)
             elif "--useragent=" in sys.argv[i]:
                 cfg_str_init("proxy", "useragent", val, set_useragent, True)
+            elif "--username=" in sys.argv[i]:
+                cfg_str_init("proxy", "username", val, set_username, True)
             else:
                 for j in ["workers", "threads", "idle", "proxyreload"]:
                     if "--" + j + "=" in sys.argv[i]:

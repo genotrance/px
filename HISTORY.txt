@@ -1,3 +1,7 @@
+TBD
+- Add support for issue #58 - authentication with user/password when SSPI is
+  unavailable or not preferred.
+
 v0.4.0 - 2018-09-04
 - Implemented #18 - support for multiple NTLM proxies that will be iterated
   through if connection fails

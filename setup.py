@@ -42,7 +42,9 @@ setup(
     py_modules = ["px"],
     install_requires = [
         'futures;python_version<"3.0"',
+        "keyring",
         "netaddr",
+        "ntlm-auth",
         "psutil",
         "pywin32",
         "winkerberos"

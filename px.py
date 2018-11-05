@@ -1175,6 +1175,9 @@ WINHTTP_ACCESS_TYPE_NO_PROXY = 1
 WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3
 WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
 
+# Error messages
+WINHTTP_ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT = 12167
+
 def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=True):
     # Fix issue #51
     ACCESS_TYPE = WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
@@ -1214,6 +1217,9 @@ def winhttp_find_proxy_for_url(url, autodetect=False, pac_url=None, autologon=Tr
     if not ok:
         error = ctypes.GetLastError()
         dprint("WinHttpGetProxyForUrl error %s" % error)
+        if error == WINHTTP_ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT:
+            dprint("Could not download PAC file, trying DIRECT instead")
+            return "DIRECT"
         return ""
 
     if proxy_info.dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY:

@@ -1,6 +1,8 @@
 TBD
 - Add support for issue #58 - authentication with user/password when SSPI is
   unavailable or not preferred.
+- Pull PR #68 to handle case where no longer behind PAC proxy
+- Fix minor bug in file:// PAC file handling
 
 v0.4.0 - 2018-09-04
 - Implemented #18 - support for multiple NTLM proxies that will be iterated

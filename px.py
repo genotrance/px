@@ -731,7 +731,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         dprint("Entering")
 
         dprint("Path = " + self.path)
-        if self.path == "/PACFile.pac":
+        if "/PxPACFile.pac" in self.path:
             resp = self.do_PAC()
         else:
             resp = self.do_transaction()
@@ -1335,7 +1335,7 @@ def find_proxy_for_url(url):
         if "file://" in State.pac:
             host = State.config.get("proxy", "listen") or "localhost"
             port = State.config.getint("proxy", "port")
-            pac = "http://%s:%d/PACFile.pac" % (host, port)
+            pac = "http://%s:%d/PxPACFile.pac" % (host, port)
             dprint("PAC URL is local: " + pac)
         proxy_str = winhttp_find_proxy_for_url(url, pac_url=pac)
 

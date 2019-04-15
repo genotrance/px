@@ -1345,6 +1345,9 @@ def find_proxy_for_url(url):
     if proxy_str.startswith("DIRECT,"):
         proxy_str = "DIRECT"
 
+    if proxy_str == "":
+        proxy_str = "DIRECT"
+
     dprint("Proxy found: " + proxy_str)
     return proxy_str
 

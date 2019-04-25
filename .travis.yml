@@ -21,7 +21,7 @@ install:
   - sudo apt-add-repository "deb https://dl.winehq.org/wine-builds/ubuntu/ trusty main"
   - sudo apt-get update && sudo apt-get install -y --install-recommends winehq-staging
 script:
-  - "./build"
+  - "./build.sh"
 deploy:
   provider: releases
   file: dist/px.exe

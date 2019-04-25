@@ -16,10 +16,10 @@ addons:
       - apt-transport-https
       - ca-certificates
 install:
-  - curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | apt-key add -
-  - dpkg --add-architecture i386
-  - apt-add-repository "deb https://dl.winehq.org/wine-builds/ubuntu/ trusty main"
-  - apt-get update && apt-get install -y --install-recommends winehq-staging
+  - curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | sudo apt-key add -
+  - sudo dpkg --add-architecture i386
+  - sudo apt-add-repository "deb https://dl.winehq.org/wine-builds/ubuntu/ trusty main"
+  - sudo apt-get update && sudo apt-get install -y --install-recommends winehq-staging
 script:
   - "./build"
 deploy:

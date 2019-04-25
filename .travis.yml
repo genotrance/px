@@ -10,7 +10,7 @@ addons:
     packages:
       - curl
       - software-properties-common
-      - gnupg1
+      - gnupg
       - unzip
       - git
       - apt-transport-https
@@ -18,7 +18,7 @@ addons:
 install:
   - curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | apt-key add -
   - dpkg --add-architecture i386
-  - apt-add-repository "deb https://dl.winehq.org/wine-builds/ubuntu/ bionic main"
+  - apt-add-repository "deb https://dl.winehq.org/wine-builds/ubuntu/ trusty main"
   - apt-get update && apt-get install -y --install-recommends winehq-staging
 script:
   - "./build"

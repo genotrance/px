@@ -1,0 +1,34 @@
+language: generic
+sudo: false
+dist: trusty
+branches:
+  only:
+    - master
+    - "/^[0-9].*?-[0-9]{8}$/"
+addons:
+  apt:
+    packages:
+      - curl
+      - software-properties-common
+      - gnupg1
+      - unzip
+      - git
+      - apt-transport-https
+      - ca-certificates
+install:
+  - curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | apt-key add -
+  - dpkg --add-architecture i386
+  - apt-add-repository "deb https://dl.winehq.org/wine-builds/ubuntu/ bionic main"
+  - apt-get update && apt-get install -y --install-recommends winehq-staging
+script:
+  - "./build"
+deploy:
+  provider: releases
+  file: dist/px.exe
+  skip_cleanup: true
+  api_key: "$GITHUB_TOKEN"
+  verbose: true
+  on:
+    tags: true
+env:
+  secure: kuUEhPj/INxg2xGm0AHdmuhBST5ObYZve6Lg3TsiJk9LnVb0iyZV2gBrQ7m86Q5/DMDqPp3e8XB5GBm0V9Iu+PzQgNp6Y770vQ2866bv7PK+GicGiKR/LPFwXoMFeQtVOBuOpopyplZV8PeLEkMQtlQAQjyPqoxAR7MY7Mpo5tyrwnHv0PIzze0FFpdzZ7kQf40pYipvX2WuzssIiwijzSMHwzcGHAYf2GLvH1N1K6PzNIbNLH5jT1O7Xcf4y/nQI4274NdGjz4O2635AHNf/rKOwajCJnv/f08ZKZTmIVbb7C0ApeUojBm0Zed/1nU94j70UIKZ95iZvRoQ/sCQEAH7ybwsLNryt3xyJVreRUVyFRBfoMTMDlussyo6j5KiC5UiAfMq+wca/f0sWMIr2nWogWcF/gCl4289xqN4Olb2VjDOaeqG1pTBkVnitJg1x0RElrX4rExvLd2kYPLo/SefL1Kah8fizFmT+b+5ZXwbQ19bwlj+5BiGPyx5UfLcqY7rY3vHXpR62JJzyHvR6YzeDEfIcoaHc6c6Sl0u7V3x5Gjci7ScBDZJRLjXLRpmmgiz+gKscfN3rAreQy6Yq/cyLt6XcfkmHkiOMkawEnv+AC9kIXyJ224NlpxSShqJPaB/mqkrPkW88wbGZ9SKCk/Rp0zBNpaynZ0kMab8LPo=

@@ -51,3 +51,6 @@ debug-*
 .vscode
 testrun
 *.egg-info
+
+build
+px.spec

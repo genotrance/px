@@ -619,6 +619,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         proxy_type = "KERBEROS"
                     elif "NEGOTIATE" in proxy_auth.upper():
                         proxy_type = "NEGOTIATE"
+                    elif "BASIC" in proxy_auth.upper():
+                        proxy_type = "BASIC"
 
                 if proxy_type is not None:
                     # Writing State.proxy_type only once but use local variable as return value to avoid
@@ -654,45 +656,77 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     return resp
 
                 # Generate auth message
-                ntlm = NtlmMessageGenerator(proxy_type, self.proxy_address[0])
-                ntlm_resp = ntlm.get_response()
-                if ntlm_resp is None:
-                    dprint("Bad NTLM response")
-                    return Response(503)
+                if proxy_type == "BASIC":
+                    if not State.username:
+                        dprint("No credentials specified, cannot authorize")
+                        return resp
 
-                self.fwd_data(resp, flush=True)
+                    # Domain has no function here. Just retrieve password via username only.
+                    pwd = keyring.get_password("Px", State.username)
 
-                # Send auth message
-                resp = self.do_socket({
-                    "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
-                })
-                if resp.code == 407:
-                    dprint("Auth required")
-                    ntlm_challenge = ""
-                    for header in resp.headers:
-                        if header[0] == "Proxy-Authenticate" and proxy_type in header[1].upper():
-                            h = header[1].split()
-                            if len(h) == 2:
-                                ntlm_challenge = h[1]
-                                break
+                    # Colons are forbidden in usernames and passwords for basic auth. But since this can happen
+                    # very easily, we make a special check just for colons so people immediately understand that and
+                    # don"t have to look up other resources.
+                    if ":" in State.username or ":" in pwd:
+                        dprint("Credentials contain invalid colon character")
+                        return resp
 
-                    if ntlm_challenge:
-                        dprint("Challenged")
-                        ntlm_resp = ntlm.get_response(ntlm_challenge)
-                        if ntlm_resp is None:
-                            dprint("Bad NTLM response")
-                            return Response(503)
+                    # Additionally check for invalid control characters as to RFC5234 Appendix B.1 (section CTL)
+                    illegal_control_characters = "".join(chr(i) for i in range(0x20)) + "\u007F"
 
-                        self.fwd_data(resp, flush=True)
+                    if any(char in State.username or char in pwd for char in illegal_control_characters):
+                        dprint("Credentials contain invalid characters. Following character codes are forbidden: %s" %
+                               ", ".join("0x" + "%x" % ord(char) for char in illegal_control_characters))
+                        return resp
 
-                        # Reply to challenge
-                        resp = self.do_socket({
-                            "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
-                        })
-                    else:
-                        dprint("Didn't get challenge, auth didn't work")
+                    # This base64 function appends a newline. Remove it again!
+                    proxy_token = b64encode("%s:%s" % (State.username, pwd))[:-1].decode()
+
+                    self.fwd_data(resp, flush=True)
+
+                    resp = self.do_socket({
+                        "Proxy-Authorization": "Basic %s" % proxy_token
+                    })
                 else:
-                    dprint("No auth required cached")
+                    ntlm = NtlmMessageGenerator(proxy_type, self.proxy_address[0])
+                    ntlm_resp = ntlm.get_response()
+                    if ntlm_resp is None:
+                        dprint("Bad NTLM response")
+                        return Response(503)
+
+                    self.fwd_data(resp, flush=True)
+
+                    # Send auth message
+                    resp = self.do_socket({
+                        "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
+                    })
+                    if resp.code == 407:
+                        dprint("Auth required")
+                        ntlm_challenge = ""
+                        for header in resp.headers:
+                            if header[0] == "Proxy-Authenticate" and proxy_type in header[1].upper():
+                                h = header[1].split()
+                                if len(h) == 2:
+                                    ntlm_challenge = h[1]
+                                    break
+
+                        if ntlm_challenge:
+                            dprint("Challenged")
+                            ntlm_resp = ntlm.get_response(ntlm_challenge)
+                            if ntlm_resp is None:
+                                dprint("Bad NTLM response")
+                                return Response(503)
+
+                            self.fwd_data(resp, flush=True)
+
+                            # Reply to challenge
+                            resp = self.do_socket({
+                                "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
+                            })
+                        else:
+                            dprint("Didn't get challenge, auth didn't work")
+                    else:
+                        dprint("No auth required cached")
             else:
                 dprint("No auth required")
         else:

@@ -615,10 +615,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                     if "NTLM" in proxy_auth.upper():
                         proxy_type = "NTLM"
+                        break
                     elif "KERBEROS" in proxy_auth.upper():
                         proxy_type = "KERBEROS"
+                        break
                     elif "NEGOTIATE" in proxy_auth.upper():
                         proxy_type = "NEGOTIATE"
+                        break
 
                 if proxy_type is not None:
                     # Writing State.proxy_type only once but use local variable as return value to avoid

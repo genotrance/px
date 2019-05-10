@@ -929,6 +929,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Close both proxy and client connection if still open.
         if self.proxy_socket is not None:
             dprint("Cleanup proxy connection")
+            # shutdown the socket before closing - stop it from hanging around
+            self.proxy_socket.shutdown(socket.SHUT_WR)
             self.proxy_socket.close()
             self.proxy_socket = None
         self.close_connection = True

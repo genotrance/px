@@ -422,7 +422,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             else:
                 dprint("Closed connection to avoid infinite loop")
                 self.close_connection = True
-
+        
     def address_string(self):
         host, port = self.client_address[:2]
         #return socket.getfqdn(host)
@@ -479,16 +479,6 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         cmdstr = "%s %s %s\r\n" % (self.command, self.path, self.request_version)
         self.proxy_socket.sendall(cmdstr.encode("utf-8"))
         dprint(cmdstr.strip())
-        
-        try:
-            del self.headers["connection"]
-        except IndexError:
-            pass # don't care
-            
-        try:
-            del self.headers["Connection"]
-        except IndexError:
-            pass # don't care
         
         #for header in self.headers:
         #    hlower = header.lower()
@@ -657,6 +647,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
     def do_transaction(self):
         dprint("Entering")
+
+        # useful debug
+        # cmdstr = "%s %s %s\r\n" % (self.command, self.path, self.request_version)
+        # dprint(cmdstr.strip())
+        # for header in self.headers:
+        #    h = "%s: %s\r\n" % (header, self.headers[header])
+        #    dprint("Req header %s" % h.strip())
         
         ipport = self.get_destination()
         if ipport not in [False, True]:
@@ -669,6 +666,20 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             # before accessing State.proxy_type in the second thread)
             resp, proxy_type = self.do_proxy_type()
             if resp.code == 407:
+                # store but remove connection: header
+                h_connection = ""
+                if self.headers["connection"] != None:
+                    h_connection = self.headers["connection"]
+                    del self.headers["connection"]
+                    dprint("removed 'connection'")
+                if self.headers["Connection"] != None:
+                    h_connection = self.headers["Connection"]
+                    del self.headers["Connection"]
+                    dprint("removed 'Connection'")
+
+                # dprint("407: connection is %s" % h_connection)
+
+                    
                 # Unknown auth mechanism
                 if proxy_type is None:
                     dprint("Unknown auth mechanism expected")
@@ -706,6 +717,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                         self.fwd_data(resp, flush=True)
 
+                        #restore connection header if it was there
+                        if h_connection != "":
+                            self.headers["Connection"] = h_connection
+                            dprint("Restore connection to %s" % h_connection)
+                        
                         # Reply to challenge
                         resp = self.do_socket({
                             "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
@@ -796,6 +812,19 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
     def do_CONNECT(self):
         dprint("Entering")
 
+        # for CONNECT, just scrap connection: close
+        h_connection = ""
+        if self.headers["connection"] != None:
+            h_connection = self.headers["connection"]
+            del self.headers["connection"]
+            dprint("removed 'connection'")
+        if self.headers["Connection"] != None:
+            h_connection = self.headers["Connection"]
+            del self.headers["Connection"]
+            dprint("removed 'Connection'")
+
+        dprint("CONNECT: connection was %s, now none." % h_connection)
+        
         cl = 0
         cs = 0
         resp = self.do_transaction()
@@ -901,7 +930,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             self.proxy_socket.close()
             self.proxy_socket = None
         self.close_connection = True
-
+        
         dprint("%d bytes read, %d bytes written" % (cl, cs))
 
         dprint("Done")

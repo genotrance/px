@@ -479,6 +479,23 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         cmdstr = "%s %s %s\r\n" % (self.command, self.path, self.request_version)
         self.proxy_socket.sendall(cmdstr.encode("utf-8"))
         dprint(cmdstr.strip())
+        
+        try:
+            del self.headers["connection"]
+        except IndexError:
+            pass # don't care
+            
+        try:
+            del self.headers["Connection"]
+        except IndexError:
+            pass # don't care
+        
+        #for header in self.headers:
+        #    hlower = header.lower()
+        #    if hlower == "connection":
+        #        del self.headers[header]
+        #        break;
+        
         for header in self.headers:
             hlower = header.lower()
             if hlower == "user-agent" and State.useragent != "":
@@ -488,8 +505,12 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 h = "%s: %s\r\n" % (header, self.headers[header])
 
             self.proxy_socket.sendall(h.encode("utf-8"))
-            dprint("Sending %s" % h.strip())
-
+            ## don't want to show this either
+            if header.lower() != "authorization":
+                dprint("Sending %s" % h.strip())
+            else:
+                dprint("Sending %s: sanitized len(%d)" % (header, len(self.headers[header])))
+            
             if hlower == "content-length":
                 cl = int(self.headers[header])
             elif hlower == "expect" and self.headers[header].lower() == "100-continue":
@@ -636,7 +657,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
     def do_transaction(self):
         dprint("Entering")
-
+        
         ipport = self.get_destination()
         if ipport not in [False, True]:
             dprint("Skipping NTLM proxying")
@@ -832,7 +853,9 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                                 # No data means connection closed by remote host
                                 dprint("Connection closed by %s" % source)
                                 # Because tunnel is closed on one end there is no need to read from both ends
-                                rlist.clear()
+                                # rlist.clear() - stick with 2.7 compatible list operator.
+                                del rlist[:]
+                                
                                 # Do not write anymore to the closed end
                                 if i in wlist:
                                     wlist.remove(i)

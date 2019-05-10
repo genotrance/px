@@ -775,7 +775,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         if resp.code >= 400:
             dprint("Error %d" % resp.code)
-            self.send_error(resp.code)
+            self.fwd_resp(resp)
+            #self.send_error(resp.code) - we need to send the body of the error too!
         else:
             self.fwd_resp(resp)
 
@@ -830,7 +831,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         resp = self.do_transaction()
         if resp.code >= 400:
             dprint("Error %d" % resp.code)
-            self.send_error(resp.code)
+            self.fwd_resp(resp)
+            # self.send_error(resp.code) - need to send the whole response back?
         else:
             # Proxy connection may be already closed due to header (Proxy-)Connection: close
             # received from proxy -> forward this to the client

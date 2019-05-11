@@ -83,6 +83,17 @@ pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos futures
 python px.py --help
 ```
 
+## Building
+
+To build an executable, run built.bat.  You will need pyinstall (pip install pyinstall) 
+and the microsoft VC++ toolset (pyinstall will prompt you with a link if not present :) ).
+
+If it complains about missing libraries, then you may modify build.bat to give it the path to the MS dlls like:
+
+`pyinstaller --clean --paths "C:\Program Files (x86)\Windows Kits\10\Redist\ucrt\DLLs\x64" --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes`
+
+substituting the correct path for your system.  (looks like this can also come from the environment).
+
 ## Configuration
 
 Px requires only one piece of information in order to function - the server

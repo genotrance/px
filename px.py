@@ -123,6 +123,11 @@ Configuration:
     remote server is not in noproxy list and proxy is undefined, Px will reject
     the request
 
+  --pac=  proxy:pac=
+  PAC file to use to connect
+    Use in place of server if PAC file should be loaded from a custom URL or
+    file location instead of from Internet Options
+
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
 
@@ -215,6 +220,7 @@ MODE_CONFIG = 1
 MODE_AUTO = 2
 MODE_PAC = 3
 MODE_MANUAL = 4
+MODE_CONFIG_PAC = 5
 
 class State(object):
     allow = netaddr.IPGlob("*.*.*.*")
@@ -710,8 +716,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
     def do_PAC(self):
         resp = Response(404)
-        if State.proxy_mode == MODE_PAC and "file://" in State.pac:
-            pac = file_url_to_local_path(State.pac)
+        if State.proxy_mode in [MODE_PAC, MODE_CONFIG_PAC]:
+            pac = State.pac
+            if "file://" in State.pac:
+                pac = file_url_to_local_path(State.pac)
             dprint(pac)
             try:
                 resp.code = 200
@@ -1005,7 +1013,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Get proxy mode and servers straight from load_proxy to avoid
         # threading issues
         (proxy_mode, self.proxy_servers) = load_proxy()
-        if proxy_mode in [MODE_AUTO, MODE_PAC]:
+        if proxy_mode in [MODE_AUTO, MODE_PAC, MODE_CONFIG_PAC]:
             proxy_str = find_proxy_for_url(
                 ("https://" if "://" not in self.path else "") + self.path)
             if proxy_str == "DIRECT":
@@ -1247,7 +1255,7 @@ def file_url_to_local_path(file_url):
 
 def load_proxy(quiet=False):
     # Return if proxies specified in Px config
-    if State.proxy_mode == MODE_CONFIG:
+    if State.proxy_mode in [MODE_CONFIG, MODE_CONFIG_PAC]:
         return (State.proxy_mode, State.proxy_server)
 
     # Do locking to avoid updating globally shared State object by multiple
@@ -1330,9 +1338,9 @@ def find_proxy_for_url(url):
     if State.proxy_mode == MODE_AUTO:
         proxy_str = winhttp_find_proxy_for_url(url, autodetect=True)
 
-    elif State.proxy_mode == MODE_PAC:
+    elif State.proxy_mode in [MODE_PAC, MODE_CONFIG_PAC]:
         pac = State.pac
-        if "file://" in State.pac:
+        if "file://" in State.pac or not State.pac.startswith("http"):
             host = State.config.get("proxy", "listen") or "localhost"
             port = State.config.getint("proxy", "port")
             pac = "http://%s:%d/PxPACFile.pac" % (host, port)
@@ -1496,6 +1504,7 @@ def parse_config():
         State.config.add_section("proxy")
 
     cfg_str_init("proxy", "server", "")
+    cfg_str_init("proxy", "pac", "")
     cfg_int_init("proxy", "port", "3128")
     cfg_str_init("proxy", "listen", "127.0.0.1")
     cfg_str_init("proxy", "allow", "*.*.*.*", parse_allow)
@@ -1526,6 +1535,8 @@ def parse_config():
             val = sys.argv[i].split("=")[1]
             if "--proxy=" in sys.argv[i] or "--server=" in sys.argv[i]:
                 cfg_str_init("proxy", "server", val, None, True)
+            elif "--pac=" in sys.argv[i]:
+                cfg_str_init("proxy", "pac", val, None, True)
             elif "--listen=" in sys.argv[i]:
                 cfg_str_init("proxy", "listen", val, None, True)
             elif "--port=" in sys.argv[i]:
@@ -1579,6 +1590,7 @@ def parse_config():
             cfg_str_init("proxy", "allow", "", parse_allow, True)
 
     State.proxy_server = parse_proxy(State.config.get("proxy", "server"))
+    State.pac = State.config.get("proxy", "pac")
 
     if "--install" in sys.argv:
         install()
@@ -1591,6 +1603,8 @@ def parse_config():
 
     if State.proxy_server:
         State.proxy_mode = MODE_CONFIG
+    elif State.pac:
+        State.proxy_mode = MODE_CONFIG_PAC
     else:
         load_proxy(quiet=True)
 

@@ -151,6 +151,11 @@ Configuration:
     remote server is not in noproxy list and proxy is undefined, Px will reject
     the request
 
+  --pac=  proxy:pac=
+  PAC file to use to connect
+    Use in place of server if PAC file should be loaded from a custom URL or
+    file location instead of from Internet Options
+
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
 

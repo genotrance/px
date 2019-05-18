@@ -175,6 +175,13 @@ Configuration:
     Create a generic credential with Px as the network address, this username
     and corresponding password.
 
+  --auth=  proxy:auth=
+  Force instead of discovering upstream proxy type
+    By default, Px will attempt to discover the upstream proxy type and either
+    use pywin32/ntlm-auth for NTLM auth or winkerberos for Kerberos or Negotiate
+    auth. This option will force either NTLM or Kerberos and not query the
+    upstream proxy type. Case sensitive 'NTLM' or 'Kerberos'.
+
   --workers=  settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
 
@@ -239,6 +246,7 @@ class State(object):
     stdout = None
     useragent = ""
     username = ""
+    auth = None
 
     ini = "px.ini"
     max_disconnect = 3
@@ -608,7 +616,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             # Read State.proxy_type only once and use value for function return if it is not None;
             # State.proxy_type should only be read here to avoid getting None after successfully
             # identifying the proxy type if another thread clears it with load_proxy
-            proxy_type = State.proxy_type.get(self.proxy_address)
+            proxy_type = State.proxy_type.get(self.proxy_address, State.auth)
             if proxy_type is None:
                 # New proxy, don't know type yet
                 dprint("Searching proxy type")
@@ -1422,6 +1430,33 @@ def set_username(username):
     else:
         State.username = username
 
+def set_pac(pac):
+    if pac == "":
+        return
+
+    pacproxy = False
+    if pac.startswith("http"):
+        pacproxy = True
+
+    elif pac.startswith("file"):
+        pac = file_url_to_local_path(pac)
+
+    if os.path.exists(pac):
+        pacproxy = True
+
+    if pacproxy:
+        State.pac = pac
+    else:
+        pprint("Unsupported PAC location or file not found: %s" % pac)
+        sys.exit()
+
+def set_auth(auth):
+    if auth not in ["NTLM", "Kerberos", ""]:
+        pprint("Bad proxy auth type: %s" % auth)
+        sys.exit()
+    if auth != "":
+      State.auth = auth
+
 def cfg_int_init(section, name, default, override=False):
     val = default
     if not override:
@@ -1504,7 +1539,7 @@ def parse_config():
         State.config.add_section("proxy")
 
     cfg_str_init("proxy", "server", "")
-    cfg_str_init("proxy", "pac", "")
+    cfg_str_init("proxy", "pac", "", set_pac)
     cfg_int_init("proxy", "port", "3128")
     cfg_str_init("proxy", "listen", "127.0.0.1")
     cfg_str_init("proxy", "allow", "*.*.*.*", parse_allow)
@@ -1513,6 +1548,7 @@ def parse_config():
     cfg_str_init("proxy", "noproxy", "", parse_noproxy)
     cfg_str_init("proxy", "useragent", "", set_useragent)
     cfg_str_init("proxy", "username", "", set_username)
+    cfg_str_init("proxy", "auth", "", set_auth)
 
     # [settings] section
     if "settings" not in State.config.sections():
@@ -1536,7 +1572,7 @@ def parse_config():
             if "--proxy=" in sys.argv[i] or "--server=" in sys.argv[i]:
                 cfg_str_init("proxy", "server", val, None, True)
             elif "--pac=" in sys.argv[i]:
-                cfg_str_init("proxy", "pac", val, None, True)
+                cfg_str_init("proxy", "pac", val, set_pac, True)
             elif "--listen=" in sys.argv[i]:
                 cfg_str_init("proxy", "listen", val, None, True)
             elif "--port=" in sys.argv[i]:
@@ -1549,6 +1585,8 @@ def parse_config():
                 cfg_str_init("proxy", "useragent", val, set_useragent, True)
             elif "--username=" in sys.argv[i]:
                 cfg_str_init("proxy", "username", val, set_username, True)
+            elif "--auth=" in sys.argv[i]:
+                cfg_str_init("proxy", "auth", val, set_auth, True)
             else:
                 for j in ["workers", "threads", "idle", "proxyreload"]:
                     if "--" + j + "=" in sys.argv[i]:
@@ -1590,7 +1628,6 @@ def parse_config():
             cfg_str_init("proxy", "allow", "", parse_allow, True)
 
     State.proxy_server = parse_proxy(State.config.get("proxy", "server"))
-    State.pac = State.config.get("proxy", "pac")
 
     if "--install" in sys.argv:
         install()

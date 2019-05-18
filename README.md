@@ -203,6 +203,13 @@ Configuration:
     Create a generic credential with Px as the network address, this username
     and corresponding password.
 
+  --auth=  proxy:auth=
+  Force instead of discovering upstream proxy type
+    By default, Px will attempt to discover the upstream proxy type and either
+    use pywin32/ntlm-auth for NTLM auth or winkerberos for Kerberos or Negotiate
+    auth. This option will force either NTLM or Kerberos and not query the
+    upstream proxy type. Case sensitive 'NTLM' or 'Kerberos'.
+
   --workers=  settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
 

@@ -207,8 +207,8 @@ Configuration:
   Force instead of discovering upstream proxy type
     By default, Px will attempt to discover the upstream proxy type and either
     use pywin32/ntlm-auth for NTLM auth or winkerberos for Kerberos or Negotiate
-    auth. This option will force either NTLM or Kerberos and not query the
-    upstream proxy type. Case sensitive 'NTLM' or 'Kerberos'.
+    auth. This option will force either NTLM, Kerberos or Basic and not query the
+    upstream proxy type.
 
   --workers=  settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2

@@ -1,14 +1,19 @@
 TBD
-- Add support for issue #58 - authentication with user/password when SSPI is
+- Added support for issue #58 - authentication with user/password when SSPI is
   unavailable or not preferred.
-- Pull PR #68 to handle case where no longer behind PAC proxy
-- Fix minor bug in file:// PAC file handling
+- Pulled PR #68 to handle case where no longer behind PAC proxy
+- Fixed minor bug in file:// PAC file handling
 - Implemented #65 - support for specifying PAC in INI
 - Implemented #73 - force auth mechanism in INI
-- Merge PR #85 - sanitize authorization header, shutdown socket, defer
+- Merged PR #85 - sanitize authorization header, shutdown socket, defer
   connection header during auth (#71), drop completely for CONNECT, forward
   error body, 2.7 fix
-- Switch to Python 3.7, drop 3.4 support
+- Switched to Python 3.7, drop 3.4 support
+- Merged PR #80 - fallback to DIRECT if no proxy found via auto or PAC discovery
+- Added basic auth support (PR #82)
+- Fixed issue where an empty domain was breaking password access
+- Fixed #88, issue 2 in #71, PR #83 - use auth mechanism in order
+- Added code to keep-alive during authentication - issue 3 in #71
 
 v0.4.0 - 2018-09-04
 - Implemented #18 - support for multiple NTLM proxies that will be iterated

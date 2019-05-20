@@ -3,6 +3,12 @@ TBD
   unavailable or not preferred.
 - Pull PR #68 to handle case where no longer behind PAC proxy
 - Fix minor bug in file:// PAC file handling
+- Implemented #65 - support for specifying PAC in INI
+- Implemented #73 - force auth mechanism in INI
+- Merge PR #85 - sanitize authorization header, shutdown socket, defer
+  connection header during auth (#71), drop completely for CONNECT, forward
+  error body, 2.7 fix
+- Switch to Python 3.7, drop 3.4 support
 
 v0.4.0 - 2018-09-04
 - Implemented #18 - support for multiple NTLM proxies that will be iterated

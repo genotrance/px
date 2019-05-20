@@ -502,7 +502,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 h = "%s: %s\r\n" % (header, self.headers[header])
 
             self.proxy_socket.sendall(h.encode("utf-8"))
-            dprint("Sending %s" % h.strip())
+            if hlower != "authorization":
+                dprint("Sending %s" % h.strip())
+            else:
+                dprint("Sending %s: sanitized len(%d)" % (header, len(self.headers[header])))
 
             if hlower == "content-length":
                 cl = int(self.headers[header])
@@ -575,6 +578,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             line = self.proxy_fp.readline(State.max_line).decode("utf-8")
             if line == b"":
                 if self.proxy_socket:
+                    self.proxy_socket.shutdown(socket.SHUT_WR)
                     self.proxy_socket.close()
                     self.proxy_socket = None
                 dprint("Proxy closed connection: %s" % resp.code)
@@ -676,6 +680,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                 self.fwd_data(resp, flush=True)
 
+                hconnection = ""
+                for i in ["connection", "Connection"]:
+                    if i in self.headers:
+                        hconnection = self.headers[i]
+                        del self.headers[i]
+                        dprint("Remove header %s: %s" % (i, hconnection))
+
                 # Send auth message
                 resp = self.do_socket({
                     "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp)
@@ -698,6 +709,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                             return Response(503)
 
                         self.fwd_data(resp, flush=True)
+
+                        if hconnection != "":
+                            self.headers["Connection"] = hconnection
+                            dprint("Restore header Connection: " + hconnection)
 
                         # Reply to challenge
                         resp = self.do_socket({
@@ -754,9 +769,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
         if resp.code >= 400:
             dprint("Error %d" % resp.code)
-            self.send_error(resp.code)
-        else:
-            self.fwd_resp(resp)
+
+        self.fwd_resp(resp)
 
         dprint("Done")
 
@@ -791,12 +805,17 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
     def do_CONNECT(self):
         dprint("Entering")
 
+        for i in ["connection", "Connection"]:
+            if i in self.headers:
+                del self.headers[i]
+                dprint("Remove header " + i)
+
         cl = 0
         cs = 0
         resp = self.do_transaction()
         if resp.code >= 400:
             dprint("Error %d" % resp.code)
-            self.send_error(resp.code)
+            self.fwd_resp(resp)
         else:
             # Proxy connection may be already closed due to header (Proxy-)Connection: close
             # received from proxy -> forward this to the client
@@ -848,7 +867,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                                 # No data means connection closed by remote host
                                 dprint("Connection closed by %s" % source)
                                 # Because tunnel is closed on one end there is no need to read from both ends
-                                rlist.clear()
+                                del rlist[:]
                                 # Do not write anymore to the closed end
                                 if i in wlist:
                                     wlist.remove(i)
@@ -891,6 +910,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # Close both proxy and client connection if still open.
         if self.proxy_socket is not None:
             dprint("Cleanup proxy connection")
+            self.proxy_socket.shutdown(socket.SHUT_WR)
             self.proxy_socket.close()
             self.proxy_socket = None
         self.close_connection = True

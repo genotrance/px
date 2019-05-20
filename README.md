@@ -285,7 +285,7 @@ also be run using a Python distribution with the following additional packages.
 
   `futures` on Python 2.x
 
-Px is tested with the latest releases of Python 2.7, 3.4, 3.5 and 3.6 using the
+Px is tested with the latest releases of Python 2.7, 3.5, 3.6 and 3.7 using the
 Miniconda distribution.
 
 In order to make Px a capable proxy server, it is designed to run in multiple
@@ -294,6 +294,18 @@ this only works on Python 3.3+ since that's when support was added to share
 sockets across processes in Windows. On older versions of Python, Px will run
 multi-threaded but in a single process. The number of threads per process is
 also configurable.
+
+## Building
+
+To build an executable, run built.bat. You will need [PyInstaller](https://www.pyinstaller.org) and the Microsoft VC++ toolset. PyInstaller will prompt you with a link if not present.
+
+  `pip install pyinstaller`
+
+If it complains about missing libraries, then you may modify build.bat to give it the path to the MS dlls:
+
+  `pyinstaller --clean --paths "C:\Program Files (x86)\Windows Kits\10\Redist\ucrt\DLLs\x64" --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes`
+
+Substitute the correct path for your system.
 
 ## Feedback
 

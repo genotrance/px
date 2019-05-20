@@ -186,7 +186,7 @@ def checkPxStart(ip, port):
             time.sleep(1)
             retry -= 1
             if retry == 0:
-                print("Px didn't start")
+                print("Px didn't start @ %s:%d" % (ip, port))
                 return False
 
     return True
@@ -358,7 +358,7 @@ def auto():
         count += 1
 
         # Test different versions of Python
-        pys = ["27", "34", "35"]
+        pys = ["27", "35", "37"]
         for py in pys:
             procs.append(runTest(test, "c:\\Miniconda\\envs\\%s\\python" % py, count))
             count += 1

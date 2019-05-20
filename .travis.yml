@@ -1,0 +1,40 @@
+language : shell
+
+env:
+  - CONDA_PYTHON=2.7
+  - CONDA_PYTHON=3.5
+  - CONDA_PYTHON=3.6
+  - CONDA_PYTHON=3.7
+
+os :
+- windows
+
+cache :
+  directories:
+    - /c/tools/miniconda3
+    - $HOME/AppData/Local/Temp/chocolatey
+
+install:
+  - MINICONDA_PATH=/c/tools/miniconda3;
+  - MINICONDA_SUB_PATH=$MINICONDA_PATH/Scripts;
+  - if [[ -d $MINICONDA_SUB_PATH ]]; then
+      echo "miniconda for Windows already installed";
+    else
+      echo "installing miniconda for windows";
+      choco install -y miniconda3;
+    fi;
+  - export PATH="$MINICONDA_PATH:$MINICONDA_SUB_PATH:$PATH";
+  - choco install -y openssl.light;
+  - hash -r;
+  - python -V
+  - conda info -a
+  - conda config --set always_yes yes --set changeps1 no;
+  - conda update -q conda;
+  - conda create -n $CONDA_PYTHON python=$CONDA_PYTHON
+  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -V
+  - $MINICONDA_PATH/envs/$CONDA_PYTHON/Scripts/pip.exe install -U keyring netaddr ntlm-auth psutil pywin32 winkerberos futures pyinstaller
+
+script: 
+  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -m py_compile px.py
+  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe px.py --help
+  - $MINICONDA_PATH/envs/$CONDA_PYTHON/Scripts/pyinstaller.exe --clean --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes

@@ -1381,6 +1381,11 @@ def find_proxy_for_url(url):
     if proxy_str.startswith("DIRECT,"):
         proxy_str = "DIRECT"
 
+    # If the proxy_str it still empty at this point, then there is no proxy
+    # configured. Try to do a direct connection. 
+    if proxy_str == "":
+        proxy_str = "DIRECT"
+
     dprint("Proxy found: " + proxy_str)
     return proxy_str
 

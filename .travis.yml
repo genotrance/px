@@ -12,7 +12,6 @@ os :
 cache :
   directories:
     - /c/tools/miniconda3
-    - $HOME/AppData/Local/Temp/chocolatey
 
 install:
   - MINICONDA_PATH=/c/tools/miniconda3;
@@ -32,9 +31,19 @@ install:
   - conda update -q conda;
   - conda create -n $CONDA_PYTHON python=$CONDA_PYTHON
   - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -V
+  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -m pip install --upgrade pip
   - $MINICONDA_PATH/envs/$CONDA_PYTHON/Scripts/pip.exe install -U keyring netaddr ntlm-auth psutil pywin32 winkerberos futures pyinstaller
 
-script: 
+script:
   - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -m py_compile px.py
   - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe px.py --help
   - $MINICONDA_PATH/envs/$CONDA_PYTHON/Scripts/pyinstaller.exe --clean --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes
+
+# Deploy doesn't work due to secret $GITHUB_TOKEN requirement which is
+# broken on Travis for Windows
+#deploy:
+#  provider: script
+#  script: python tools.py --post --token=$GITHUB_TOKEN
+#  on:
+#    branch: master
+#    condition: $CONDA_PYTHON = 3.7

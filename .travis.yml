@@ -12,10 +12,14 @@ os :
 cache :
   directories:
     - /c/tools/miniconda3
+    - /c/Users/travis/AppData/Roaming/pyinstaller
+    - /c/Users/travis/AppData/Local/pip/cache
+    - /c/Users/travis/AppData/Local/Temp/chocolatey
 
 install:
   - MINICONDA_PATH=/c/tools/miniconda3;
   - MINICONDA_SUB_PATH=$MINICONDA_PATH/Scripts;
+  - PYTHON_ENV=$MINICONDA_PATH/envs/$CONDA_PYTHON;
   - if [[ -d $MINICONDA_SUB_PATH ]]; then
       echo "miniconda for Windows already installed";
     else
@@ -30,14 +34,15 @@ install:
   - conda config --set always_yes yes --set changeps1 no;
   - conda update -q conda;
   - conda create -n $CONDA_PYTHON python=$CONDA_PYTHON
-  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -V
-  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -m pip install --upgrade pip
-  - $MINICONDA_PATH/envs/$CONDA_PYTHON/Scripts/pip.exe install -U keyring netaddr ntlm-auth psutil pywin32 winkerberos futures pyinstaller
+  - $PYTHON_ENV/python.exe -V
+  - $PYTHON_ENV/python.exe -m pip install --upgrade pip
+  - $PYTHON_ENV/Scripts/pip.exe install -U keyring netaddr ntlm-auth psutil pywin32 winkerberos futures pyinstaller
 
 script:
-  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe -m py_compile px.py
-  - $MINICONDA_PATH/envs/$CONDA_PYTHON/python.exe px.py --help
-  - $MINICONDA_PATH/envs/$CONDA_PYTHON/Scripts/pyinstaller.exe --clean --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes
+  - $PYTHON_ENV/python.exe -m py_compile px.py
+  - $PYTHON_ENV/python.exe px.py --help
+  - $PYTHON_ENV/Scripts/pyinstaller.exe --clean --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes
+  - $PYTHON_ENV/python.exe test.py --python=$PYTHON_ENV --baseurl=https://google.com
 
 # Deploy doesn't work due to secret $GITHUB_TOKEN requirement which is
 # broken on Travis for Windows

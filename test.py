@@ -15,12 +15,18 @@ CURL_PROXY = ' --proxy-ntlm '
 
 BASEURL = ""
 PROXY = ""
+PYTHON = ""
 TESTS = []
 
 try:
     ConnectionRefusedError
 except NameError:
     ConnectionRefusedError = socket.error
+
+try:
+    DEVNULL = subprocess.DEVNULL
+except AttributeError:
+    DEVNULL = open(os.devnull, 'wb')
 
 def exec_output(cmd):
     pipe = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
@@ -232,7 +238,7 @@ def checkSocket(ips, port):
 def checkFilter(ips, port):
     def checkProc(lip, port):
         rcode = subprocess.call("curl --proxy " + lip + ":" + str(port) + " http://google.com",
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=DEVNULL, stderr=DEVNULL)
         sys.stdout.write(str(rcode) + " ")
         if rcode == 0:
             return True
@@ -248,11 +254,11 @@ def remoteTest(port, fail=False):
     lip = 'echo $SSH_CLIENT ^| cut -d \\\" \\\" -f 1,1'
     cmd = os.getenv("REMOTE_SSH")
     if cmd is None:
-        print("Skipping remote test - REMOTE_SSH not set")
+        print("  Skipping: Remote test - REMOTE_SSH not set")
         return
     cmd = cmd + " curl --proxy `%s`:%s --connect-timeout 2 -s http://google.com" % (lip, port)
     sys.stdout.write("  Checking: Remote:" + str(port) + " = ")
-    ret = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ret = subprocess.call(cmd, stdout=DEVNULL, stderr=DEVNULL)
     if (ret == 0 and fail == False) or (ret != 0 and fail == True) :
         print(str(ret) + ": Passed")
     else:
@@ -267,14 +273,11 @@ def hostonlyTest(ips, port):
 def gatewayTest(ips, port):
     return checkSocket(ips, port) and remoteTest(port)
 
-def allowTest127(ips, port):
-    return checkFilter(ips, port) and remoteTest(port, fail=True)
-
-def allowTest169(ips, port):
-    return checkFilter(ips, port) and remoteTest(port, fail=True)
-
-def allowTest192(ips, port):
+def allowTest(ips, port):
     return checkFilter(ips, port) and remoteTest(port)
+
+def allowTestFail(ips, port):
+    return checkFilter(ips, port) and remoteTest(port, fail=True)
 
 def listenTestLocal(ip, port):
     return checkSocket([ip], port) and remoteTest(port, fail=True)
@@ -296,14 +299,15 @@ def socketTestSetup():
         TESTS.append(("--proxy=" + PROXY + " --gateway", gatewayTest, getips()))
 
     if "--noallow" not in sys.argv:
-        TESTS.append(("--proxy=" + PROXY + " --gateway --allow=127.*.*.*",
-            allowTest127, [""]))
+        for ip in getips():
+            oct = ip.split(".")[0]
 
-        TESTS.append(("--proxy=" + PROXY + " --gateway --allow=169.*.*.*",
-            allowTest169, list(filter(lambda x: "169" in x, getips()))))
+            atest = allowTestFail
+            if oct in ["192"]:
+                atest = allowTest
 
-        TESTS.append(("--proxy=" + PROXY + " --gateway --allow=192.*.*.*",
-            allowTest192, list(filter(lambda x: "192" in x, getips()))))
+            TESTS.append(("--proxy=" + PROXY + " --gateway --allow=%s.*.*.*" % oct,
+                atest, list(filter(lambda x: oct in x, getips()))))
 
     if "--nolisten" not in sys.argv:
         localips = getips()
@@ -354,14 +358,15 @@ def auto():
         procs = []
 
         # Latest version
-        procs.append(runTest(test, "c:\\Miniconda\\python", count))
+        procs.append(runTest(test, PYTHON + "/python.exe", count))
         count += 1
 
-        # Test different versions of Python
-        pys = ["27", "35", "37"]
-        for py in pys:
-            procs.append(runTest(test, "c:\\Miniconda\\envs\\%s\\python" % py, count))
-            count += 1
+        if "--envs" in sys.argv:
+            # Test different versions of Python
+            pys = ["27", "35", "37"]
+            for py in pys:
+                procs.append(runTest(test, PYTHON + "/envs/%s/python.exe" % py, count))
+                count += 1
 
         # Run px.exe
         procs.append(runTest(test, None, count))
@@ -372,19 +377,34 @@ def auto():
 
     os.chdir("..")
 
+def get_argval(name):
+    for i in range(len(sys.argv)):
+        if "=" in sys.argv[i]:
+            val = sys.argv[i].split("=")[1]
+            if ("--%s=" % name) in sys.argv[i]:
+                return val
+
+    return ""
+
 if __name__ == "__main__":
-    """python test.py testproxy.org:80 http://baseurl.com
+    """python test.py --proxy=testproxy.org:80 --baseurl=http://baseurl.com [--all]
         Point test.py to the NTLM proxy server that Px should connect through
 
         Base URL is some base webpage which will be spidered for URLs to
         compare results directly through proxy and through Px"""
 
-    if len(sys.argv) > 1:
-        PROXY = sys.argv[1]
-    if len(sys.argv) > 2:
-        BASEURL = sys.argv[2]
+    PROXY = get_argval("proxy")
+    BASEURL = get_argval("baseurl")
+    PYTHON = get_argval("python")
 
-    if PROXY == "" or BASEURL == "":
-        sys.exit()
+    if PROXY == "":
+        sys.argv.append("--noproxy")
+
+    if BASEURL == "":
+        sys.argv.append("--noproxy")
+        sys.argv.append("--nonoproxy")
+
+    if PYTHON == "":
+        PYTHON = "c:/Miniconda"
 
     auto()

@@ -742,7 +742,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 # Send auth message
                 resp = self.do_socket({
                     "Proxy-Authorization": "%s %s" % (proxy_type, ntlm_resp),
-                    "Connection": "Keep-Alive"
+                    "Proxy-Connection": "Keep-Alive"
                 })
                 if resp.code == 407:
                     dprint("Auth required")

@@ -104,8 +104,12 @@ On Windows, Credential Manager is the backend and can be accessed as follows:
 
     Control Panel > User Accounts > Credential Manager > Windows Credentials
 
-Px looks for a generic credential with Px as the network address. More
-information on keyring backends can be found [here](https://pypi.org/project/keyring).
+Or run command line
+
+    rundll32.exe keymgr.dll, KRShowKeyMgr
+
+Px looks for a 'generic credential' type with 'Px' as the network address name. More
+information on keyring backends can be found [here](https://pypi.org/project/keyring). 
 
 There are a few other settings to tweak in the INI file but most are obvious.
 All settings can be specified on the command line for convenience. The INI file

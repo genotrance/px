@@ -582,8 +582,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 dprint("Getting body for POST/PUT/PATCH")
                 if cl:
                     self.body = self.rfile.read(cl)
+                # elif chk:
+                #     self.body = self.rfile.read()
                 else:
-                    self.body = self.rfile.read()
+                    self.body = ""
+
 
             dprint("Sending body for POST/PUT/PATCH: %d = %d" % (
                 cl or -1, len(self.body)))

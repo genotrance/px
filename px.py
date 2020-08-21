@@ -543,7 +543,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                 h = "%s: %s\r\n" % (header, self.headers[header])
 
             self.proxy_socket.sendall(h.encode("utf-8"))
-            dprint("Sending %s" % h.strip())
+            if hlower != "authorization":
+                dprint("Sending %s" % h.strip())
+            else:
+                dprint("Sending %s: sanitized len(%d)" % (
+                    header, len(self.headers[header])))
 
             if hlower == "content-length":
                 cl = int(self.headers[header])
@@ -566,8 +570,11 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         for header in xheaders:
             h = ("%s: %s\r\n" % (header, xheaders[header])).encode("utf-8")
             self.proxy_socket.sendall(h)
-            dprint("Sending extra %s" % h.strip())
-
+            if header.lower() != "proxy-authorization":
+                dprint("Sending extra %s" % h.strip())
+            else:
+                dprint("Sending extra %s: sanitized len(%d)" % (
+                    header, len(xheaders[header])))
         self.proxy_socket.sendall(b"\r\n")
 
         if self.command in ["POST", "PUT", "PATCH"]:
@@ -631,8 +638,10 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             name = nv[0].strip()
             value = nv[1].strip()
             resp.headers.append((name, value))
-            dprint("Received %s: %s" % (name, value))
-
+            if name.lower() != "proxy-authenticate":
+                dprint("Received %s: %s" % (name, value))
+            else:
+                dprint("Received %s: sanitized (%d)" % (name, len(value)))
 
             if name.lower() == "content-length":
                 resp.length = int(value)

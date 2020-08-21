@@ -740,7 +740,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     ntlm_challenge = ""
                     for header in resp.headers:
                         if (header[0].lower() == "proxy-authenticate" and
-                                proxy_type in header[1].upper()):
+                                proxy_type.upper() in header[1].upper()):
                             h = header[1].split()
                             if len(h) == 2:
                                 ntlm_challenge = h[1]

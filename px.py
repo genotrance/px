@@ -672,8 +672,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         proxy_auth += header[1] + " "
 
                 for auth in proxy_auth.split():
-                    auth_verification = auth.upper()
-                    if auth_verification in ["NTLM", "KERBEROS", "NEGOTIATE", "BASIC"]:
+                    if auth.upper() in ["NTLM", "KERBEROS", "NEGOTIATE", "BASIC"]:
                         proxy_type = auth
                         break
 

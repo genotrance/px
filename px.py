@@ -407,6 +407,20 @@ class AuthMessageGenerator:
                     principal = (urlparse.quote(State.username) + ":" +
                         urlparse.quote(pwd))
 
+            # Attempt to resolve CNAME record for the `proxy_server_address` in case the proxy server is being hosted behind a DNS load balancing mechanism
+            try:
+                dprint("Attempting to resolve CNAME record for '%s'" % proxy_server_address)
+                cname_entries = socket.getaddrinfo(proxy_server_address, None, 0, 0, 0, socket.AI_CANONNAME)
+
+                for record in cname_entries:
+                    address_family, socket_type, protocol, canonical_name, socket_address = record
+                    dprint("The ultimate hostname resolved to '%s' " % canonical_name)
+                    proxy_server_address = canonical_name
+                    break
+            except:
+                dprint("No CNAME Record found for '%s'" % proxy_server_address)
+
+            dprint("Requesting Kerberos Ticket for '%s'" % proxy_server_address )
             _, self.ctx = winkerberos.authGSSClientInit("HTTP@" +
                 proxy_server_address, principal=principal, gssflags=0,
                 mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)

@@ -681,8 +681,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                         proxy_auth += header[1] + " "
 
                 for auth in proxy_auth.split():
-                    auth = auth.upper()
-                    if auth in ["NTLM", "KERBEROS", "NEGOTIATE", "BASIC"]:
+                    if auth.upper() in ["NTLM", "KERBEROS", "NEGOTIATE", "BASIC"]:
                         proxy_type = auth
                         break
 
@@ -749,7 +748,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     ntlm_challenge = ""
                     for header in resp.headers:
                         if (header[0].lower() == "proxy-authenticate" and
-                                proxy_type in header[1].upper()):
+                                proxy_type.upper() in header[1].upper()):
                             h = header[1].split()
                             if len(h) == 2:
                                 ntlm_challenge = h[1]

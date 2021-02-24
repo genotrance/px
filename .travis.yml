@@ -1,10 +1,10 @@
 language : shell
 
 env:
-  - CONDA_PYTHON=2.7
   - CONDA_PYTHON=3.5
   - CONDA_PYTHON=3.6
   - CONDA_PYTHON=3.7
+  - CONDA_PYTHON=3.9
 
 os :
 - windows

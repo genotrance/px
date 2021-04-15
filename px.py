@@ -345,13 +345,13 @@ def b64decode(val):
     try:
         return base64.decodebytes(val.encode("utf-8"))
     except AttributeError:
-        return base64.decodestring(val)
+        return base64.decodebytes(val)
 
 def b64encode(val):
     try:
         return base64.encodebytes(val.encode("utf-8"))
     except AttributeError:
-        return base64.encodestring(val)
+        return base64.encodebytes(val)
 
 class AuthMessageGenerator:
     def __init__(self, proxy_type, proxy_server_address):

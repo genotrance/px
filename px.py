@@ -6,9 +6,9 @@ __version__ = "0.4.0"
 
 import base64
 import ctypes
-import ctypes.wintypes
 import multiprocessing
 import os
+import platform
 import select
 import signal
 import socket
@@ -25,6 +25,15 @@ def pprint(*objs):
         pass
 
 # Dependencies
+
+# Check ValueError due to following error: https://bugs.python.org/issue16396
+try:
+    import ctypes.wintypes
+except (ImportError, ValueError):
+    if platform.system() == 'Windows':
+        pprint("Requires module ctypes.wintypes")
+        sys.exit()
+
 try:
     import concurrent.futures
 except ImportError:
@@ -47,14 +56,16 @@ try:
     import pywintypes
     import sspi
 except ImportError:
-    pprint("Requires module pywin32")
-    sys.exit()
+    if platform.system() == 'Windows':
+        pprint("Requires module pywin32")
+        sys.exit()
 
 try:
     import winkerberos
 except ImportError:
-    pprint("Requires module winkerberos")
-    sys.exit()
+    if platform.system() == 'Windows':
+        pprint("Requires module winkerberos")
+        sys.exit()
 
 try:
     import ntlm_auth.ntlm
@@ -68,8 +79,9 @@ try:
 
     keyring.set_keyring(keyring.backends.Windows.WinVaultKeyring())
 except ImportError:
-    pprint("Requires module keyring")
-    sys.exit()
+    if platform.system() == 'Windows':
+        pprint("Requires module keyring")
+        sys.exit()
 
 # Python 2.x vs 3.x support
 try:
@@ -77,16 +89,20 @@ try:
     import http.server as httpserver
     import socketserver
     import urllib.parse as urlparse
-    import winreg
 except ImportError:
     import ConfigParser as configparser
     import SimpleHTTPServer as httpserver
     import SocketServer as socketserver
     import urlparse
-    import _winreg as winreg
-
+    
     os.getppid = psutil.Process().ppid
-    PermissionError = WindowsError
+
+if platform.system() == 'Windows':    
+    try:
+        import winreg
+    except ImportError:
+        import _winreg as winreg
+        PermissionError = WindowsError
 
 HELP = """Px v%s
 

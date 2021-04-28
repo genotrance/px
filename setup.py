@@ -46,8 +46,8 @@ setup(
         "netaddr",
         "ntlm-auth",
         "psutil",
-        "pywin32",
-        "winkerberos"
+        "pywin32;platform_system=='Windows'",
+        "winkerberos;platform_system=='Windows'"
     ],
     data_files = [
         ("lib/site-packages/px-proxy", [

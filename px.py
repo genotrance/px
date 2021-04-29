@@ -230,15 +230,6 @@ Configuration:
     Prevents logs from being overwritten on subsequent runs. Also useful if
     running multiple instances of Px""" % __version__
 
-# Windows version
-#  6.1 = Windows 7
-#  6.2 = Windows 8
-#  6.3 = Windows 8.1
-# 10.0 = Windows 10
-WIN_VERSION = float(
-    str(sys.getwindowsversion().major) + "." +
-    str(sys.getwindowsversion().minor))
-
 # Proxy modes - source of proxy info
 MODE_NONE = 0
 MODE_CONFIG = 1
@@ -1247,33 +1238,36 @@ def run_pool():
 
 ###
 # Proxy detection
+try:
+    class WINHTTP_CURRENT_USER_IE_PROXY_CONFIG(ctypes.Structure):
+        _fields_ = [("fAutoDetect", ctypes.wintypes.BOOL),
+                    # "Automatically detect settings"
+                    ("lpszAutoConfigUrl", ctypes.wintypes.LPWSTR),
+                    # "Use automatic configuration script, Address"
+                    ("lpszProxy", ctypes.wintypes.LPWSTR),
+                    # "1.2.3.4:5" if "Use the same proxy server for all protocols",
+                    # else advanced
+                    # "ftp=1.2.3.4:5;http=1.2.3.4:5;https=1.2.3.4:5;socks=1.2.3.4:5"
+                    ("lpszProxyBypass", ctypes.wintypes.LPWSTR),
+                    # ";"-separated list
+                    # "Bypass proxy server for local addresses" adds "<local>"
+                ]
 
-class WINHTTP_CURRENT_USER_IE_PROXY_CONFIG(ctypes.Structure):
-    _fields_ = [("fAutoDetect", ctypes.wintypes.BOOL),
-                # "Automatically detect settings"
-                ("lpszAutoConfigUrl", ctypes.wintypes.LPWSTR),
-                # "Use automatic configuration script, Address"
-                ("lpszProxy", ctypes.wintypes.LPWSTR),
-                # "1.2.3.4:5" if "Use the same proxy server for all protocols",
-                # else advanced
-                # "ftp=1.2.3.4:5;http=1.2.3.4:5;https=1.2.3.4:5;socks=1.2.3.4:5"
-                ("lpszProxyBypass", ctypes.wintypes.LPWSTR),
-                # ";"-separated list
-                # "Bypass proxy server for local addresses" adds "<local>"
-               ]
+    class WINHTTP_AUTOPROXY_OPTIONS(ctypes.Structure):
+        _fields_ = [("dwFlags", ctypes.wintypes.DWORD),
+                    ("dwAutoDetectFlags", ctypes.wintypes.DWORD),
+                    ("lpszAutoConfigUrl", ctypes.wintypes.LPCWSTR),
+                    ("lpvReserved", ctypes.c_void_p),
+                    ("dwReserved", ctypes.wintypes.DWORD),
+                    ("fAutoLogonIfChallenged", ctypes.wintypes.BOOL), ]
 
-class WINHTTP_AUTOPROXY_OPTIONS(ctypes.Structure):
-    _fields_ = [("dwFlags", ctypes.wintypes.DWORD),
-                ("dwAutoDetectFlags", ctypes.wintypes.DWORD),
-                ("lpszAutoConfigUrl", ctypes.wintypes.LPCWSTR),
-                ("lpvReserved", ctypes.c_void_p),
-                ("dwReserved", ctypes.wintypes.DWORD),
-                ("fAutoLogonIfChallenged", ctypes.wintypes.BOOL), ]
-
-class WINHTTP_PROXY_INFO(ctypes.Structure):
-    _fields_ = [("dwAccessType", ctypes.wintypes.DWORD),
-                ("lpszProxy", ctypes.wintypes.LPCWSTR),
-                ("lpszProxyBypass", ctypes.wintypes.LPCWSTR), ]
+    class WINHTTP_PROXY_INFO(ctypes.Structure):
+        _fields_ = [("dwAccessType", ctypes.wintypes.DWORD),
+                    ("lpszProxy", ctypes.wintypes.LPCWSTR),
+                    ("lpszProxyBypass", ctypes.wintypes.LPCWSTR), ]
+except AttributeError as e:
+    if platform.system() == 'Windows':
+        raise e
 
 # Parameters for WinHttpOpen, http://msdn.microsoft.com/en-us/library/aa384098(VS.85).aspx
 WINHTTP_NO_PROXY_NAME = 0
@@ -1299,6 +1293,19 @@ WINHTTP_ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT = 12167
 
 def winhttp_find_proxy_for_url(
         url, autodetect=False, pac_url=None, autologon=True):
+
+    if platform.system() != 'Windows':
+        return
+
+    # Windows version
+    #  6.1 = Windows 7
+    #  6.2 = Windows 8
+    #  6.3 = Windows 8.1
+    # 10.0 = Windows 10
+    WIN_VERSION = float(
+        str(sys.getwindowsversion().major) + "." +
+        str(sys.getwindowsversion().minor)) 
+
     # Fix issue #51
     ACCESS_TYPE = WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
     if WIN_VERSION < 6.3:
@@ -1386,56 +1393,60 @@ def load_proxy(quiet=False):
             if not quiet:
                 dprint("Skip proxy refresh")
             return (proxy_mode, proxy_servers)
-
+        
         # Start with clean proxy mode and server list
         proxy_mode = MODE_NONE
         proxy_servers = []
 
-        # Get proxy info from Internet Options
-        ie_proxy_config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG()
-        ok = ctypes.windll.winhttp.WinHttpGetIEProxyConfigForCurrentUser(
-            ctypes.byref(ie_proxy_config))
-        if not ok:
-            if not quiet:
-                dprint(ctypes.GetLastError())
-        else:
-            if ie_proxy_config.fAutoDetect:
-                proxy_mode = MODE_AUTO
-            elif ie_proxy_config.lpszAutoConfigUrl:
-                State.pac = ie_proxy_config.lpszAutoConfigUrl
-                proxy_mode = MODE_PAC
+        try:
+            # Get proxy info from Internet Options
+            ie_proxy_config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG()
+            ok = ctypes.windll.winhttp.WinHttpGetIEProxyConfigForCurrentUser(
+                ctypes.byref(ie_proxy_config))
+            if not ok:
                 if not quiet:
-                    dprint("AutoConfigURL = " + State.pac)
+                    dprint(ctypes.GetLastError())
             else:
-                # Manual proxy
-                proxies = []
-                proxies_str = ie_proxy_config.lpszProxy or ""
-                for proxy_str in proxies_str.lower().replace(
-                        ' ', ';').split(';'):
-                    if '=' in proxy_str:
-                        scheme, proxy = proxy_str.split('=', 1)
-                        if scheme.strip() != "ftp":
-                            proxies.append(proxy)
-                    elif proxy_str:
-                        proxies.append(proxy_str)
-                if proxies:
-                    proxy_servers = parse_proxy(",".join(proxies))
-                    proxy_mode = MODE_MANUAL
+                if ie_proxy_config.fAutoDetect:
+                    proxy_mode = MODE_AUTO
+                elif ie_proxy_config.lpszAutoConfigUrl:
+                    State.pac = ie_proxy_config.lpszAutoConfigUrl
+                    proxy_mode = MODE_PAC
+                    if not quiet:
+                        dprint("AutoConfigURL = " + State.pac)
+                else:
+                    # Manual proxy
+                    proxies = []
+                    proxies_str = ie_proxy_config.lpszProxy or ""
+                    for proxy_str in proxies_str.lower().replace(
+                            ' ', ';').split(';'):
+                        if '=' in proxy_str:
+                            scheme, proxy = proxy_str.split('=', 1)
+                            if scheme.strip() != "ftp":
+                                proxies.append(proxy)
+                        elif proxy_str:
+                            proxies.append(proxy_str)
+                    if proxies:
+                        proxy_servers = parse_proxy(",".join(proxies))
+                        proxy_mode = MODE_MANUAL
 
-                # Proxy exceptions into noproxy
-                bypass_str = ie_proxy_config.lpszProxyBypass or "" # FIXME: Handle "<local>"
-                bypasses = [h.strip() for h in bypass_str.lower().replace(
-                    ' ', ';').split(';')]
-                for bypass in bypasses:
-                    try:
-                        ipns = netaddr.IPGlob(bypass)
-                        State.noproxy.add(ipns)
-                        if not quiet:
-                            dprint("Noproxy += " + bypass)
-                    except:
-                        State.noproxy_hosts.append(bypass)
-                        if not quiet:
-                            dprint("Noproxy hostname += " + bypass)
+                    # Proxy exceptions into noproxy
+                    bypass_str = ie_proxy_config.lpszProxyBypass or "" # FIXME: Handle "<local>"
+                    bypasses = [h.strip() for h in bypass_str.lower().replace(
+                        ' ', ';').split(';')]
+                    for bypass in bypasses:
+                        try:
+                            ipns = netaddr.IPGlob(bypass)
+                            State.noproxy.add(ipns)
+                            if not quiet:
+                                dprint("Noproxy += " + bypass)
+                        except:
+                            State.noproxy_hosts.append(bypass)
+                            if not quiet:
+                                dprint("Noproxy hostname += " + bypass)
+        except(AttributeError):
+            if platform.system() == 'Windows':
+                dprint("Failed to load IE config")
 
         State.proxy_refresh = time.time()
         if not quiet:

@@ -1866,6 +1866,9 @@ def check_installed():
     return ret
 
 def install():
+    if platform.system() != 'Windows':
+        sys.exit("Not implemented")
+
     if check_installed() is False:
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
@@ -1880,6 +1883,9 @@ def install():
     sys.exit()
 
 def uninstall():
+    if platform.system() != 'Windows':
+        sys.exit("Not implemented")
+
     if check_installed() is True:
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
@@ -1896,6 +1902,9 @@ def uninstall():
 # Attach/detach console
 
 def attach_console():
+    if platform.system() != 'Windows':
+        sys.exit("Not implemented")
+
     if ctypes.windll.kernel32.GetConsoleWindow() != 0:
         dprint("Already attached to a console")
         return

@@ -24,7 +24,7 @@ works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-ve
 
 ## Installation
 
-Px can be obtained in multiple ways:-
+Px can be obtained in multiple ways:
 
 - Download the latest binary ZIP from the [releases](https://github.com/genotrance/px/releases)
   page. Once downloaded, extract to a folder of choice and use the `--save`

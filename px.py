@@ -44,10 +44,14 @@ except ImportError:
     sys.exit()
 
 try:
-    import pywintypes
     import sspi
 except ImportError:
-    pprint("Requires module pywin32")
+    pprint("Requires module pywin32 sspi")
+    sys.exit()
+try:
+    import pywintypes
+except ImportError:
+    pprint("Requires module pywin32 pywintypes")
     sys.exit()
 
 try:

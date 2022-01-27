@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 import base64
 import ctypes
@@ -1768,12 +1768,23 @@ def quit(force=False):
 
         try:
             p = psutil.Process(pid)
-            if p.exe().lower() == sys.executable.lower():
-                count += 1
-                if force:
-                    p.kill()
+            if p.exe().lower() == os.path.realpath(sys.executable).lower():
+                sel = sys.executable.lower()
+                qt = False
+                if "python.exe" in sel or "pythonw.exe" in sel:
+                    # Verify px is the script being run by this instance of Python
+                    cmdline = p.cmdline()
+                    if "px" in cmdline or "px.py" in cmdline:
+                        qt = True
                 else:
-                    p.send_signal(signal.CTRL_C_EVENT)
+                    # PyInstaller case
+                    qt = True
+                if qt:
+                    count += 1
+                    if force:
+                        p.kill()
+                    else:
+                        p.send_signal(signal.CTRL_C_EVENT)
         except (psutil.AccessDenied, psutil.NoSuchProcess, PermissionError, SystemError):
             pass
         except:

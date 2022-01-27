@@ -24,63 +24,51 @@ works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-ve
 
 ## Installation
 
-Px can be obtained in multiple ways:
+Px can be easily installed using the Python package manager `pip`. This will
+download and install Px as a Python module along with all dependencies:
 
-- Download the latest binary ZIP from the [releases](https://github.com/genotrance/px/releases)
-  page. Once downloaded, extract to a folder of choice and use the `--save`
-  and `--install` commands as documented below.
+- Latest:
 
-- If Python is already available, Px can be easily installed using the Python
-  package manager `pip`. This will download and install Px along with all
-  dependencies.
+	`pip install git+https://github.com/genotrance/px`
 
-  - Latest: `pip install git+https://github.com/genotrance/px`
+- Stable:
 
-  - Stable: `pip install px-proxy`
+	`pip install px-proxy`
 
-- Px can also be run from source if Python is available.
+The latest Px version can also be downloaded and installed from source:
 
-  - Download a source ZIP of the latest release from above releases link
+- Via git:
 
-  - Clone the latest source:
+	`git clone https://github.com/genotrance/px`
 
-    `git clone https://github.com/genotrance/px`
+- Download [ZIP](https://github.com/genotrance/px/archive/master.zip):
 
-  - Download the latest source ZIP:
+	`https://github.com/genotrance/px/archive/master.zip`
 
-    `https://github.com/genotrance/px/archive/master.zip`
-
-Running from source requires a few dependencies installed. Px along with all
-dependencies can be installed to the standard Python location using:
+Once downloaded, Px can be installed as a standard Python module along
+with all dependencies :
 
   `python setup.py install`
 
-After installation, Px can be run on the command line like an executable and
-the `--save` and `--install` commands can be used per usual.
+Once installed, Px can be run as follows:
+- In the background: `pythonw -m px`
+- In the foreground in a console window: `python -m px`
 
-```
-px --proxy=proxy.server.com --save
-px --install
-````
-
-NOTE: Command line parameters passed with `--install` are not saved for use on
-startup. The `--save` flag or manual editing of `px.ini` is required to provide
-configuration to Px on startup.
-
-If installed, Px can be uninstalled as follows:
-
-```
-px --uninstall
-pip uninstall px-proxy
-```
-
-Lastly, Px can be run as a standard Python script. Download the source as
-described above. Install all dependencies manually using pip and then run Px:
+Lastly, Px can be run as a local Python script without installation. Download the source
+as described above, install all dependencies manually using `pip` and then run Px:
 
 ```
 pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos futures
 
-python px.py --help
+pythonw px.py # run in the background
+python px.py # run in a console window
+```
+
+If installed, Px can be uninstalled as follows:
+
+```
+python -m px --uninstall
+pip uninstall px-proxy
 ```
 
 ## Configuration
@@ -121,6 +109,10 @@ quit by running `px --quit`. When run directly using Python, use `CTRL-C` to qui
 Px can also be setup to automatically run on startup with the --install flag.
 This is done by adding an entry into the Window registry which can be removed
 with `--uninstall`.
+
+NOTE: Command line parameters passed with `--install` are not saved for use on
+startup. The `--save` flag or manual editing of `px.ini` is required to provide
+configuration to Px on startup.
 
 ## Usage
 
@@ -281,9 +273,8 @@ Workaround:
 
 ## Dependencies
 
-Px doesn't have any GUI and runs completely in the background. It is distributed
-using Python 3.x and PyInstaller to have a self-contained executable but can
-also be run using a Python distribution with the following additional packages.
+Px doesn't have any GUI and runs completely in the background. It depends on
+the following Python packages:
 
   `keyring`, `netaddr`, `ntlm-auth`, `psutil`, `pywin32`, `winkerberos`
 
@@ -301,7 +292,9 @@ also configurable.
 
 ## Building
 
-To build an executable, run built.bat. You will need [PyInstaller](https://www.pyinstaller.org) and the Microsoft VC++ toolset. PyInstaller will prompt you with a link if not present.
+To build a self-sufficient executable that does not depend on the presence of Python and
+dependency modules, run `built.bat`. You will need [PyInstaller](https://www.pyinstaller.org)
+and the Microsoft VC++ toolset. PyInstaller will prompt you with a link if not present.
 
   `pip install pyinstaller`
 

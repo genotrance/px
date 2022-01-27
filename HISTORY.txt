@@ -1,4 +1,4 @@
-TBD
+v0.5.0 - 2022-01-26
 - Added support for issue #58 - authentication with user/password when SSPI is
   unavailable or not preferred.
 - Pulled PR #68 to handle case where no longer behind PAC proxy
@@ -14,6 +14,10 @@ TBD
 - Fixed issue where an empty domain was breaking password access
 - Fixed #88, issue 2 in #71, PR #83 - use auth mechanism in order
 - Added code to keep-alive during authentication - issue 3 in #71
+- Fixed #108 - case sensitive authentication response
+- Fixed #116 - Python 3.0 deprecation compatibility
+- Fixed #122 - pywin32 import order
+- Resolved #72 via documentation update
 
 v0.4.0 - 2018-09-04
 - Implemented #18 - support for multiple NTLM proxies that will be iterated

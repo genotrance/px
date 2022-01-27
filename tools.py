@@ -198,6 +198,12 @@ def main():
         delete_release(rel)
         delete_tag_by_name(tag)
 
+    elif "--deps" in sys.argv:
+        os.system("python -m pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos")
+
+    elif "--devel" in sys.argv:
+        os.system("python -m pip install --upgrade build twine")
+
     else:
         print("""
 Flags:

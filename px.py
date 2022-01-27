@@ -465,20 +465,22 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
     proxy_servers = []
     proxy_socket = None
 
+    def close_proxy_socket(self):
+        if self.proxy_socket is not None:
+            dprint("Cleanup proxy connection")
+            self.proxy_socket.shutdown(socket.SHUT_WR)
+            self.proxy_socket.close()
+            self.proxy_socket = None
+
     def handle_one_request(self):
         try:
             httpserver.SimpleHTTPRequestHandler.handle_one_request(self)
         except socket.error as e:
-            dprint("Socket error: %s" % e)
-            if not hasattr(self, "_host_disconnected"):
-                self._host_disconnected = 1
-                dprint("Host disconnected")
-            elif self._host_disconnected < State.max_disconnect:
-                self._host_disconnected += 1
-                dprint("Host disconnected: %d" % self._host_disconnected)
+            if "forcibly closed" in str(e):
+                dprint("Connection closed by client")
             else:
-                dprint("Closed connection to avoid infinite loop")
-                self.close_connection = True
+                dprint("Socket error: %s" % e)
+            self.close_connection = True
 
     def address_string(self):
         host, port = self.client_address[:2]
@@ -604,15 +606,13 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         for i in range(2):
             dprint("Reading response code")
             line = self.proxy_fp.readline(State.max_line)
-            if line == b"\r\n":
+            while line in [b"\r\n", b""]:
                 line = self.proxy_fp.readline(State.max_line)
             try:
                 resp.code = int(line.split()[1])
             except (ValueError, IndexError):
                 dprint("Bad response %s" % line)
-                if line == b"":
-                    dprint("Client closed connection")
-                    return Response(444)
+                return Response(503)
             if (b"connection established" in line.lower() or
                     resp.code == 204 or resp.code == 304):
                 resp.body = False
@@ -627,10 +627,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         while not State.exit:
             line = self.proxy_fp.readline(State.max_line).decode("utf-8")
             if line == b"":
-                if self.proxy_socket:
-                    self.proxy_socket.shutdown(socket.SHUT_WR)
-                    self.proxy_socket.close()
-                    self.proxy_socket = None
+                self.close_proxy_socket()
                 dprint("Proxy closed connection: %s" % resp.code)
                 return Response(444)
             if line == "\r\n":
@@ -879,7 +876,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             # (Proxy-)Connection: close received from proxy -> forward this to
             # the client
             if self.proxy_socket is None:
-                dprint("Proxy connection closed")
+                dprint("Proxy connection is closed")
                 self.send_response(200, "True")
                 self.send_header("Proxy-Connection", "close")
                 self.end_headers()
@@ -971,11 +968,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # either after timeout seconds without data transfer or when at least
         # one side closes the connection. Close both proxy and client
         # connection if still open.
-        if self.proxy_socket is not None:
-            dprint("Cleanup proxy connection")
-            self.proxy_socket.shutdown(socket.SHUT_WR)
-            self.proxy_socket.close()
-            self.proxy_socket = None
+        self.close_proxy_socket()
         self.close_connection = True
 
         dprint("%d bytes read, %d bytes written" % (cl, cs))

@@ -264,8 +264,8 @@ Allow requests from everywhere. Be careful, every client will use your login:
 
   `px --proxy=proxyserver.com:80 --gateway`
 
-NOTE: In Docker for Windows you need to set your proxy to `http://<your_ip>:3128`
-(or actual port Px is listening to) and be aware of https://github.com/docker/for-win/issues/1380.
+NOTE: In Docker for Windows you need to set your proxy to `http://host.docker.internal:3128` or `http://<your_ip>:3128`
+(or actual port Px is listening to) in your containers and be aware of https://github.com/docker/for-win/issues/1380.
 
 Workaround:
 

@@ -178,7 +178,7 @@ def post(tagname):
 
     id = create_release(tagname, "Px for Windows", get_history(), True)
 
-    add_asset_to_release("dist/px.exe", id)
+    #add_asset_to_release("dist/px.exe", id)
 
 def main():
     if "--wheel" in sys.argv:
@@ -202,7 +202,7 @@ def main():
         os.system("python -m pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos")
 
     elif "--devel" in sys.argv:
-        os.system("python -m pip install --upgrade build twine")
+        os.system("python -m pip install --upgrade build twine wheel")
 
     else:
         print("""

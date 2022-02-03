@@ -1,3 +1,6 @@
+TBD
+- Fix #128 - IP:port split once from the right
+
 v0.5.0 - 2022-01-26
 - Added support for issue #58 - authentication with user/password when SSPI is
   unavailable or not preferred.

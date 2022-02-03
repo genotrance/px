@@ -1079,7 +1079,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
         # possibly involving connections
         if State.noproxy.size:
             addr = []
-            spl = netloc.split(":", 1)
+            spl = netloc.rsplit(":", 1)
             try:
                 addr = socket.getaddrinfo(spl[0], int(spl[1]))
             except socket.gaierror:
@@ -1101,7 +1101,7 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
             proxy_str = find_proxy_for_url(
                 ("https://" if "://" not in self.path else "") + self.path)
             if proxy_str == "DIRECT":
-                ipport = netloc.split(":")
+                ipport = netloc.rsplit(":", 1)
                 ipport[1] = int(ipport[1])
                 dprint("Direct connection from PAC")
                 self.path = path
@@ -1469,7 +1469,7 @@ def parse_proxy(proxystrs):
 
     servers = []
     for proxystr in [i.strip() for i in proxystrs.split(",")]:
-        pserver = [i.strip() for i in proxystr.split(":")]
+        pserver = [i.strip() for i in proxystr.rsplit(":", 1)]
         if len(pserver) == 1:
             pserver.append(80)
         elif len(pserver) == 2:

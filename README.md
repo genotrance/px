@@ -24,8 +24,9 @@ works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-ve
 
 ## Installation
 
-Px can be easily installed using the Python package manager `pip`. This will
-download and install Px as a Python module along with all dependencies:
+If Python is already available, Px can be easily installed using the Python
+package manager `pip`. This will download and install Px as a Python module
+along with all dependencies:
 
 - Latest:
 
@@ -70,6 +71,10 @@ If installed, Px can be uninstalled as follows:
 python -m px --uninstall
 pip uninstall px-proxy
 ```
+
+If Python is not available, download the latest binary ZIP from the [releases](https://github.com/genotrance/px/releases)
+page. This binary is compiled using [Nuitka](https://nuitka.net) and contains everything
+needed to run standalone.
 
 ## Configuration
 

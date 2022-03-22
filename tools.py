@@ -257,7 +257,7 @@ def post():
 # Main
 def main():
     if "--release" in sys.argv:
-        sys.argv.append("--wheel", "--nuitka", "--twine", "--post")
+        sys.argv.extend(["--wheel", "--nuitka", "--twine", "--post"])
 
     # Setup
     if "--deps" in sys.argv:

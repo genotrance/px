@@ -1,5 +1,8 @@
-TBD
-- Fix #128 - IP:port split once from the right
+v0.5.1 - 2022-03-22
+- Fixed #128 - IP:port split once from the right
+- Binary is now built using Nuitka
+- Moved PyInstaller build script to tools.py
+- Removed px.ico from PyInstaller build since it upsets anti-virus tools
 
 v0.5.0 - 2022-01-26
 - Added support for issue #58 - authentication with user/password when SSPI is

@@ -45,7 +45,12 @@ $RECYCLE.BIN/
 Network Trash Folder
 Temporary Items
 .apdisk
+build/
 dist/
+px.build/
+px.dist/
+pyinst/
+wheel/
 debug-*
 *.pyc
 .vscode

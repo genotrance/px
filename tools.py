@@ -72,7 +72,7 @@ def pyinstaller():
     os.rename("dist", "pyinst")
 
 def nuitka():
-    rmtree("px.build px.dist")
+    rmtree("__pycache__ px.build px.dist")
 
     os.system(sys.executable + " -m nuitka --standalone --include-module=win32timezone --nofollow-import-to=win32ctypes --prefer-source-code --remove-output px.py")
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "px.dist")
@@ -84,12 +84,12 @@ def nuitka():
         os.system("upx --best px.exe python3*.dll")
 
     remove("_asyncio.pyd _bz2.pyd _decimal.pyd _elementtree.pyd _hashlib.pyd _lzma.pyd _msi.pyd")
-    remove("_overlapped.pyd _queue.pyd _ssl.pyd _uuid.pyd _win32sysloader.pyd _zoneinfo.pyd pyexpat.pyd unicodedata.pyd")
+    remove("_overlapped.pyd _queue.pyd _ssl.pyd _uuid.pyd _win32sysloader.pyd _zoneinfo.pyd pyexpat.pyd")
     remove("libcrypto*.dll libssl*.dll pythoncom*.dll")
 
     os.chdir("..")
 
-    shutil.rmtree("px.build", True)
+    shutil.rmtree("__pycache__ px.build", True)
 
     name = shutil.make_archive("px-v" + __version__, "zip", "px.dist")
     time.sleep(1)

@@ -36,10 +36,13 @@ setup(
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Topic :: Internet :: Proxy Servers"
     ],
     keywords = "proxy ntlm kerberos",
-    py_modules = ["px"],
+    py_modules = ["px", "debug", "wproxy"],
     install_requires = [
         'futures;python_version<"3.0"',
         "keyring",

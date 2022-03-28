@@ -56,3 +56,4 @@ debug-*
 .vscode
 testrun
 *.egg-info
+_*.stats

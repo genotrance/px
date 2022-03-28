@@ -1,3 +1,10 @@
+v0.6.0 - TBD
+- Moved all Windows proxy detection code into wproxy.py, eventually to be made
+  an independent module
+- Moved debugging code into separate debug.py module
+- Removed support for file:// PAC files configured in network settings since
+  Windows 10 no longer supports this scheme (see https://bit.ly/3JKPgjR)
+
 v0.5.1 - 2022-03-22
 - Fixed #128 - IP:port split once from the right
 - Binary is now built using Nuitka

@@ -1169,33 +1169,11 @@ def reload_proxy():
 ###
 # Parse settings and command line
 
-def parse_ip_ranges(iprangesconfig):
-    ipranges = netaddr.IPSet([])
-
-    iprangessplit = [i.strip() for i in iprangesconfig.split(",")]
-    for iprange in iprangessplit:
-        if not iprange:
-            continue
-
-        try:
-            if "-" in iprange:
-                spl = iprange.split("-", 1)
-                ipns = netaddr.IPRange(spl[0], spl[1])
-            elif "*" in iprange:
-                ipns = netaddr.IPGlob(iprange)
-            else:
-                ipns = netaddr.IPNetwork(iprange)
-            ipranges.add(ipns)
-        except:
-            pprint("Bad IP definition: %s" % iprangesconfig)
-            sys.exit()
-    return ipranges
-
 def parse_allow(allow):
-    State.allow = parse_ip_ranges(allow)
+    State.allow = wproxy.parse_noproxy(allow, iponly = True)
 
 def parse_noproxy(noproxy):
-    State.noproxy = parse_ip_ranges(noproxy)
+    State.noproxy = wproxy.parse_noproxy(noproxy, iponly = True)
 
 def set_useragent(useragent):
     State.useragent = useragent

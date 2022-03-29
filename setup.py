@@ -1,6 +1,8 @@
-from setuptools import setup
+"Setup for PyPi"
 
 import os.path
+
+from setuptools import setup
 
 version = ""
 here = os.path.abspath(os.path.dirname(__file__))

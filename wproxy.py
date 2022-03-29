@@ -1,24 +1,33 @@
+"Load proxy information from the operating system"
+
 import copy
 import socket
 import sys
 
+import netaddr
+
 # Python 2.x vs 3.x support
 try:
     import urllib.parse as urlparse
+    import urllib.request as request
 except ImportError:
     import urlparse
+    import urllib as request
 
 # Proxy modes - source of proxy info
 MODE_NONE = 0
 MODE_AUTO = 1
 MODE_PAC = 2
 MODE_MANUAL = 3
-MODE_CONFIG = 4
-MODE_CONFIG_PAC = 5
+MODE_ENV = 4
+MODE_CONFIG = 5
+MODE_CONFIG_PAC = 6
 
+# Direct proxy connection
 DIRECT = ("DIRECT", 80)
 
-dprint = print
+# Debug shortcut
+dprint = lambda x: None
 
 def parse_proxy(proxystrs):
     """
@@ -48,10 +57,165 @@ def parse_proxy(proxystrs):
 
     return servers
 
+def parse_noproxy(noproxystr, iponly = False):
+    """
+    Convert comma/semicolon separated noproxy list of IP1,IP2,host1,host2 and returns two
+    lists: one with IP addreses and ranges, second with hostnames
+      If iponly = True, only allows returns IP addresses and ranges
+    """
+
+    noproxy = netaddr.IPSet([])
+    noproxy_hosts = []
+
+    bypasses = [h for h in noproxystr.lower().replace(' ', ',').replace(';', ',').split(',')]
+    for bypass in bypasses:
+        if len(bypass) == 0:
+            continue
+
+        try:
+            if "-" in bypass:
+                spl = bypass.split("-", 1)
+                ipns = netaddr.IPRange(spl[0], spl[1])
+            elif "*" in bypass:
+                ipns = netaddr.IPGlob(bypass)
+            else:
+                ipns = netaddr.IPNetwork(bypass)
+            noproxy.add(ipns)
+            dprint("Noproxy += " + bypass)
+        except Exception as error:
+            if not iponly:
+                if bypass == "<local>":
+                    # TODO: detect all intranet addresses
+                    noproxy_hosts.append("localhost")
+                    noproxy.add(netaddr.IPNetwork("127.0.0.1/24"))
+                else:
+                    noproxy_hosts.append(bypass)
+                dprint("Noproxy hostname += " + bypass)
+            else:
+                dprint("Bad IP definition: %s" % bypass)
+                raise error
+
+    if iponly:
+        return noproxy
+    else:
+        return noproxy, noproxy_hosts
+
+class _WproxyBase(object):
+    "Load proxy information using urllib.request.getproxies()"
+
+    mode = MODE_NONE
+    servers = None
+    noproxy = None
+    noproxy_hosts = None
+
+    def __init__(self, debug_print = None):
+        global dprint
+        if debug_print is not None:
+            dprint = debug_print
+
+        self.servers = []
+        self.noproxy = netaddr.IPSet([])
+        self.noproxy_hosts = []
+
+        proxy = request.getproxies()
+        if "http" in proxy:
+            self.mode = MODE_ENV
+            self.servers = parse_proxy(proxy["http"])
+
+            if "no" in proxy:
+                self.noproxy, self.noproxy_hosts = parse_noproxy(proxy["no"])
+
+    def get_netloc(self, url):
+        "Split url into netloc = hostname:port and path"
+
+        nloc = url
+        parse = urlparse.urlparse(url, allow_fragments=False)
+        if parse.netloc:
+            nloc = parse.netloc
+        if ":" not in nloc:
+            port = parse.port
+            if not port:
+                if parse.scheme == "http":
+                    port = 80
+                elif parse.scheme == "https":
+                    port = 443
+                elif parse.scheme == "ftp":
+                    port = 21
+            netloc = (nloc, port)
+        else:
+            spl = nloc.rsplit(":", 1)
+            netloc = (spl[0], int(spl[1]))
+
+        path = parse.path or "/"
+        if parse.params:
+            path = path + ";" + parse.params
+        if parse.query:
+            path = path + "?" + parse.query
+
+        dprint("netloc = %s, path = %s" % (netloc, path))
+
+        return netloc, path
+
+    def check_noproxy_for_netloc(self, netloc):
+        """
+        Check if (host, port) is in noproxy list
+        Returns:
+          (IP, port) of netloc to connect directly
+          None to connect through proxy
+        """
+
+        if self.noproxy.size:
+            addr = []
+            try:
+                addr = socket.getaddrinfo(netloc[0], netloc[1])
+            except socket.gaierror:
+                # Couldn't resolve, let parent proxy try, px#18
+                dprint("Couldn't resolve host")
+            if len(addr) != 0 and len(addr[0]) == 5:
+                ipport = addr[0][4]
+                # "%s => %s + %s" % (url, ipport, path)
+
+                if ipport[0] in self.noproxy:
+                    # Direct connection from noproxy configuration
+                    return ipport
+
+    def check_noproxy_for_url(self, url):
+        """
+        Check if url is in noproxy list
+        Returns:
+          (IP, port) of URL to connect directly
+          None to connect through proxy
+        """
+
+        if self.noproxy.size:
+            netloc, path = self.get_netloc(url)
+            return self.check_noproxy_for_netloc(netloc)
+
+    def find_proxy_for_url(self, url):
+        """
+        Return list of proxy servers to use for this url
+            DIRECT can be returned as one of the options in the response
+        """
+
+        netloc, path = self.get_netloc(url)
+        if self.mode == MODE_NONE:
+            # Direct connection since no proxy configured
+            return [DIRECT], netloc, path
+
+        ipport = self.check_noproxy_for_netloc(netloc)
+        if ipport is not None:
+            # Direct connection since in noproxy list
+            return [DIRECT], ipport, path
+
+        if self.mode == MODE_ENV:
+            # Return proxy from the environment
+            return copy.deepcopy(self.servers), netloc, path
+
+        return None, netloc, path
+
 if sys.platform == "win32":
     import ctypes
     import ctypes.wintypes
-    import netaddr
 
     # Windows version
     #  6.1 = Windows 7
@@ -86,8 +250,8 @@ if sys.platform == "win32":
 
     class WINHTTP_PROXY_INFO(ctypes.Structure):
         _fields_ = [("dwAccessType", ctypes.wintypes.DWORD),
-                    ("lpszProxy", ctypes.wintypes.LPCWSTR),
-                    ("lpszProxyBypass", ctypes.wintypes.LPCWSTR), ]
+                    ("lpszProxy", ctypes.wintypes.LPWSTR),
+                    ("lpszProxyBypass", ctypes.wintypes.LPWSTR), ]
 
     # Parameters for WinHttpOpen, http://msdn.microsoft.com/en-us/library/aa384098(VS.85).aspx
     WINHTTP_NO_PROXY_NAME = 0
@@ -112,30 +276,43 @@ if sys.platform == "win32":
     WINHTTP_ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT = 12167
     WINHTTP_ERROR_WINHTTP_AUTODETECTION_FAILED = 12180
 
-    class Wproxy(object):
-        """Load proxy information from the operating system"""
-        mode = MODE_NONE
-        servers = None
-        noproxy = None
-        noproxy_hosts = None
+    class Wproxy(_WproxyBase):
+        "Load proxy information from Windows Internet Options"
 
-        def __init__(self, mode = -1, servers = [], noproxy = netaddr.IPSet([]), noproxy_hosts = [], debug_print = print):
+        def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, noproxy_hosts = None, debug_print = None):
             """
-            Load proxy information from Windows if mode = -1
-              Returns MODE_NONE, MODE_AUTO, MODE_PAC, MODE_MANUAL
+            Load proxy information from Windows Internet Options
+              Returns MODE_NONE, MODE_ENV, MODE_AUTO, MODE_PAC, MODE_MANUAL
+
             Mode can be set to MODE_CONFIG or MODE_CONFIG_PAC
               MODE_CONFIG expects servers = [(proxy1, port), (proxy2, port)]
               MODE_CONFIG_PAC expects servers = [pac_url]
+
+            Order of proxy priority:
+            - Configuration - MODE_CONFIG, MODE_CONFIG_PAC
+            - Internet Options - MODE_AUTO, MODE_PAC, MODE_MANUAL
+            - Environment - MODE_ENV
+
+            Proxy and noproxy details need to come from the same source - they are not merged
             """
 
             global dprint
-            dprint = debug_print
+            if debug_print is not None:
+                dprint = debug_print
 
-            self.noproxy = noproxy
-            self.noproxy_hosts = noproxy_hosts
+            self.servers = []
+            self.noproxy = netaddr.IPSet([])
+            self.noproxy_hosts = []
 
-            if mode == -1:
+            if mode != MODE_NONE:
+                # MODE_CONFIG or MODE_CONFIG_PAC
+                self.mode = mode
+                self.servers = servers or []
+                self.noproxy = noproxy or netaddr.IPSet([])
+                self.noproxy_hosts = noproxy_hosts or []
+            else:
                 # Get proxy info from Internet Options
+                #   MODE_AUTO, MODE_PAC or MODE_MANUAL
                 ie_proxy_config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG()
                 ok = ctypes.windll.winhttp.WinHttpGetIEProxyConfigForCurrentUser(
                     ctypes.byref(ie_proxy_config))
@@ -145,7 +322,7 @@ if sys.platform == "win32":
                     if ie_proxy_config.fAutoDetect:
                         # Mode = Auto detect
                         self.mode = MODE_AUTO
-                    elif ie_proxy_config.lpszAutoConfigUrl:
+                    elif ie_proxy_config.lpszAutoConfigUrl is not None and len(ie_proxy_config.lpszAutoConfigUrl) != 0:
                         # Mode = PAC
                         self.mode = MODE_PAC
                         self.servers = [ie_proxy_config.lpszAutoConfigUrl]
@@ -163,30 +340,22 @@ if sys.platform == "win32":
                             elif proxy_str:
                                 proxies.append(proxy_str)
                         if proxies:
-                            self.servers = parse_proxy(",".join(proxies))
                             self.mode = MODE_MANUAL
+                            self.servers = parse_proxy(",".join(proxies))
 
-                        # Proxy exceptions into noproxy
-                        bypass_str = ie_proxy_config.lpszProxyBypass or "" # FIXME: Handle "<local>"
-                        bypasses = [h.strip() for h in bypass_str.lower().replace(
-                            ' ', ';').split(';')]
-                        for bypass in bypasses:
-                            try:
-                                ipns = netaddr.IPGlob(bypass)
-                                self.noproxy.add(ipns)
-                                dprint("Noproxy += " + bypass)
-                            except:
-                                self.noproxy_hosts.append(bypass)
-                                dprint("Noproxy hostname += " + bypass)
-            else:
-                self.mode = mode
-                self.servers = servers
+                            # Proxy exceptions into noproxy
+                            bypass_str = ie_proxy_config.lpszProxyBypass or ""
+                            self.noproxy, self.noproxy_hosts = parse_noproxy(bypass_str)
+
+            if self.mode == MODE_NONE:
+                # Get from environment since nothing in Internet Options
+                super().__init__()
 
             dprint("Proxy mode = " + str(self.mode))
 
         # Find proxy for specified URL using WinHttp API
         #   Used internally for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC
-        def _winhttp_find_proxy_for_url(self, url, autologon=True):
+        def winhttp_find_proxy_for_url(self, url, autologon=True):
             ACCESS_TYPE = WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
             if WIN_VERSION < 6.3:
                 ACCESS_TYPE = WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
@@ -211,7 +380,7 @@ if sys.platform == "win32":
                     WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A)
                 autoproxy_options.lpszAutoConfigUrl = 0
             else:
-                dprint("_winhttp_find_proxy_for_url only applicable for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC")
+                dprint("winhttp_find_proxy_for_url only applicable for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC")
                 return ""
             autoproxy_options.fAutoLogonIfChallenged = autologon
 
@@ -249,71 +418,29 @@ if sys.platform == "win32":
 
             # TODO: WinHttpCloseHandle(), GlobalFree() on lpszProxy and lpszProxyBypass
 
-        # Split url into netloc = hostname:port and path
-        def _get_netloc(self, url):
-            nl = url
-            parse = urlparse.urlparse(url, allow_fragments=False)
-            if parse.netloc:
-                nl = parse.netloc
-            if ":" not in nl:
-                port = parse.port
-                if not port:
-                    if parse.scheme == "http":
-                        port = 80
-                    elif parse.scheme == "https":
-                        port = 443
-                    elif parse.scheme == "ftp":
-                        port = 21
-                netloc = (nl, port)
-            else:
-                spl = nl.rsplit(":", 1)
-                netloc = (spl[0], int(spl[1]))
-
-            path = parse.path or "/"
-            if parse.params:
-                path = path + ";" + parse.params
-            if parse.query:
-                path = path + "?" + parse.query
-
-            dprint("netloc = %s, path = %s" % (netloc, path))
-
-            return netloc, path
-
-        # Check if url is in noproxy list
-        #   Returns (IP, port) or None
-        def _check_noproxy_for_url(self, netloc, path):
-            if self.noproxy.size:
-                addr = []
-                try:
-                    addr = socket.getaddrinfo(netloc[0], netloc[1])
-                except socket.gaierror:
-                    # Couldn't resolve, let parent proxy try, px#18
-                    dprint("Couldn't resolve host")
-                if len(addr) and len(addr[0]) == 5:
-                    ipport = addr[0][4]
-                    # "%s => %s + %s" % (url, ipport, path)
-
-                    if ipport[0] in self.noproxy:
-                        # Direct connection from noproxy configuration
-                        return ipport
-
-        # Return list of proxy servers to use for this url
-        #   DIRECT can be returned as one of the options in the response
         def find_proxy_for_url(self, url):
-            netloc, path = self._get_netloc(url)
-            ipport = self._check_noproxy_for_url(netloc, path)
-            if not ipport is None:
-                # Direct connection since in noproxy list
-                return [DIRECT], ipport, path
-            elif self.mode == MODE_NONE:
-                # Direct connection since no proxy configured
-                return [DIRECT], netloc, path
+            """
+            Return list of proxy servers to use for this url
+              DIRECT can be returned as one of the options in the response
+            """
+
+            servers, netloc, path = super().find_proxy_for_url(url)
+            if servers is not None:
+                # MODE_NONE, url in no_proxy or MODE_ENV
+                return servers, netloc, path
             elif self.mode in [MODE_AUTO, MODE_PAC, MODE_CONFIG_PAC]:
                 # Use proxies as resolved via WinHttp
-                return parse_proxy(self._winhttp_find_proxy_for_url(url)), netloc, path
+                return parse_proxy(self.winhttp_find_proxy_for_url(url)), netloc, path
             elif self.mode in [MODE_MANUAL, MODE_CONFIG]:
                 # Use specific proxies configured
                 return copy.deepcopy(self.servers), netloc, path
-
 else:
-    pass
+    class Wproxy(_WproxyBase):
+        "Load proxy information from the operating system"
+        pass
+
+if __name__ == "__main__":
+    wp = Wproxy(debug_print=print)
+    print("Servers: " + str(wp.servers))
+    print("Noproxy: " + str(wp.noproxy))
+    print("Noproxy hosts: " + str(wp.noproxy_hosts))

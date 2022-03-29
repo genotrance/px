@@ -53,8 +53,7 @@ def remove(files):
 def wheel():
     rmtree("__pycache__ build dist wheel")
 
-    os.system("python setup.py bdist_wheel --universal -p win32")
-    os.system("python setup.py bdist_wheel --universal -p win-amd64")
+    os.system(sys.executable + " setup.py bdist_wheel --universal")
 
     time.sleep(1)
     rmtree("__pycache__ build px_proxy.egg-info")
@@ -74,24 +73,35 @@ def pyinstaller():
 def nuitka():
     rmtree("__pycache__ px.build px.dist")
 
-    os.system(sys.executable + " -m nuitka --standalone --include-module=win32timezone --nofollow-import-to=win32ctypes --prefer-source-code --remove-output px.py")
+    flags = ""
+    if sys.platform == "win32":
+        flags = "--include-module=win32timezone --nofollow-import-to=win32ctypes"
+    os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --remove-output px.py" % flags)
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "px.dist")
 
     time.sleep(1)
 
     os.chdir("px.dist")
-    if len(shutil.which("upx")) != 0:
-        os.system("upx --best px.exe python3*.dll")
+    if shutil.which("upx") is not None:
+        if sys.platform == "win32":
+            os.system("upx --best px.exe python3*.dll libcrypto*.dll")
+        else:
+            os.system("upx --best px")
 
-    remove("_asyncio.pyd _bz2.pyd _decimal.pyd _elementtree.pyd _hashlib.pyd _lzma.pyd _msi.pyd")
-    remove("_overlapped.pyd _queue.pyd _ssl.pyd _uuid.pyd _win32sysloader.pyd _zoneinfo.pyd pyexpat.pyd")
-    remove("libcrypto*.dll libssl*.dll pythoncom*.dll")
+    if sys.platform == "win32":
+        remove("_asyncio.pyd _bz2.pyd _decimal.pyd _elementtree.pyd _lzma.pyd _msi.pyd _overlapped.pyd ")
+        remove("pyexpat.pyd pythoncom*.dll _queue.pyd *ssl*.* _uuid.pyd _win32sysloader.pyd _zoneinfo.pyd")
+    else:
+        remove("_asyncio.so *bz2*.* *ctypes*.* *curses*.* _decimal.so libmpdec*.* *elementtree*.* *expat*.* ld-musl*.* *lzma*.* *ssl*.* libz*.* zlib.so")
 
     os.chdir("..")
 
     shutil.rmtree("__pycache__ px.build", True)
 
-    name = shutil.make_archive("px-v" + __version__, "zip", "px.dist")
+    arch = "gztar"
+    if sys.platform == "win32":
+        arch = "zip"
+    name = shutil.make_archive("px-v" + __version__, arch, "px.dist")
     time.sleep(1)
     shutil.move(name, "px.dist")
 
@@ -261,20 +271,32 @@ def main():
 
     # Setup
     if "--deps" in sys.argv:
-        os.system(sys.executable + " -m pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos")
+        os.system(sys.executable + " -m pip install keyring netaddr ntlm-auth psutil")
+        if sys.platform == "win32":
+            os.system(sys.executable + " -m pip install pywin32 winkerberos")
 
     if "--devel" in sys.argv:
-        os.system(sys.executable + " -m pip install --upgrade build twine wheel nuitka pyinstaller")
+        if "--wheel" in sys.argv:
+            os.system(sys.executable + " -m pip install --upgrade build twine wheel")
 
-    # Build
-    if "--wheel" in sys.argv:
-        wheel()
+        if sys.platform == "win32":
+            if "--pyinst" in sys.argv:
+                os.system(sys.executable + " -m pip install pyinstaller")
 
-    if "--pyinst" in sys.argv:
-        pyinstaller()
+        if "--nuitka" in sys.argv:
+            os.system(sys.executable + " -m pip install nuitka")
 
-    if "--nuitka" in sys.argv:
-        nuitka()
+    else:
+        # Build
+        if "--wheel" in sys.argv:
+            wheel()
+
+        if sys.platform == "win32":
+            if "--pyinst" in sys.argv:
+                pyinstaller()
+
+        if "--nuitka" in sys.argv:
+            nuitka()
 
     # Delete
     if "--delete" in sys.argv:
@@ -302,6 +324,7 @@ def main():
 Setup:
 --deps		Install all px runtime dependencies
 --devel		Install development dependencies
+  --wheel --pyinst --nuitka
 
 Build:
 --wheel		Build wheels for pypi.org

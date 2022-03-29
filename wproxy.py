@@ -3,9 +3,6 @@
 import copy
 import socket
 import sys
-
-import netaddr
-
 # Python 2.x vs 3.x support
 try:
     import urllib.parse as urlparse
@@ -13,6 +10,12 @@ try:
 except ImportError:
     import urlparse
     import urllib as request
+
+try:
+    import netaddr
+except ImportError:
+    print("Requires module netaddr")
+    sys.exit()
 
 # Proxy modes - source of proxy info
 MODE_NONE = 0
@@ -22,6 +25,11 @@ MODE_MANUAL = 3
 MODE_ENV = 4
 MODE_CONFIG = 5
 MODE_CONFIG_PAC = 6
+
+MODES = [
+    "MODE_NONE", "MODE_AUTO", "MODE_PAC", "MODE_MANUAL",
+    "MODE_ENV", "MODE_CONFIG", "MODE_CONFIG_PAC"
+]
 
 # Direct proxy connection
 DIRECT = ("DIRECT", 80)
@@ -108,7 +116,7 @@ class _WproxyBase(object):
     noproxy = None
     noproxy_hosts = None
 
-    def __init__(self, debug_print = None):
+    def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, debug_print = None):
         global dprint
         if debug_print is not None:
             dprint = debug_print
@@ -117,13 +125,19 @@ class _WproxyBase(object):
         self.noproxy = netaddr.IPSet([])
         self.noproxy_hosts = []
 
-        proxy = request.getproxies()
-        if "http" in proxy:
-            self.mode = MODE_ENV
-            self.servers = parse_proxy(proxy["http"])
+        if mode != MODE_NONE:
+            # MODE_CONFIG or MODE_CONFIG_PAC
+            self.mode = mode
+            self.servers = servers or []
+            noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
+        else:
+            proxy = request.getproxies()
+            if "http" in proxy:
+                self.mode = MODE_ENV
+                self.servers = parse_proxy(proxy["http"])
 
-            if "no" in proxy:
-                self.noproxy, self.noproxy_hosts = parse_noproxy(proxy["no"])
+                if "no" in proxy:
+                    self.noproxy, self.noproxy_hosts = parse_noproxy(proxy["no"])
 
     def get_netloc(self, url):
         "Split url into netloc = hostname:port and path"
@@ -207,8 +221,8 @@ class _WproxyBase(object):
             # Direct connection since in noproxy list
             return [DIRECT], ipport, path
 
-        if self.mode == MODE_ENV:
-            # Return proxy from the environment
+        if self.mode in [MODE_ENV, MODE_CONFIG]:
+            # Return proxy from environment or configuration
             return copy.deepcopy(self.servers), netloc, path
 
         return None, netloc, path
@@ -279,7 +293,7 @@ if sys.platform == "win32":
     class Wproxy(_WproxyBase):
         "Load proxy information from Windows Internet Options"
 
-        def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, noproxy_hosts = None, debug_print = None):
+        def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, debug_print = None):
             """
             Load proxy information from Windows Internet Options
               Returns MODE_NONE, MODE_ENV, MODE_AUTO, MODE_PAC, MODE_MANUAL
@@ -305,12 +319,10 @@ if sys.platform == "win32":
             self.noproxy_hosts = []
 
             if mode != MODE_NONE:
-                # MODE_CONFIG or MODE_CONFIG_PAC
-                self.mode = mode
-                self.servers = servers or []
-                self.noproxy = noproxy or netaddr.IPSet([])
-                self.noproxy_hosts = noproxy_hosts or []
-            else:
+                # Check MODE_CONFIG and MODE_CONFIG_PAC cases
+                super().__init__(mode, servers, noproxy, debug_print)
+
+            if self.mode == MODE_NONE:
                 # Get proxy info from Internet Options
                 #   MODE_AUTO, MODE_PAC or MODE_MANUAL
                 ie_proxy_config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG()
@@ -351,7 +363,7 @@ if sys.platform == "win32":
                 # Get from environment since nothing in Internet Options
                 super().__init__()
 
-            dprint("Proxy mode = " + str(self.mode))
+            dprint("Proxy mode =" + MODES[self.mode])
 
         # Find proxy for specified URL using WinHttp API
         #   Used internally for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC
@@ -426,12 +438,12 @@ if sys.platform == "win32":
 
             servers, netloc, path = super().find_proxy_for_url(url)
             if servers is not None:
-                # MODE_NONE, url in no_proxy or MODE_ENV
+                # MODE_NONE, MODE_ENV, MODE_CONFIG or url in no_proxy
                 return servers, netloc, path
             elif self.mode in [MODE_AUTO, MODE_PAC, MODE_CONFIG_PAC]:
                 # Use proxies as resolved via WinHttp
                 return parse_proxy(self.winhttp_find_proxy_for_url(url)), netloc, path
-            elif self.mode in [MODE_MANUAL, MODE_CONFIG]:
+            elif self.mode in [MODE_MANUAL]:
                 # Use specific proxies configured
                 return copy.deepcopy(self.servers), netloc, path
 else:

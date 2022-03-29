@@ -28,11 +28,15 @@ setup(
     classifiers = [
         "Development Status :: 4 - Beta",
         "Environment :: Win32 (MS Windows)",
+        "Environment :: MacOS X",
         "Intended Audience :: Developers",
         "Intended Audience :: End Users/Desktop",
+        "Intended Audience :: System Administrators",
         "License :: OSI Approved :: MIT License",
         "Natural Language :: English",
+        "Operating System :: MacOS :: MacOS X",
         "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX :: Linux",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3.4",
         "Programming Language :: Python :: 3.5",
@@ -41,6 +45,7 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Topic :: Internet :: Proxy Servers"
     ],
     keywords = "proxy ntlm kerberos",
@@ -51,8 +56,8 @@ setup(
         "netaddr",
         "ntlm-auth",
         "psutil",
-        "pywin32",
-        "winkerberos"
+        'pywin32;platform_system=="Windows"',
+        'winkerberos;platform_system=="Windows"'
     ],
     data_files = [
         ("lib/site-packages/px-proxy", [

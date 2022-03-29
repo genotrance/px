@@ -5,7 +5,6 @@ from __future__ import print_function
 __version__ = "0.6.0"
 
 import base64
-import ctypes
 import multiprocessing
 import os
 import select
@@ -17,7 +16,27 @@ import time
 import traceback
 
 from debug import pprint, Debug
-import wproxy
+
+try:
+    import psutil
+except ImportError:
+    pprint("Requires module psutil")
+    sys.exit()
+
+# Python 2.x vs 3.x support
+try:
+    import configparser
+    import http.server as httpserver
+    import socketserver
+    import urllib.parse as urlparse
+except ImportError:
+    import ConfigParser as configparser
+    import SimpleHTTPServer as httpserver
+    import SocketServer as socketserver
+    import urlparse
+
+    os.getppid = psutil.Process().ppid
+    PermissionError = OSError
 
 # Dependencies
 try:
@@ -33,29 +52,6 @@ except ImportError:
     sys.exit()
 
 try:
-    import psutil
-except ImportError:
-    pprint("Requires module psutil")
-    sys.exit()
-
-try:
-    import sspi
-except ImportError:
-    pprint("Requires module pywin32 sspi")
-    sys.exit()
-try:
-    import pywintypes
-except ImportError:
-    pprint("Requires module pywin32 pywintypes")
-    sys.exit()
-
-try:
-    import winkerberos
-except ImportError:
-    pprint("Requires module winkerberos")
-    sys.exit()
-
-try:
     import ntlm_auth.ntlm
 except ImportError:
     pprint("Requires module ntlm-auth")
@@ -63,29 +59,45 @@ except ImportError:
 
 try:
     import keyring
-    import keyring.backends.Windows
 
-    keyring.set_keyring(keyring.backends.Windows.WinVaultKeyring())
+    # Explicit imports for Nuitka/PyInstaller
+    if sys.platform == "win32":
+        import keyring.backends.Windows
+    elif sys.platform.startswith("linux"):
+        import keyring.backends.SecretService
+    elif sys.platform == "darwin":
+        import keyring.backends.OS_X
 except ImportError:
     pprint("Requires module keyring")
     sys.exit()
 
-# Python 2.x vs 3.x support
-try:
-    import configparser
-    import http.server as httpserver
-    import socketserver
-    import urllib.parse as urlparse
-    import winreg
-except ImportError:
-    import ConfigParser as configparser
-    import SimpleHTTPServer as httpserver
-    import SocketServer as socketserver
-    import urlparse
-    import _winreg as winreg
+if sys.platform == "win32":
+    import ctypes
 
-    os.getppid = psutil.Process().ppid
-    PermissionError = WindowsError
+    # Python 2.x vs 3.x support
+    try:
+        import winreg
+    except ImportError:
+        import _winreg as winreg
+
+    try:
+        import sspi
+    except ImportError:
+        pprint("Requires module pywin32 sspi")
+        sys.exit()
+    try:
+        import pywintypes
+    except ImportError:
+        pprint("Requires module pywin32 pywintypes")
+        sys.exit()
+
+    try:
+        import winkerberos
+    except ImportError:
+        pprint("Requires module winkerberos")
+        sys.exit()
+
+import wproxy
 
 HELP = """Px v%s
 
@@ -118,9 +130,7 @@ Configuration:
   --proxy=  --server=  proxy:server= in INI file
   NTLM server(s) to connect through. IP:port, hostname:port
     Multiple proxies can be specified comma separated. Px will iterate through
-    and use the one that works. Required field unless --noproxy is defined. If
-    remote server is not in noproxy list and proxy is undefined, Px will reject
-    the request
+    and use the one that works
 
   --pac=  proxy:pac=
   PAC file to use to connect
@@ -195,8 +205,7 @@ Configuration:
 
   --proxyreload=  settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60
-    Proxy info reloaded from a PAC file found via WPAD or AutoConfig URL, or
-    manual proxy info defined in Internet Options
+    Proxy info reloaded from manual proxy info defined in Internet Options
 
   --foreground  settings:foreground=
   Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
@@ -222,8 +231,7 @@ class State(object):
     exit = False
     hostonly = False
     debug = None
-    noproxy = netaddr.IPSet([])
-    noproxy_hosts = []
+    noproxy = ""
     pac = ""
     wproxy = None
     proxy_refresh = None
@@ -312,6 +320,8 @@ def b64encode(val):
         return base64.encodebytes(val)
 
 class AuthMessageGenerator:
+    get_response = None
+
     def __init__(self, proxy_type, proxy_server_address):
         pwd = ""
         if State.username:
@@ -322,9 +332,12 @@ class AuthMessageGenerator:
 
         if proxy_type == "NTLM":
             if not pwd:
-                self.ctx = sspi.ClientAuth("NTLM",
-                  os.environ.get("USERNAME"), scflags=0)
-                self.get_response = self.get_response_sspi
+                if sys.platform == "win32":
+                    self.ctx = sspi.ClientAuth("NTLM",
+                    os.environ.get("USERNAME"), scflags=0)
+                    self.get_response = self.get_response_sspi
+                else:
+                    dprint("No password configured for NTLM authentication")
             else:
                 self.ctx = ntlm_auth.ntlm.NtlmContext(
                     State.username, pwd, State.domain, "", ntlm_compatibility=3)
@@ -349,13 +362,15 @@ class AuthMessageGenerator:
 
                     if any(char in State.username or char in pwd
                             for char in illegal_control_characters):
-                        dprint("Credentials contain invalid characters: %s" % ", ".join("0x" + "%x" % ord(char) for char in illegal_control_characters))
+                        dprint("Credentials contain invalid characters: %s" %
+                            ", ".join("0x" + "%x" % ord(char) for char in illegal_control_characters))
                     else:
                         # Remove newline appended by base64 function
                         self.ctx = b64encode(
                             "%s:%s" % (State.username, pwd))[:-1].decode()
-            self.get_response = self.get_response_basic
-        else:
+                        self.get_response = self.get_response_basic
+        elif sys.platform == "win32":
+            # winkerberos only on Windows
             principal = None
             if pwd:
                 if State.domain:
@@ -369,6 +384,8 @@ class AuthMessageGenerator:
                 proxy_server_address, principal=principal, gssflags=0,
                 mech_oid=winkerberos.GSS_MECH_OID_SPNEGO)
             self.get_response = self.get_response_wkb
+        else:
+            dprint("Unsupported proxy_type: " + proxy_type)
 
     def get_response_sspi(self, challenge=None):
         dprint("pywin32 SSPI")
@@ -633,8 +650,12 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
                     if header[0].lower() == "proxy-authenticate":
                         proxy_auth += header[1] + " "
 
+                # Limited support on Linux for now
+                supported = ["NTLM", "BASIC"]
+                if sys.platform == "win32":
+                    supported.extend(["KERBEROS", "NEGOTIATE"])
                 for auth in proxy_auth.split():
-                    if auth.upper() in ["NTLM", "KERBEROS", "NEGOTIATE", "BASIC"]:
+                    if auth.upper() in supported:
                         proxy_type = auth
                         break
 
@@ -677,6 +698,8 @@ class Proxy(httpserver.SimpleHTTPRequestHandler):
 
                 # Generate auth message
                 ntlm = AuthMessageGenerator(proxy_type, self.proxy_address[0])
+                if ntlm.get_response == None:
+                    return Response(503)
                 ntlm_resp = ntlm.get_response()
                 if ntlm_resp is None:
                     dprint("Bad auth response")
@@ -1066,9 +1089,10 @@ def print_banner():
         multiprocessing.current_process().name)
     )
 
-    if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
-        if State.config.getint("settings", "foreground") == 0:
-            detach_console()
+    if sys.platform == "win32":
+        if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
+            if State.config.getint("settings", "foreground") == 0:
+                detach_console()
 
     for section in State.config.sections():
         for option in State.config.options(section):
@@ -1155,7 +1179,7 @@ def reload_proxy():
             return
 
         # Reload proxy information
-        State.wproxy = wproxy.Wproxy(noproxy = State.noproxy, debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(debug_print = dprint)
 
         State.proxy_refresh = time.time()
         dprint("Proxy mode = " + str(State.wproxy.mode))
@@ -1173,7 +1197,7 @@ def parse_allow(allow):
     State.allow = wproxy.parse_noproxy(allow, iponly = True)
 
 def parse_noproxy(noproxy):
-    State.noproxy = wproxy.parse_noproxy(noproxy, iponly = True)
+    State.noproxy = noproxy
 
 def set_useragent(useragent):
     State.useragent = useragent
@@ -1270,8 +1294,9 @@ def parse_config():
         State.debug = Debug(dfile(), "w")
         dprint = State.debug.get_print()
 
-    if getattr(sys, "frozen", False) is not False or "pythonw.exe" in sys.executable:
-        attach_console()
+    if sys.platform == "win32":
+        if getattr(sys, "frozen", False) is not False or "pythonw.exe" in sys.executable:
+            attach_console()
 
     if "-h" in sys.argv or "--help" in sys.argv:
         pprint(HELP)
@@ -1388,10 +1413,11 @@ def parse_config():
 
     servers = wproxy.parse_proxy(State.config.get("proxy", "server"))
 
-    if "--install" in sys.argv:
-        install()
-    elif "--uninstall" in sys.argv:
-        uninstall()
+    if sys.platform == "win32":
+        if "--install" in sys.argv:
+            install()
+        elif "--uninstall" in sys.argv:
+            uninstall()
     elif "--quit" in sys.argv:
         quit()
     elif "--save" in sys.argv:
@@ -1406,9 +1432,9 @@ def parse_config():
             port = State.config.getint("proxy", "port")
             pac = "http://%s:%d/PxPACFile.pac" % (host, port)
             dprint("PAC URL is local: " + pac)
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [pac], State.noproxy, debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [pac], debug_print = dprint)
     else:
-        State.wproxy = wproxy.Wproxy(noproxy = State.noproxy, debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(debug_print = dprint)
         State.proxy_refresh = time.time()
 
     socket.setdefaulttimeout(State.config.getfloat("settings", "socktimeout"))
@@ -1441,7 +1467,10 @@ def quit(force=False):
                     if force:
                         p.kill()
                     else:
-                        p.send_signal(signal.CTRL_C_EVENT)
+                        if sys.platform == "win32":
+                            p.send_signal(signal.CTRL_C_EVENT)
+                        else:
+                            p.send_signal(signal.SIGINT)
         except (psutil.AccessDenied, psutil.NoSuchProcess, PermissionError, SystemError):
             pass
         except:
@@ -1491,106 +1520,107 @@ def get_script_path():
     # Frozen mode
     return sys.executable
 
-def get_script_cmd():
-    spath = get_script_path()
-    if os.path.splitext(spath)[1].lower() == ".py":
-        return sys.executable + ' "%s"' % spath
+if sys.platform == "win32":
+    def get_script_cmd():
+        spath = get_script_path()
+        if os.path.splitext(spath)[1].lower() == ".py":
+            return sys.executable + ' "%s"' % spath
 
-    return spath
+        return spath
 
-def check_installed():
-    ret = True
-    runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-        r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
-    try:
-        winreg.QueryValueEx(runkey, "Px")
-    except:
-        ret = False
-    winreg.CloseKey(runkey)
-
-    return ret
-
-def install():
-    if check_installed() is False:
+    def check_installed():
+        ret = True
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
-            winreg.KEY_WRITE)
-        winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ,
-            get_script_cmd())
-        winreg.CloseKey(runkey)
-        pprint("Px installed successfully")
-    else:
-        pprint("Px already installed")
-
-    sys.exit()
-
-def uninstall():
-    if check_installed() is True:
-        runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
-            winreg.KEY_WRITE)
-        winreg.DeleteValue(runkey, "Px")
-        winreg.CloseKey(runkey)
-        pprint("Px uninstalled successfully")
-    else:
-        pprint("Px is not installed")
-
-    sys.exit()
-
-###
-# Attach/detach console
-
-def attach_console():
-    if ctypes.windll.kernel32.GetConsoleWindow() != 0:
-        dprint("Already attached to a console")
-        return
-
-    # Find parent cmd.exe if exists
-    pid = os.getpid()
-    while True:
+            r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
         try:
-            p = psutil.Process(pid)
-        except psutil.NoSuchProcess:
-            # No such parent - started without console
-            pid = -1
-            break
+            winreg.QueryValueEx(runkey, "Px")
+        except:
+            ret = False
+        winreg.CloseKey(runkey)
 
-        if os.path.basename(p.name()).lower() in [
-                "cmd", "cmd.exe", "powershell", "powershell.exe"]:
-            # Found it
-            break
+        return ret
 
-        # Search parent
-        pid = p.ppid()
+    def install():
+        if check_installed() is False:
+            runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
+                winreg.KEY_WRITE)
+            winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ,
+                get_script_cmd())
+            winreg.CloseKey(runkey)
+            pprint("Px installed successfully")
+        else:
+            pprint("Px already installed")
 
-    # Not found, started without console
-    if pid == -1:
-        dprint("No parent console to attach to")
-        return
+        sys.exit()
 
-    dprint("Attaching to console " + str(pid))
-    if ctypes.windll.kernel32.AttachConsole(pid) == 0:
-        dprint("Attach failed with error " +
-            str(ctypes.windll.kernel32.GetLastError()))
-        return
+    def uninstall():
+        if check_installed() is True:
+            runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
+                winreg.KEY_WRITE)
+            winreg.DeleteValue(runkey, "Px")
+            winreg.CloseKey(runkey)
+            pprint("Px uninstalled successfully")
+        else:
+            pprint("Px is not installed")
 
-    if ctypes.windll.kernel32.GetConsoleWindow() == 0:
-        dprint("Not a console window")
-        return
+        sys.exit()
 
-    reopen_stdout()
+    ###
+    # Attach/detach console
 
-def detach_console():
-    if ctypes.windll.kernel32.GetConsoleWindow() == 0:
-        return
+    def attach_console():
+        if ctypes.windll.kernel32.GetConsoleWindow() != 0:
+            dprint("Already attached to a console")
+            return
 
-    restore_stdout()
+        # Find parent cmd.exe if exists
+        pid = os.getpid()
+        while True:
+            try:
+                p = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                # No such parent - started without console
+                pid = -1
+                break
 
-    if not ctypes.windll.kernel32.FreeConsole():
-        dprint("Free console failed with error " +
-            str(ctypes.windll.kernel32.GetLastError()))
-    else:
-        dprint("Freed console successfully")
+            if os.path.basename(p.name()).lower() in [
+                    "cmd", "cmd.exe", "powershell", "powershell.exe"]:
+                # Found it
+                break
+
+            # Search parent
+            pid = p.ppid()
+
+        # Not found, started without console
+        if pid == -1:
+            dprint("No parent console to attach to")
+            return
+
+        dprint("Attaching to console " + str(pid))
+        if ctypes.windll.kernel32.AttachConsole(pid) == 0:
+            dprint("Attach failed with error " +
+                str(ctypes.windll.kernel32.GetLastError()))
+            return
+
+        if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+            dprint("Not a console window")
+            return
+
+        reopen_stdout()
+
+    def detach_console():
+        if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+            return
+
+        restore_stdout()
+
+        if not ctypes.windll.kernel32.FreeConsole():
+            dprint("Free console failed with error " +
+                str(ctypes.windll.kernel32.GetLastError()))
+        else:
+            dprint("Freed console successfully")
 
 ###
 # Startup

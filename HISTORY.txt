@@ -1,9 +1,12 @@
-v0.6.0 - TBD
+v0.6.0 - 2022-04-02
 - Moved all Windows proxy detection code into wproxy.py, eventually to be made
   an independent module
 - Moved debugging code into separate debug.py module
 - Removed support for file:// PAC files configured in network settings since
   Windows 10 no longer supports this scheme (see https://bit.ly/3JKPgjR)
+- Added support in wproxy to detect proxies defined via environment variables
+- Added support for Linux - only NTLM and BASIC authentication are supported
+  for now, PAC files are not supported and Px is limited to a single process
 
 v0.5.1 - 2022-03-22
 - Fixed #128 - IP:port split once from the right

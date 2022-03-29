@@ -1,4 +1,5 @@
 [![Chat on Gitter](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/genotrance/px)
+[![Chat on Matrix](https://img.shields.io/matrix/genotrance_px:matrix.org)](https://matrix.to/#/#genotrance_px:matrix.org)
 
 # Px
 
@@ -6,8 +7,10 @@
 Px is a HTTP(s) proxy server that allows applications to authenticate through
 an NTLM or Kerberos proxy server, typically used in corporate deployments,
 without having to deal with the actual handshake. It is primarily designed to
-run on Windows systems and authenticates on behalf of the application using the
-currently logged in Windows user account.
+run on Windows systems and automatically authenticates on using the currently
+logged in Windows user account. It is also possible to run Px on Windows, Linux
+and MacOS when single signon is not available by configuring the domain, username
+and password to authenticate with.
 
 Px is similar to "NTLM Authorization Proxy Server" [NTLMAPS](http://ntlmaps.sourceforge.net/)
 and [Cntlm](http://cntlm.sourceforge.net/) in that it sits between the corporate
@@ -17,7 +20,8 @@ requiring any user supplied credentials. This is accomplished by using Microsoft
 SSPI to generate the tokens and signatures required to authenticate with the proxy.
 
 Px also supports Kerberos and works with user supplied credentials for cases
-where SSPI is not available.
+where SSPI is not available. Kerberos/Negotiate support is only available on
+Windows at this time.
 
 Microsoft provides a good starting point to understand how NTLM [authentication](https://msdn.microsoft.com/en-us/library/dd925287.aspx)
 works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc772815(v=ws.10)) (warning: long!)
@@ -80,29 +84,38 @@ needed to run standalone.
 
 Px requires only one piece of information in order to function - the server
 name and port of the proxy server. This needs to be configured in px.ini. If not
-specified, Px will check Internet Options for any proxy definitions and use them.
-Without this, Px will not work and exit immediately.
+specified, Px will check Internet Options or environment variables for any proxy
+definitions and use them. Without this, Px will try to connect to sites directly.
 
 The noproxy capability allows Px to connect to hosts in the configured subnets
 directly, bypassing the proxy altogether. This allows clients to connect to
 hosts within the intranet without requiring additional configuration for each
-client or at the proxy. If noproxy is defined, the proxy is optional - this
-allows Px to run as a regular proxy full time if required.
+client or at the proxy.
+
+### Credentials
 
 If SSPI is not available or not preferred, providing a `username` in `domain\username`
 format allows Px to authenticate as that user. The corresponding password is
-retrieved using Python keyring and needs to be setup directly in the backend.
+retrieved using Python keyring and needs to be setup directly in the appropriate
+OS specific backend.
 
-On Windows, Credential Manager is the backend and can be accessed as follows:
+On Windows, Credential Manager is the backend and Px looks for a 'generic credential'
+type with 'Px' as the network address name. Credential Manager and can be accessed
+as follows:
 
-    Control Panel > User Accounts > Credential Manager > Windows Credentials
+  Control Panel > User Accounts > Credential Manager > Windows Credentials
 
-Or run command line
+  Or on the command line: `rundll32.exe keymgr.dll, KRShowKeyMgr`
 
-    rundll32.exe keymgr.dll, KRShowKeyMgr
+On Linux, Gnome Keyring or KWallet can be used to store passwords.
 
-Px looks for a 'generic credential' type with 'Px' as the network address name. More
-information on keyring backends can be found [here](https://pypi.org/project/keyring). 
+If Python is available, credentials can be setup with:
+
+  `python -m keyring set Px username`
+
+More information on keyring backends can be found [here](https://pypi.org/project/keyring).
+
+### Misc
 
 There are a few other settings to tweak in the INI file but most are obvious.
 All settings can be specified on the command line for convenience. The INI file
@@ -146,11 +159,9 @@ Configuration:
   Specify config file. Valid file path, default: px.ini in working directory
 
   --proxy=  --server=  proxy:server= in INI file
-    Proxy server(s) to connect through. IP:port, hostname:port
+  NTLM server(s) to connect through. IP:port, hostname:port
     Multiple proxies can be specified comma separated. Px will iterate through
-    and use the one that works. Required field unless --noproxy is defined. If
-    remote server is not in noproxy list and proxy is undefined, Px will reject
-    the request
+    and use the one that works
 
   --pac=  proxy:pac=
   PAC file to use to connect
@@ -185,7 +196,7 @@ Configuration:
 
   --noproxy=  proxy:noproxy=
   Direct connect to specific subnets like a regular proxy. Comma separated
-    Skip the proxy for connections to these subnets
+    Skip the NTLM proxy for connections to these subnets
     127.0.0.1 - specific ip
     192.168.0.* - wildcards
     192.168.0.1-192.168.0.255 - ranges
@@ -195,7 +206,7 @@ Configuration:
   Override or send User-Agent header on client's behalf
 
   --username=  proxy:username=
-  Authentication to use when SSPI is unavailable. Format is domain\username
+  Authentication to use when SSPI is unavailable. Format is domain\\username
   Service name "Px" and this username are used to retrieve the password using
   Python keyring. Px only retrieves credentials and storage should be done
   directly in the keyring backend.
@@ -224,9 +235,8 @@ Configuration:
   Timeout in seconds for connections before giving up. Valid float, default: 20
 
   --proxyreload=  settings:proxyreload=
-  Time interval in seconds before reloading proxy info. Valid int, default: 60
-    Proxy info is reloaded from a PAC file found via WPAD or AutoConfig URL, or
-    manual proxy info defined in Internet Options
+  Time interval in seconds before refreshing proxy info. Valid int, default: 60
+    Proxy info reloaded from manual proxy info defined in Internet Options
 
   --foreground  settings:foreground=
   Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
@@ -281,12 +291,11 @@ Workaround:
 Px doesn't have any GUI and runs completely in the background. It depends on
 the following Python packages:
 
-  `keyring`, `netaddr`, `ntlm-auth`, `psutil`, `pywin32`, `winkerberos`
+  `keyring`, `netaddr`, `ntlm-auth`, `psutil`
+
+  `pywin32`, `winkerberos` on Windows
 
   `futures` on Python 2.x
-
-Px is tested with the latest releases of Python 2.7, 3.5, 3.6 and 3.7 using the
-Miniconda distribution.
 
 In order to make Px a capable proxy server, it is designed to run in multiple
 processes. The number of parallel workers or processes is configurable. However,
@@ -295,25 +304,26 @@ sockets across processes in Windows. On older versions of Python, Px will run
 multi-threaded but in a single process. The number of threads per process is
 also configurable.
 
+On Linux, Px only runs in a single process. Further, only NTLM and BASIC auth
+are supported and there is no PAC support. These limitations should be removed
+over time.
+
+While it should mostly work, Px is not tested on MacOSX since there's no test
+environment available at this time to verify functionality. PRs are welcome to
+help fix any issues.
+
 ## Building
 
-To build a self-sufficient executable that does not depend on the presence of Python and
-dependency modules, run `built.bat`. You will need [PyInstaller](https://www.pyinstaller.org)
-and the Microsoft VC++ toolset. PyInstaller will prompt you with a link if not present.
-
-  `pip install pyinstaller`
-
-If it complains about missing libraries, then you may modify build.bat to give it the path to the MS dlls:
-
-  `pyinstaller --clean --paths "C:\Program Files (x86)\Windows Kits\10\Redist\ucrt\DLLs\x64" --noupx -w -F -i px.ico px.py --hidden-import win32timezone --exclude-module win32ctypes`
-
-Substitute the correct path for your system.
+To build a self-sufficient executable that does not depend on the presence of
+Python and dependency modules, both Nuitka and PyInstaller scripts are provided.
+Run `python tools.py` for more details.
 
 ## Feedback
 
 Px is definitely a work in progress and any feedback or suggestions are welcome.
 It is hosted on [GitHub](https://github.com/genotrance/px) with an MIT license
-so issues, forks and PRs are most appreciated. Also join us on [Gitter](https://gitter.im/genotrance/px)
+so issues, forks and PRs are most appreciated. Join us on the [discussion](https://github.com/genotrance/px/discussions)
+board, [Gitter](https://gitter.im/genotrance/px) or [Matrix](https://matrix.to/#/#genotrance_px:matrix.org)
 to chat about Px.
 
 ## Credits

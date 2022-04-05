@@ -48,8 +48,8 @@ Temporary Items
 build/
 dist/
 px.build/
-px.dist/
-pyinst/
+px.dist*/
+pyinst*/
 wheel/
 debug-*
 *.pyc

@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 import base64
 import multiprocessing
@@ -1114,7 +1114,9 @@ def start_worker(pipeout):
     httpd = ThreadedTCPServer((
         State.config.get("proxy", "listen").strip(),
         State.config.getint("proxy", "port")), Proxy, bind_and_activate=False)
-    mainsock = socket.fromshare(pipeout.recv())
+    mainsock = pipeout.recv()
+    if hasattr(socket, "fromshare"):
+        mainsock = socket.fromshare(mainsock)
     httpd.socket = mainsock
 
     print_banner()
@@ -1136,16 +1138,28 @@ def run_pool():
 
     print_banner()
 
-    if hasattr(socket, "fromshare"):
-        workers = State.config.getint("settings", "workers")
-        for i in range(workers-1):
-            (pipeout, pipein) = multiprocessing.Pipe()
-            p = multiprocessing.Process(target=start_worker, args=(pipeout,))
-            p.daemon = True
-            p.start()
-            while p.pid is None:
-                time.sleep(1)
-            pipein.send(mainsock.share(p.pid))
+    if sys.platform != "darwin":
+        # Multiprocessing enabled on Windows and Linux, no idea how shared sockets
+        # work on MacOSX
+        if sys.platform == "linux" or hasattr(socket, "fromshare"):
+            # Windows needs Python > 3.3 which added socket.fromshare()- have to
+            # explicitly share socket with child processes
+            #
+            # Linux shares all open FD with children since it uses fork()
+            workers = State.config.getint("settings", "workers")
+            for i in range(workers-1):
+                (pipeout, pipein) = multiprocessing.Pipe()
+                p = multiprocessing.Process(target=start_worker, args=(pipeout,))
+                p.daemon = True
+                p.start()
+                while p.pid is None:
+                    time.sleep(1)
+                if hasattr(socket, "fromshare"):
+                    # Send duplicate socket explicitly shared with child for Windows
+                    pipein.send(mainsock.share(p.pid))
+                else:
+                    # Send socket as is for Linux
+                    pipein.send(mainsock)
 
     serve_forever(httpd)
 

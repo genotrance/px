@@ -304,9 +304,8 @@ sockets across processes in Windows. On older versions of Python, Px will run
 multi-threaded but in a single process. The number of threads per process is
 also configurable.
 
-On Linux, Px only runs in a single process. Further, only NTLM and BASIC auth
-are supported and there is no PAC support. These limitations should be removed
-over time.
+On Linux, Px only supports NTLM and BASIC auth and there is no PAC support.
+These limitations should be removed over time.
 
 While it should mostly work, Px is not tested on MacOSX since there's no test
 environment available at this time to verify functionality. PRs are welcome to

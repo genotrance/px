@@ -1,12 +1,15 @@
 import glob
 import json
 import os
+import platform
 import requests
 import shutil
 import sys
 import time
 
 from px import __version__
+
+import distro
 
 REPO = "genotrance/px"
 
@@ -51,59 +54,64 @@ def remove(files):
                 pass
 
 def wheel():
-    rmtree("__pycache__ build dist wheel")
+    rmtree("build dist wheel")
 
     os.system(sys.executable + " setup.py bdist_wheel --universal")
 
     time.sleep(1)
-    rmtree("__pycache__ build px_proxy.egg-info")
+    rmtree("build px_proxy.egg-info")
     os.rename("dist", "wheel")
 
 def pyinstaller():
-    rmtree("__pycache__ build dist pyinst")
+    did = distro.id().replace("32", "")
+    dist = "pyinst-%s-%s" % (did, platform.machine().lower())
+    rmtree("build dist " + dist)
 
     os.system("pyinstaller --clean --noupx -w -F px.py --hidden-import win32timezone --exclude-module win32ctypes")
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "dist")
 
     time.sleep(1)
     os.remove("px.spec")
-    rmtree("__pycache__ build")
-    os.rename("dist", "pyinst")
+    rmtree("build")
+    os.rename("dist", dist)
 
 def nuitka():
-    rmtree("__pycache__ px.build px.dist")
+    did = distro.id().replace("32", "")
+    outdir = "px.dist-%s-%s" % (did, platform.machine().lower())
+    dist = os.path.join(outdir, "px.dist")
+    shutil.rmtree(outdir, True)
 
+    # Build
     flags = ""
     if sys.platform == "win32":
         flags = "--include-module=win32timezone --nofollow-import-to=win32ctypes"
-    os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --remove-output px.py" % flags)
-    copy("px.ini HISTORY.txt LICENSE.txt README.md", "px.dist")
+    os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
+    copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
 
     time.sleep(1)
 
-    os.chdir("px.dist")
+    # Compress some binaries
+    os.chdir(dist)
     if shutil.which("upx") is not None:
         if sys.platform == "win32":
             os.system("upx --best px.exe python3*.dll libcrypto*.dll")
         else:
             os.system("upx --best px")
 
+    # Remove unused modules
     if sys.platform == "win32":
         remove("_asyncio.pyd _bz2.pyd _decimal.pyd _elementtree.pyd _lzma.pyd _msi.pyd _overlapped.pyd ")
         remove("pyexpat.pyd pythoncom*.dll _queue.pyd *ssl*.* _uuid.pyd _win32sysloader.pyd _zoneinfo.pyd")
     else:
         remove("_asyncio.so *bz2*.* *ctypes*.* *curses*.* _decimal.so libmpdec*.* *elementtree*.* *expat*.* ld-musl*.* *lzma*.* *ssl*.* libz*.* zlib.so")
 
+    # Create archive
     os.chdir("..")
-
-    shutil.rmtree("__pycache__ px.build", True)
-
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"
-    name = shutil.make_archive("px-v" + __version__, arch, "px.dist")
-    time.sleep(1)
-    shutil.move(name, "px.dist")
+    shutil.make_archive("px-v%s-%s" % (__version__, did), arch, "px.dist")
+    os.chdir("..")
 
 # Github related
 
@@ -260,9 +268,10 @@ def post():
 
     delete_tag_by_name(tagname)
 
-    id = create_release(tagname, "Px for Windows", get_history(), True)
+    id = create_release(tagname, "Px v" + __version__, get_history(), True)
 
-    add_asset_to_release("px.dist/px-v" + __version__ + ".zip", id)
+    for archive in glob.glob("px.dist*/px-v%s*" % __version__):
+        add_asset_to_release(archive, id)
 
 # Main
 def main():
@@ -313,7 +322,8 @@ def main():
         os.system("twine upload wheel/*.whl")
 
     if "--post" in sys.argv:
-        if not os.path.exists("px.dist/px-v" + __version__ + ".zip"):
+        bins = glob.glob("px.dist*/px-v%s*" % __version__)
+        if len(bins) == 0:
             nuitka()
         post()
 

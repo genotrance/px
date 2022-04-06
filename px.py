@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 import base64
 import multiprocessing
@@ -1432,7 +1432,8 @@ def parse_config():
             install()
         elif "--uninstall" in sys.argv:
             uninstall()
-    elif "--quit" in sys.argv:
+
+    if "--quit" in sys.argv:
         quit()
     elif "--save" in sys.argv:
         save()

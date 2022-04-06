@@ -1,4 +1,7 @@
-v0.6.1 - TBD
+v0.6.2 - 2022-04-06
+- Fixed #137 - quit() and save() don't work on Windows
+
+v0.6.1 - 2022-04-05
 - Enabled multiprocessing on Linux
 
 v0.6.0 - 2022-04-02

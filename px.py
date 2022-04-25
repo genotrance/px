@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 import base64
 import multiprocessing
@@ -1208,7 +1208,7 @@ def reload_proxy():
 # Parse settings and command line
 
 def parse_allow(allow):
-    State.allow = wproxy.parse_noproxy(allow, iponly = True)
+    State.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
 
 def parse_noproxy(noproxy):
     State.noproxy = noproxy

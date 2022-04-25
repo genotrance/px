@@ -44,10 +44,11 @@ def parse_proxy(proxystrs):
       Raises ValueError if bad proxy format
     """
 
-    if not proxystrs or len(proxystrs) == 0:
-        return []
-
     servers = []
+
+    if proxystrs is None or len(proxystrs) == 0:
+        return servers
+
     for proxystr in [i.strip() for i in proxystrs.split(",")]:
         pserver = [i.strip() for i in proxystr.rsplit(":", 1)]
         if len(pserver) == 1:
@@ -68,12 +69,15 @@ def parse_proxy(proxystrs):
 def parse_noproxy(noproxystr, iponly = False):
     """
     Convert comma/semicolon separated noproxy list of IP1,IP2,host1,host2 and returns two
-    lists: one with IP addreses and ranges, second with hostnames
-      If iponly = True, only allows returns IP addresses and ranges
+    lists: one with IP addresses and ranges, second with hostnames
+      Raises exception for non-IP definitions if iponly = True
     """
 
     noproxy = netaddr.IPSet([])
     noproxy_hosts = []
+
+    if noproxystr is None or len(noproxystr) == 0:
+        return noproxy, noproxy_hosts
 
     bypasses = [h for h in noproxystr.lower().replace(' ', ',').replace(';', ',').split(',')]
     for bypass in bypasses:
@@ -103,10 +107,7 @@ def parse_noproxy(noproxystr, iponly = False):
                 dprint("Bad IP definition: %s" % bypass)
                 raise error
 
-    if iponly:
-        return noproxy
-    else:
-        return noproxy, noproxy_hosts
+    return noproxy, noproxy_hosts
 
 class _WproxyBase(object):
     "Load proxy information using urllib.request.getproxies()"
@@ -129,7 +130,7 @@ class _WproxyBase(object):
             # MODE_CONFIG or MODE_CONFIG_PAC
             self.mode = mode
             self.servers = servers or []
-            noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
+            self.noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
         else:
             proxy = request.getproxies()
             if "http" in proxy:

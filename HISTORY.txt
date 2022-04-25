@@ -1,3 +1,6 @@
+v0.6.3 - 2022-04-25
+- Fixed #139, #141 - bug in noproxy parsing
+
 v0.6.2 - 2022-04-06
 - Fixed #137 - quit() and save() don't work on Windows
 

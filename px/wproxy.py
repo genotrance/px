@@ -93,7 +93,6 @@ def parse_noproxy(noproxystr, iponly = False):
             else:
                 ipns = netaddr.IPNetwork(bypass)
             noproxy.add(ipns)
-            dprint("Noproxy += " + bypass)
         except Exception as error:
             if not iponly:
                 if bypass == "<local>":
@@ -102,7 +101,6 @@ def parse_noproxy(noproxystr, iponly = False):
                     noproxy.add(netaddr.IPNetwork("127.0.0.1/24"))
                 else:
                     noproxy_hosts.append(bypass)
-                dprint("Noproxy hostname += " + bypass)
             else:
                 dprint("Bad IP definition: %s" % bypass)
                 raise error
@@ -364,7 +362,7 @@ if sys.platform == "win32":
                 # Get from environment since nothing in Internet Options
                 super().__init__()
 
-            dprint("Proxy mode =" + MODES[self.mode])
+            dprint("Proxy mode = " + MODES[self.mode])
 
         # Find proxy for specified URL using WinHttp API
         #   Used internally for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC

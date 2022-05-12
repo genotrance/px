@@ -1,30 +1,52 @@
 "Setup for PyPi"
 
 import os.path
+import sys
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
-version = ""
-here = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(here, "px.py")) as f:
-    for line in f.readlines():
-        if "__version__" in line:
-            version = line.strip().replace('"', '').split()[-1]
-            break
+from px.version import __version__
 
 long_description = ""
+here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(here, "README.md")) as f:
-    long_description = f.read().split("\n\n")[2].replace("\n", " ").split("? ")[1]
+    long_description = f.read()
+
+data_files = [
+    ("lib/site-packages/px", [
+        "HISTORY.txt",
+        "LICENSE.txt",
+        "README.md",
+        "px.ico",
+        "px.ini"
+    ])
+]
+if "bdist_wheel" in sys.argv:
+    dll = ""
+    if "win32" in sys.argv:
+        dll = "libcurl.dll"
+    elif "win-amd64" in sys.argv:
+        dll = "libcurl-x64.dll"
+
+    if len(dll) != 0:
+        dllpath = os.path.join("px/libcurl", dll)
+        if os.path.exists(os.path.join(here, dllpath)):
+            data_files.append((
+                "lib/site-packages/px/libcurl",
+                [dllpath]))
+        else:
+            print(dllpath + " missing, skipping in wheel")
 
 setup(
     name = "px-proxy",
-    version = version,
+    version = __version__,
     description = "An HTTP proxy server to automatically authenticate through an NTLM proxy",
     long_description = long_description,
+    long_description_content_type = "text/markdown",
     url = "https://github.com/genotrance/px",
     author = "Ganesh Viswanathan",
     author_email = "dev@genotrance.com",
-    platforms = "Windows",
+    platforms = ["Windows", "Linux", "MacOS X"],
     classifiers = [
         "Development Status :: 4 - Beta",
         "Environment :: Win32 (MS Windows)",
@@ -49,28 +71,17 @@ setup(
         "Topic :: Internet :: Proxy Servers"
     ],
     keywords = "proxy ntlm kerberos",
-    py_modules = ["px", "debug", "wproxy"],
+    packages = find_packages(),
     install_requires = [
         'futures;python_version<"3.0"',
         "keyring",
         "netaddr",
-        "ntlm-auth",
-        "psutil",
-        'pywin32;platform_system=="Windows"',
-        'winkerberos;platform_system=="Windows"'
+        "psutil"
     ],
-    data_files = [
-        ("lib/site-packages/px-proxy", [
-            "HISTORY.txt",
-            "LICENSE.txt",
-            "README.md",
-            "px.ico",
-            "px.ini"
-        ])
-    ],
+    data_files = data_files,
     entry_points = {
         "console_scripts": [
-            "px=px:main"
+            "px=px.main:main"
         ]
     },
     project_urls = {

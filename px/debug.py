@@ -17,48 +17,76 @@ def pprint(*objs):
 class Debug(object):
     "Redirect stdout to a file for debugging"
 
-    def __init__(self, name, mode):
-        self.name = name
-        self.mode = mode
+    stdout = None
+    stderr = None
+    file = None
+    name = ""
+    mode = ""
+
+    def __init__(self, name = "", mode = ""):
+        if isinstance(sys.stdout, Debug):
+            # Restore stdout since child inherits parent's Debug instance on Linux
+            sys.stderr = sys.stdout.stderr
+            sys.stdout = sys.stdout.stdout
+
         self.stdout = sys.stdout
         self.stderr = sys.stderr
-        self.reopen()
+        if len(name) != 0:
+            self.name = name
+            self.mode = mode
+            self.reopen()
 
     def reopen(self):
         "Restart debug redirection - can be called after self.close()"
         sys.stdout = self
         sys.stderr = self
-        self.file = open(self.name, self.mode)
+        if len(self.name) != 0:
+            self.file = open(self.name, self.mode)
 
     def close(self):
         "Turn off debug redirection"
         sys.stdout = self.stdout
         sys.stderr = self.stderr
-        self.file.close()
+        if len(self.name) != 0:
+            self.file.close()
 
     def write(self, data):
         "Write data to debug file and stdout"
-        try:
-            self.file.write(data)
-        except:
-            pass
+        if self.file is not None:
+            try:
+                self.file.write(data)
+            except:
+                pass
         if self.stdout is not None:
             self.stdout.write(data)
         self.flush()
 
     def flush(self):
         "Flush data to debug file and stdout after write"
-        self.file.flush()
-        os.fsync(self.file.fileno())
+        if self.file is not None:
+            self.file.flush()
+            os.fsync(self.file.fileno())
         if self.stdout is not None:
             self.stdout.flush()
 
     def print(self, msg):
         "Print message to stdout and debug file if open"
+        offset = 0
+        tree = ""
+        while True:
+            try:
+                name = sys._getframe(offset).f_code.co_name
+                offset += 1
+                if name != "print":
+                    tree = "/" + name + tree
+                if offset > 3:
+                    break
+            except ValueError:
+                break
         sys.stdout.write(
             multiprocessing.current_process().name + ": " +
             threading.current_thread().name + ": " + str(int(time.time())) +
-            ": " + sys._getframe(1).f_code.co_name + ": " + msg + "\n")
+            ": " + tree + ": " + msg + "\n")
 
     def get_print(self):
         "Get self.print() method to call directly as print(msg)"

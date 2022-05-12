@@ -2,14 +2,20 @@ import glob
 import json
 import os
 import platform
-import requests
 import shutil
 import sys
 import time
+import urllib.request
+import zipfile
 
-from px import __version__
+try:
+    import distro
+    import requests
+except ModuleNotFoundError as exc:
+    if "--setup" not in sys.argv:
+        raise exc
 
-import distro
+from px.version import __version__
 
 REPO = "genotrance/px"
 
@@ -34,6 +40,9 @@ def get_auth():
 def rmtree(dirs):
     for dir in dirs.split(" "):
         shutil.rmtree(dir, True)
+        time.sleep(0.1)
+        if os.path.exists(dir):
+            shutil.rmtree(dir, True)
 
 def copy(files, dir):
     for file in files.split(" "):
@@ -53,21 +62,57 @@ def remove(files):
             except:
                 pass
 
+def extract(zfile, cfile):
+    with zipfile.ZipFile(zfile) as czip:
+        for file in czip.namelist():
+            if file.endswith(cfile):
+                member = czip.open(file)
+                with open(cfile, "wb") as dll:
+                    shutil.copyfileobj(member, dll)
+
+def get_curl():
+    os.chdir("px/libcurl")
+
+    try:
+        for bit, ext in {"32": "", "64": "-x64"}.items():
+            lcurl = "libcurl%s.dll" % ext
+            lcurlzip = "curl%s.zip" % bit
+            if not os.path.exists(lcurl):
+                if not os.path.exists(lcurlzip):
+                    urllib.request.urlretrieve("https://curl.se/windows/curl-win%s-latest.zip" % bit, lcurlzip)
+                extract(lcurlzip, lcurl)
+                os.remove(lcurlzip)
+
+                if shutil.which("strip") is not None:
+                    os.system("strip -s " + lcurl)
+                if shutil.which("upx") is not None:
+                    os.system("upx --best " + lcurl)
+
+    finally:
+        os.chdir("../..")
+
 def wheel():
-    rmtree("build dist wheel")
+    rmtree("build wheel")
 
-    os.system(sys.executable + " setup.py bdist_wheel --universal")
+    get_curl()
 
-    time.sleep(1)
+    os.system(sys.executable + " setup.py bdist_wheel --universal -d wheel -k")
+    rmtree("build")
+    os.system(sys.executable + " setup.py bdist_wheel -p win32 -d wheel -k")
+    rmtree("build")
+    os.system(sys.executable + " setup.py bdist_wheel -p win-amd64 -d wheel -k")
+
+    # Check wheels
+    os.system(sys.executable + " -m twine check wheel/*")
+
     rmtree("build px_proxy.egg-info")
-    os.rename("dist", "wheel")
 
 def pyinstaller():
     did = distro.id().replace("32", "")
     dist = "pyinst-%s-%s" % (did, platform.machine().lower())
     rmtree("build dist " + dist)
 
-    os.system("pyinstaller --clean --noupx -w -F px.py --hidden-import win32timezone --exclude-module win32ctypes")
+    os.system("pyinstaller --clean --noupx -w -F px.py --hidden-import win32timezone")
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "dist")
 
     time.sleep(1)
@@ -84,9 +129,16 @@ def nuitka():
     # Build
     flags = ""
     if sys.platform == "win32":
-        flags = "--include-module=win32timezone --nofollow-import-to=win32ctypes"
+        flags = "--include-module=win32timezone"
     os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
     copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
+    if sys.platform == "win32":
+        pxdir = os.path.join(dist, "px")
+        lcdir = os.path.join(pxdir, "libcurl")
+        os.mkdir(pxdir)
+        os.mkdir(lcdir)
+        # 64-bit only for Windows for now
+        copy(os.path.join("px", "libcurl", "libcurl-x64.dll"), lcdir)
 
     time.sleep(1)
 
@@ -97,13 +149,6 @@ def nuitka():
             os.system("upx --best px.exe python3*.dll libcrypto*.dll")
         else:
             os.system("upx --best px")
-
-    # Remove unused modules
-    if sys.platform == "win32":
-        remove("_asyncio.pyd _bz2.pyd _decimal.pyd _elementtree.pyd _lzma.pyd _msi.pyd _overlapped.pyd ")
-        remove("pyexpat.pyd pythoncom*.dll _queue.pyd *ssl*.* _uuid.pyd _win32sysloader.pyd _zoneinfo.pyd")
-    else:
-        remove("_asyncio.so *bz2*.* *ctypes*.* *curses*.* _decimal.so libmpdec*.* *elementtree*.* *expat*.* ld-musl*.* *lzma*.* *ssl*.* libz*.* zlib.so")
 
     # Create archive
     os.chdir("..")
@@ -275,25 +320,20 @@ def post():
 
 # Main
 def main():
-    if "--release" in sys.argv:
-        sys.argv.extend(["--wheel", "--nuitka", "--twine", "--post"])
-
     # Setup
-    if "--deps" in sys.argv:
-        os.system(sys.executable + " -m pip install keyring netaddr ntlm-auth psutil")
-        if sys.platform == "win32":
-            os.system(sys.executable + " -m pip install pywin32 winkerberos")
+    if "--setup" in sys.argv:
+        os.system(sys.executable + " -m pip install --upgrade keyring netaddr psutil")
+        os.system(sys.executable + " -m pip install --upgrade build distro nuitka requests twine wheel")
+        if sys.platform == "linux":
+            os.system(sys.executable + " -m pip install --upgrade keyrings.alt keyring_jeepney netifaces")
 
-    if "--devel" in sys.argv:
-        if "--wheel" in sys.argv:
-            os.system(sys.executable + " -m pip install --upgrade build twine wheel")
+        get_curl()
 
-        if sys.platform == "win32":
-            if "--pyinst" in sys.argv:
-                os.system(sys.executable + " -m pip install pyinstaller")
+        sys.exit()
 
-        if "--nuitka" in sys.argv:
-            os.system(sys.executable + " -m pip install nuitka")
+    elif "--libcurl" in sys.argv:
+        get_curl()
+        sys.exit()
 
     else:
         # Build
@@ -332,9 +372,8 @@ def main():
     if len(sys.argv) == 1:
         print("""
 Setup:
---deps		Install all px runtime dependencies
---devel		Install development dependencies
-  --wheel --pyinst --nuitka
+--setup		Install all px runtime and development dependencies
+--libcurl	Download and extract libcurl binaries for Windows
 
 Build:
 --wheel		Build wheels for pypi.org
@@ -351,9 +390,6 @@ Post:
   --tag=vX.X.X	Use specified tag
 
 --token=$GITHUB_TOKEN required for Github operations
-
-Release:
---release	Build and release to Github and Pypi.org
 """)
 
 if __name__ == "__main__":

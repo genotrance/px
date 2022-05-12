@@ -1,0 +1,793 @@
+"Manage outbound HTTP connections using Curl & CurlMulti"
+
+import ctypes
+import hashlib
+import select
+import socket
+import sys
+import threading
+import time
+
+try:
+    from . import libcurl
+except OSError as exc:
+    print("Requires libcurl")
+    if sys.platform == "win32":
+        print("  Download from https://curl.se/windows and extract DLLs to px/libcurl")
+    else:
+        print("  Install libcurl with package manager")
+    sys.exit()
+
+# Debug shortcut
+dprint = lambda x: None
+MCURL = None
+
+# Merging ideas from:
+#   https://github.com/pycurl/pycurl/blob/master/examples/multi-socket_action-select.py
+#   https://github.com/fsbs/aiocurl
+
+def sanitized(msg):
+    "Hide user sensitive data from debug output"
+    lower = msg.lower()
+    if "authorization: " in lower or "authenticate: " in lower or \
+        lower.startswith("proxy auth using"):
+        # Hide SSPI responses and username
+        spl = msg.split(" ")
+        if len(spl) > 2 or "authorization: " in lower:
+            return " ".join(spl[0:-1]) + " sanitized len(%d)" % len(spl[-1])
+    return msg
+
+def gethash(easy):
+    "Return hash value for easy to allow usage as a dict key"
+    return hashlib.sha1(easy).hexdigest()
+
+def getauth(auth):
+    """
+    Return auth value for specified authentication string
+
+    Supported values can be found here: https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html
+
+    Skip the CURLAUTH_ portion in input - e.g. getauth("ANY")
+
+    To control which methods are available during proxy detection:
+      Prefix NO to avoid method - e.g. NONTLM => ANY - NTLM
+      Prefix SAFENO to avoid method - e.g. SAFENONTLM => ANYSAFE - NTLM
+      Prefix ONLY to support only that method - e.g ONLYNTLM => ONLY + NTLM
+    """
+    authval = libcurl.CURLAUTH_NONE
+    if auth.startswith("NO"):
+        auth = auth[len("NO"):]
+        authval = libcurl.CURLAUTH_ANY & ~(getattr(libcurl, "CURLAUTH_" + auth))
+    elif auth.startswith("SAFENO"):
+        auth = auth[len("SAFENO"):]
+        authval = libcurl.CURLAUTH_ANYSAFE & ~(getattr(libcurl, "CURLAUTH_" + auth))
+    elif auth.startswith("ONLY"):
+        auth = auth[len("ONLY"):]
+        authval = libcurl.CURLAUTH_ONLY | getattr(libcurl, "CURLAUTH_" + auth)
+    else:
+        authval = getattr(libcurl, "CURLAUTH_" + auth)
+
+    return authval
+
+# Active thread running callbacks can print debug output for any other
+# thread's easy - cannot assume it is for this thread. All dprint()s
+# include easyhash to correlate instead
+
+@libcurl.debug_callback
+def _debug_callback(easy, infotype, data, size, userp):
+    "Prints out curl debug info and headers sent/received"
+
+    del userp
+    easyhash = gethash(easy)
+    if infotype == libcurl.CURLINFO_TEXT:
+        prefix = easyhash + ": Curl info: "
+    elif infotype == libcurl.CURLINFO_HEADER_IN:
+        prefix = easyhash + ": Received header <= "
+    elif infotype == libcurl.CURLINFO_HEADER_OUT:
+        prefix = easyhash + ": Sent header => "
+    else:
+        return libcurl.CURLE_OK
+
+    msgs = bytes(data[:size]).decode("utf-8").strip()
+    if "\r\n" in msgs:
+        for msg in msgs.split("\r\n"):
+            if len(msg) != 0:
+                dprint(prefix + sanitized(msg))
+    else:
+        if len(msgs) != 0:
+            dprint(prefix + sanitized(msgs))
+
+    return libcurl.CURLE_OK
+
+@libcurl.read_callback
+def _read_callback(buffer, size, nitems, userdata):
+    tsize = size * nitems
+    curl = MCURL.handles[libcurl.from_oid(userdata)]
+    if curl.size is not None:
+        if curl.size > tsize:
+            curl.size -= tsize
+        else:
+            tsize = curl.size
+            curl.size = None
+        ctypes.memmove(buffer,
+            curl.client_rfile.read(tsize), tsize)
+    else:
+        tsize = 0
+
+    dprint(curl.easyhash + ": Read %d bytes" % tsize)
+    return tsize
+
+@libcurl.write_callback
+def _write_callback(buffer, size, nitems, userdata):
+    tsize = size * nitems
+    curl = MCURL.handles[libcurl.from_oid(userdata)]
+    if tsize > 0:
+        if curl.sentheaders:
+            try:
+                tsize = curl.client_wfile.write(bytes(buffer[:tsize]))
+            except (ConnectionError, BrokenPipeError) as exc:
+                dprint(curl.easyhash + ": Write error: " + str(exc))
+                return 0
+        else:
+            dprint(curl.easyhash + ": Skipped %d bytes" % tsize)
+            return tsize
+
+    dprint(curl.easyhash + ": Wrote %d bytes" % tsize)
+    return tsize
+
+@libcurl.write_callback
+def _header_callback(buffer, size, nitems, userdata):
+    tsize = size * nitems
+    curl = MCURL.handles[libcurl.from_oid(userdata)]
+    if tsize > 0:
+        data = bytes(buffer[:tsize])
+        if curl.suppress:
+            if data == b"\r\n":
+                # Stop suppressing headers since done
+                dprint(curl.easyhash + ": Resuming headers")
+                curl.suppress = False
+            return tsize
+        else:
+            if data == b"\r\n":
+                # Done sending headers
+                dprint(curl.easyhash + ": Done sending headers")
+                curl.sentheaders = True
+            elif b"407 Proxy Authentication Required" in data:
+                # Don't send back proxy headers
+                dprint(curl.easyhash + ": Suppressing headers")
+                curl.suppress = True
+                return tsize
+        try:
+            return curl.client_wfile.write(data)
+        except (ConnectionError, BrokenPipeError) as exc:
+            dprint("Header write error: " + str(exc))
+            return 0
+
+    return 0
+
+class Curl:
+    "Helper class to manage a curl easy instance"
+
+    # Data
+    easy = None
+    easyhash = None
+    sock_fd = None
+
+    # For plain HTTP
+    client_rfile = None
+    client_wfile = None
+
+    # Request info
+    method = None
+    proxy = None
+    size = None
+    url = None
+    headers = None
+    user = None
+    auth = None
+
+    # Status
+    done = False
+    errstr = ""
+    resp = 503
+    sentheaders = False
+    suppress = False
+
+    def __init__(self, url, method = "GET", request_version = "HTTP/1.1", connect_timeout = 60):
+        """
+        Initialize curl instance
+
+        method = GET, POST, PUT, CONNECT, etc.
+        request_version = HTTP/1.0, HTTP/1.1, etc.
+        """
+        self.easy = libcurl.easy_init()
+        self.easyhash = gethash(self.easy)
+        dprint(self.easyhash + ": New curl instance")
+
+        self._setup(url, method, request_version, connect_timeout)
+
+    def __del__(self):
+        if self.headers is not None:
+            libcurl.slist_free_all(self.headers)
+        libcurl.easy_cleanup(self.easy)
+
+    def _setup(self, url, method, request_version, connect_timeout):
+        dprint(self.easyhash + ": %s %s using %s" % (method, url, request_version))
+
+        # Ignore proxy environment variables
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXY, b"")
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_NOPROXY, b"")
+
+        # Timeouts
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CONNECTTIMEOUT, int(connect_timeout))
+        #libcurl.easy_setopt(self.easy, libcurl.CURLOPT_TIMEOUT, 60)
+
+        # Set HTTP method
+        self.method = method
+        if method == "CONNECT":
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CONNECT_ONLY, True)
+
+            # We want libcurl to make a simple HTTP connection to auth
+            # with the upstream proxy and let client establish SSL
+            if "://" not in url:
+                url = "http://" + url
+        elif method == "GET":
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPGET, True)
+        elif method == "HEAD":
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_NOBODY, True)
+        elif method == "POST":
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_POST, True)
+        elif method == "PUT":
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_UPLOAD, True)
+        elif method in ["PATCH", "DELETE"]:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CUSTOMREQUEST, method.encode("utf-8"))
+        else:
+            dprint(self.easyhash + ": Unknown method: " + method)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CUSTOMREQUEST, method.encode("utf-8"))
+
+        self.url = url
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_URL, url.encode("utf-8"))
+
+        # Set HTTP version to use
+        version = request_version.split("/")[1].replace(".", "_")
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_VERSION,
+            getattr(libcurl, "CURL_HTTP_VERSION_" + version))
+
+    def reset(self, url, method = "GET", request_version = "HTTP/1.1", connect_timeout = 60):
+        "Reuse existing curl instance for another request"
+        dprint(self.easyhash + ": Resetting curl")
+        libcurl.easy_reset(self.easy)
+        self.sock_fd = None
+        self.proxy = None
+        self.size = None
+        self.done = False
+        self.errstr = ""
+        self.sentheaders = False
+        self.suppress = False
+
+        if self.headers is not None:
+            libcurl.slist_free_all(self.headers)
+            self.headers = None
+
+        self._setup(url, method, request_version, connect_timeout)
+
+    def is_connect(self):
+        "True if this is an HTTP CONNECT request"
+        return self.method == "CONNECT"
+
+    def is_upload(self):
+        "True if this is an HTTP PUT or POST request"
+        return self.method in ["PUT", "POST"]
+
+    def is_patch(self):
+        "True if this is an HTTP PATCH request"
+        return self.method in ["PATCH"]
+
+    def get_response(self):
+        "Return response code of completed request"
+        codep = ctypes.c_int()
+        if self.method == "CONNECT":
+            ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_HTTP_CONNECTCODE, ctypes.byref(codep))
+        else:
+            ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_RESPONSE_CODE, ctypes.byref(codep))
+        return ret, codep.value
+
+    def set_proxy(self, proxy, port = 0, noproxy = None):
+        """
+        Set proxy options - returns False if this proxy server has auth failures
+        """
+        if proxy in MCURL.failed:
+            dprint("Authentication issues with this proxy server")
+            return False
+
+        self.proxy = proxy
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXY, proxy.encode("utf-8"))
+        if port != 0:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPORT, port)
+        if noproxy is not None:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_NOPROXY, noproxy.encode("utf-8"))
+
+        if self.is_connect():
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPPROXYTUNNEL, True)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SUPPRESS_CONNECT_HEADERS, True)
+
+        return True
+
+    def set_auth(self, user, password = None, auth = "ANY"):
+        "Set authentication info"
+        if user == ":":
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYUSERPWD, user.encode("utf-8"))
+        else:
+            self.user = user
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYUSERNAME, user.encode("utf-8"))
+            if password is not None:
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPASSWORD, password.encode("utf-8"))
+            else:
+                dprint("Blank password")
+        if auth is not None:
+            self.auth = auth
+
+            authval = getauth(auth)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYAUTH, authval)
+
+    def set_headers(self, xheaders):
+        "Set headers to send"
+        self.headers = ctypes.POINTER(libcurl.slist)()
+        for header in xheaders:
+            if self.proxy is not None and header.lower().startswith("proxy-"):
+                # Skip all proxy headers if no proxy configured
+                dprint(self.easyhash + ": Skipping header =!> %s: %s" % (header, xheaders[header]))
+                continue
+            elif header.lower() == "content-length":
+                size = int(xheaders[header])
+                if self.is_upload():
+                    # Save content-length for PUT/POST later
+                    # Turn off Transfer-Encoding since size is known
+                    self.size = size
+                    self.headers = libcurl.slist_append(self.headers, b"Transfer-Encoding:")
+                    self.headers = libcurl.slist_append(self.headers, b"Expect:")
+                    libcurl.easy_setopt(self.easy, libcurl.CURLOPT_POSTFIELDSIZE, size)
+                elif self.is_patch():
+                    # Get data from client - libcurl doesn't seem to use READFUNCTION
+                    data = self.client_rfile.read(size)
+                    libcurl.easy_setopt(self.easy, libcurl.CURLOPT_COPYPOSTFIELDS, data)
+            elif header.lower() == "user-agent":
+                # Forward user agent via setopt
+                self.set_useragent(xheaders[header])
+                continue
+            self.headers = libcurl.slist_append(self.headers,
+                ("%s: %s" % (header, xheaders[header])).encode("utf-8"))
+
+        if len(xheaders) != 0:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPHEADER, self.headers)
+
+    def set_verbose(self, enable = True):
+        "Set verbose mode"
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_VERBOSE, enable)
+
+    def set_debug(self, enable = True):
+        "Enable debug output"
+        self.set_verbose(enable)
+        if enable:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _debug_callback)
+        else:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, None)
+
+    def bridge(self, client_rfile, client_wfile):
+        "Bridge curl reads/writes to socket specified"
+        dprint(self.easyhash + ": Setting up bridge")
+        self.client_rfile = client_rfile
+        self.client_wfile = client_wfile
+
+        # Setup read/write callbacks
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_READFUNCTION, _read_callback)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_READDATA, id(self.easyhash))
+
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_WRITEFUNCTION, _write_callback)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_WRITEDATA, id(self.easyhash))
+
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HEADERFUNCTION, _header_callback)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HEADERDATA, id(self.easyhash))
+
+        # Turn off transfer decoding - let client do it
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_TRANSFER_DECODING, False)
+
+    def set_useragent(self, useragent):
+        "Set user agent to send"
+        if len(useragent) != 0:
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_USERAGENT, useragent.encode("utf-8"))
+
+@libcurl.socket_callback
+def _socket_callback(easy, sock_fd, ev_bitmask, userp, socketp):
+    # libcurl socket callback: add/remove actions for socket events
+    del easy, userp, socketp
+    if ev_bitmask & libcurl.CURL_POLL_IN or ev_bitmask & libcurl.CURL_POLL_INOUT:
+        #dprint("Read sock_fd %d" % sock_fd)
+        if sock_fd not in MCURL.rlist:
+            MCURL.rlist.append(sock_fd)
+
+    if ev_bitmask & libcurl.CURL_POLL_OUT or ev_bitmask & libcurl.CURL_POLL_INOUT:
+        #dprint("Write sock_fd %d" % sock_fd)
+        if sock_fd not in MCURL.wlist:
+            MCURL.wlist.append(sock_fd)
+
+    if ev_bitmask & libcurl.CURL_POLL_REMOVE:
+        #dprint("Remove sock_fd %d" % sock_fd)
+        if sock_fd in MCURL.rlist:
+            MCURL.rlist.remove(sock_fd)
+        if sock_fd in MCURL.wlist:
+            MCURL.wlist.remove(sock_fd)
+
+    return libcurl.CURLE_OK
+
+@libcurl.multi_timer_callback
+def _timer_callback(multi, timeout_ms, userp):
+    # libcurl timer callback: schedule/cancel a timeout action
+    #dprint("timeout = %d" % timeout_ms)
+    del multi, userp
+    if timeout_ms == -1:
+        MCURL.timer = None
+    else:
+        MCURL.timer = timeout_ms / 1000.0
+
+    return libcurl.CURLE_OK
+
+@libcurl.sockopt_callback
+def _sockopt_callback(clientp, sock_fd, purpose):
+    # Associate new socket with last handle added
+    #dprint("sock_fd = %d" % sock_fd)
+    del clientp, purpose
+    if MCURL.last is not None:
+        MCURL.last.sock_fd = sock_fd
+        MCURL.last = None
+
+    return libcurl.CURLE_OK
+
+def curl_version():
+    "Display curl version information"
+    dprint(libcurl.version().decode("utf-8"))
+    vinfo = libcurl.version_info(libcurl.CURLVERSION_NOW).contents
+    for feature in [
+        "CURL_VERSION_SSL", "CURL_VERSION_SSPI", "CURL_VERSION_SPNEGO",
+        "CURL_VERSION_GSSAPI", "CURL_VERSION_GSSNEGOTIATE",
+        "CURL_VERSION_KERBEROS5", "CURL_VERSION_NTLM", "CURL_VERSION_NTLM_WB"
+    ]:
+        bit = getattr(libcurl, feature)
+        avail = True if (bit & vinfo.features) > 0 else False
+        dprint("%s: %s" % (feature, avail))
+    dprint("Host: " + vinfo.host.decode("utf-8"))
+
+class MCurl:
+    "Helper class to manage a curl multi instance"
+
+    _multi = None
+    _lock = None
+
+    handles = None
+    proxytype = None
+    failed = None # Proxy servers with auth failures
+    last = None
+    timer = None
+    rlist = None
+    wlist = None
+
+    def __init__(self, debug_print = None):
+        "Initialize multi interface"
+        global dprint
+        if debug_print is not None:
+            dprint = debug_print
+
+        # Save as global to enable access via callbacks
+        global MCURL
+        MCURL = self
+
+        curl_version()
+        self._multi = libcurl.multi_init()
+
+        # Set a callback for registering or unregistering socket events.
+        libcurl.multi_setopt(self._multi, libcurl.CURLMOPT_SOCKETFUNCTION, _socket_callback)
+
+        # Set a callback for scheduling or cancelling timeout actions.
+        libcurl.multi_setopt(self._multi, libcurl.CURLMOPT_TIMERFUNCTION, _timer_callback)
+
+        # Init
+        self.handles = {}
+        self.failed = []
+        self.rlist = []
+        self.wlist = []
+        self._lock = threading.Lock()
+
+    def setopt(self, option, value):
+        "Configure multi options"
+        if option in (libcurl.CURLMOPT_SOCKETFUNCTION, libcurl.CURLMOPT_TIMERFUNCTION):
+            raise Exception('Callback options reserved for the event loop')
+        libcurl.multi_setopt(self._multi, option, value)
+
+    # Callbacks
+
+    def _socket_action(self, sock_fd, ev_bitmask):
+        # Event loop callback: act on ready sockets or timeouts
+        #dprint("mask = %d, sock_fd = %d" % (ev_bitmask, sock_fd))
+        handle_count = ctypes.c_int()
+        _ = libcurl.multi_socket_action(
+            self._multi, sock_fd, ev_bitmask, ctypes.byref(handle_count))
+
+        # Check if any handles have finished.
+        if handle_count.value != len(self.handles):
+            self._update_transfers()
+
+    def _update_transfers(self):
+        # Mark finished handles as done
+        while True:
+            queued = ctypes.c_int()
+            msg: ctypes.POINTER(libcurl.CURLMsg) = libcurl.multi_info_read(
+                self._multi, ctypes.byref(queued))
+            if not msg:
+                break
+
+            msg = msg.contents
+            if msg.msg == libcurl.CURLMSG_DONE:
+                # Always true since only one msg type
+                easyhash = gethash(msg.easy_handle)
+                curl = self.handles[easyhash]
+                curl.done = True
+
+                if msg.data.result != libcurl.CURLE_OK:
+                    curl.errstr = str(msg.data.result) + "; "
+
+    # Adding to multi
+
+    def _add_handle(self, curl: Curl):
+        # Add a handle
+        dprint(curl.easyhash + ": Add handle")
+        if curl.easyhash not in self.handles:
+            self.handles[curl.easyhash] = curl
+            if curl.is_connect():
+                # Need to know socket assigned for CONNECT since used later in select()
+                self.last = curl
+                libcurl.easy_setopt(curl.easy, libcurl.CURLOPT_SOCKOPTFUNCTION, _sockopt_callback)
+            libcurl.multi_add_handle(self._multi, curl.easy)
+            dprint(curl.easyhash + ": Added handle")
+        else:
+            dprint(curl.easyhash + ": Active handle")
+
+    def add(self, curl: Curl):
+        """
+        Add a Curl handle to perform
+
+        Waits until multi instance is ready to add a handle
+        """
+        while True:
+            with self._lock:
+                dprint(curl.easyhash + ": Handles = %d" % len(self.handles))
+                if self.last is not None:
+                    dprint(curl.easyhash + ": Multi not ready for new curl")
+                else:
+                    self._add_handle(curl)
+                    break
+            self.perform()
+            time.sleep(0.01)
+
+    # Removing from multi
+
+    def _remove_handle(self, curl: Curl, errstr = ""):
+        # Remove a handle and set status
+        if curl.easyhash not in self.handles:
+            return
+
+        if curl.done is False:
+            curl.done = True
+
+        if len(errstr) != 0:
+            curl.errstr += errstr + "; "
+
+        dprint(curl.easyhash + ": Remove handle: " + curl.errstr)
+        if len(curl.errstr) == 0:
+            libcurl.multi_remove_handle(self._multi, curl.easy)
+        curl.sock_fd = None
+        self.handles.pop(curl.easyhash)
+
+    def remove(self, curl: Curl):
+        "Remove a Curl handle once done"
+        with self._lock:
+            self._remove_handle(curl)
+
+    def stop(self, curl: Curl):
+        "Stop a running curl handle and remove"
+        with self._lock:
+            self._remove_handle(curl, errstr = "Stopped")
+
+    # Executing multi
+
+    def perform(self):
+        "Perform all tasks in the multi instance"
+        with self._lock:
+            rlen = len(self.rlist)
+            wlen = len(self.wlist)
+            if rlen != 0 or wlen != 0:
+                rready, wready, xready = select.select(
+                    self.rlist, self.wlist, set(self.rlist) | set(self.wlist), self.timer)
+            else:
+                rready, wready, xready = [], [], []
+                if self.timer is not None:
+                    time.sleep(self.timer)
+
+            if len(rready) == 0 and len(wready) == 0 and len(xready) == 0:
+                #dprint("No activity")
+                self._socket_action(libcurl.CURL_SOCKET_TIMEOUT, 0)
+            else:
+                for sock_fd in rready:
+                    #dprint("Ready to read sock_fd %d" % sock_fd)
+                    self._socket_action(sock_fd, libcurl.CURL_CSELECT_IN)
+                for sock_fd in wready:
+                    #dprint("Ready to write sock_fd %d" % sock_fd)
+                    self._socket_action(sock_fd, libcurl.CURL_CSELECT_OUT)
+                for sock_fd in xready:
+                    #dprint("Error sock_fd %d" % sock_fd)
+                    self._socket_action(sock_fd, libcurl.CURL_CSELECT_ERR)
+
+    def do(self, curl: Curl):
+        "Add a Curl handle and peform until completion"
+        self.add(curl)
+        while True:
+            if curl.done:
+                break
+            self.perform()
+            time.sleep(0.01)
+
+        if "timed out" in curl.errstr:
+            curl.resp = 408
+
+        if curl.proxy is not None:
+            ret, codep = curl.get_response()
+            if ret == 0 and codep == 407:
+                # Proxy auth did not work for whatever reason
+                out = "Proxy authentication failed: "
+                if curl.user is not None:
+                    out += "check user/password or try different auth mechanism"
+                else:
+                    out += "single sign-on failed, user/password might be required"
+
+                curl.errstr += out + "; "
+                curl.resp = 401
+
+                # Add this proxy to failed list and don't try again
+                with self._lock:
+                    self.failed.append(curl.proxy)
+
+        return len(curl.errstr) == 0
+
+    def select(self, curl: Curl, client_sock, idle = 30):
+        "Run select loop between client and curl"
+        # TODO figure out if IPv6 or IPv4
+        if curl.sock_fd is None:
+            # Reusing a CONNECT!?
+            dprint(curl.easyhash + ": sock_fd is None")
+            return
+
+        dprint(curl.easyhash + ": Starting select loop")
+        curl_sock = socket.fromfd(curl.sock_fd, socket.AF_INET, socket.SOCK_STREAM)
+
+        # sockets will be removed from these lists, when they are
+        # detected as closed by remote host; wlist contains sockets
+        # only when data has to be written
+        rlist = [client_sock, curl_sock]
+        wlist = []
+
+        # data to be written to client connection and proxy socket
+        cl = 0
+        cs = 0
+        cdata = []
+        sdata = []
+        max_idle = time.time() + idle
+        while (rlist or wlist):
+            (ins, outs, exs) = select.select(rlist, wlist, rlist, idle)
+            if exs:
+                dprint(curl.easyhash + ": Exception, breaking")
+                break
+            if ins:
+                for i in ins:
+                    if i is curl_sock:
+                        out = client_sock
+                        wdata = cdata
+                        source = "server"
+                    else:
+                        out = curl_sock
+                        wdata = sdata
+                        source = "client"
+
+                    data = i.recv(4096)
+                    datalen = len(data)
+                    if datalen != 0:
+                        cl += datalen
+                        # Prepare data to send it later in outs section
+                        wdata.append(data)
+                        if out not in outs:
+                            outs.append(out)
+                        max_idle = time.time() + idle
+                    else:
+                        # No data means connection closed by remote host
+                        dprint(curl.easyhash + ": Connection closed by %s" % source)
+                        # Because tunnel is closed on one end there is
+                        # no need to read from both ends
+                        del rlist[:]
+                        # Do not write anymore to the closed end
+                        if i in wlist:
+                            wlist.remove(i)
+                        if i in outs:
+                            outs.remove(i)
+            if outs:
+                for o in outs:
+                    if o is curl_sock:
+                        wdata = sdata
+                    else:
+                        wdata = cdata
+                    data = wdata[0]
+                    # socket.send() may sending only a part of the data
+                    # (as documentation says). To ensure sending all data
+                    bsnt = o.send(data)
+                    if bsnt > 0:
+                        if bsnt < len(data):
+                            # Not all data was sent; store data not
+                            # sent and ensure select() get's it when
+                            # the socket can be written again
+                            wdata[0] = data[bsnt:]
+                            if o not in wlist:
+                                wlist.append(o)
+                        else:
+                            wdata.pop(0)
+                            if not data and o in wlist:
+                                wlist.remove(o)
+                        cs += bsnt
+                    else:
+                        dprint(curl.easyhash + ": No data sent")
+                max_idle = time.time() + idle
+            if max_idle < time.time():
+                # No data in timeout seconds
+                dprint(curl.easyhash + ": Server connection timeout")
+                break
+
+        # After serving the proxy tunnel it could not be used for samething else.
+        # A proxy doesn't really know, when a proxy tunnnel isn't needed any
+        # more (there is no content length for data). So servings will be ended
+        # either after timeout seconds without data transfer or when at least
+        # one side closes the connection. Close both proxy and client
+        # connection if still open.
+        dprint(curl.easyhash + ": %d bytes read, %d bytes written" % (cl, cs))
+
+    # Cleanup multi
+
+    def close(self):
+        "Stop any running transfers and close this multi handle"
+        dprint("Closing multi")
+        for easyhash in tuple(self.handles):
+            self.stop(self.handles[easyhash])
+        libcurl.multi_cleanup(self._multi)
+
+def tester(multi, url):
+    curl = Curl(url)
+    curl.set_debug()
+    multi.do(curl)
+    multi.remove(curl)
+
+def main():
+    import debug
+    dbg = debug.Debug("test.log", "w")
+    global dprint
+    dprint = dbg.get_print()
+
+    multi = MCurl()
+
+    urls = ["http://www.google.com"]
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+        futures = {executor.submit(tester, multi, url): url for url in urls}
+        for future in concurrent.futures.as_completed(futures):
+            url = futures[future]
+            dprint("Done: " + url)
+
+    multi.close()
+
+if __name__ == "__main__":
+    main()

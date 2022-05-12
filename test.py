@@ -1,22 +1,30 @@
+"Test Px"
+
+import difflib
 import multiprocessing
 import os
-import re
+import platform
 import shutil
 import socket
 import subprocess
 import sys
 import time
-import traceback
+import uuid
 
+import distro
 import psutil
+if sys.platform == "linux":
+    import netifaces
 
-CURL = 'curl.exe -s -L -k -A "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 Safari/537.36" -H "Accept-Language: en-US"'
-CURL_PROXY = ' --proxy-ntlm '
+from px.version import __version__
 
-BASEURL = ""
 PROXY = ""
-PYTHON = ""
+PORT = 3128
+USERNAME = ""
+AUTH = ""
+BINARY = ""
 TESTS = []
+STDOUT = None
 
 try:
     ConnectionRefusedError
@@ -28,158 +36,172 @@ try:
 except AttributeError:
     DEVNULL = open(os.devnull, 'wb')
 
-def exec_output(cmd):
-    pipe = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
-    if pipe != None:
-        output = pipe.read().decode("UTF-8", "ignore")
+def exec(cmd):
+    p = subprocess.run(cmd, stdout = subprocess.PIPE, stderr = subprocess.STDOUT, check = False, timeout = 30)
+    return p.returncode, p.stdout
+
+def curl(url, method = "GET", data = "", proxy = ""):
+    cmd = ["curl", "-s", "-L", "-k", url]
+    if method == "HEAD":
+        cmd.append("--head")
     else:
-        print("Error running curl")
-        sys.exit()
+        cmd.extend(["-X", method])
+    if len(proxy) != 0:
+        cmd.extend(["--proxy", proxy])
+    if len(data) != 0:
+        cmd.extend(["-d", data])
 
-    return output
+    writeflush(" ".join(cmd) + "\n")
 
-def curl(url, proxy="", ntlm=False, filename="", head=False):
-    output = ""
-    cmd = CURL
-    if filename:
-        cmd += " -o " + filename
-    if head:
-        cmd += ' -I'
+    return exec(cmd)
 
-    if proxy:
-        cmd += " --proxy " + proxy
-    if ntlm:
-        cmd += ' --proxy-ntlm -U :'
-
-    cmd += ' "%s"' % url
-
-    if "--debug" in sys.argv:
-        print(cmd)
-
-    return exec_output(cmd)
-
-def getPyversion(cmd):
-    return int(exec_output(cmd + " -V").split(" ")[1].replace(".", ""))
-
-def write(data, file):
-    with open(file, "w") as f:
-        f.write(data)
-
-def check(url, proxy, port):
-    start = time.time()
-    a = curl(url, proxy=proxy, ntlm=True)
-    end = time.time()
-
-    ta = end - start
-    b = curl(url, proxy="localhost:%d" % port)
-    tb = time.time() - end
-
-    la = len(a)
-    lb = len(b)
-
-    out = 100
-    if la < lb:
-        out = la / lb * 100
-    elif la > lb:
-        out = lb / la * 100
-
-    print("  %.2f%%\t%.2fx\t%s" % (out, tb / ta, url))
-
-def waitprocs(procs):
+def waitasync(results):
     ret = True
-    while len(procs):
-        for i in range(len(procs)):
-            if not procs[i].is_alive():
-                if procs[i].exitcode:
+    while len(results):
+        for i in range(len(results)):
+            if results[i].ready():
+                if not results[i].get():
                     ret = False
-                procs.pop(i)
+                results.pop(i)
                 break
         time.sleep(0.1)
 
     return ret
 
-def run(base, port):
+def filterHeaders(a):
+    ignore = [
+        "Date:",
+        "Proxy-Connection",
+        '"origin"',
+        "Cache-Control", "Accept-Encoding",
+        "X-Amzn", "X-Bluecoat"
+    ]
+    lines = []
+    for line in a.decode("utf-8").split("\n"):
+        line = line.rstrip()
+        isign = False
+        for ign in ignore:
+            if ign in line:
+                isign = True
+                break
+        if isign:
+            continue
+        lines.append(line)
+    return lines
+
+def checkMethod(method, port, secure = False):
+    testname = "%s %s" % (method, "secured" if secure else "")
+    writeflush("Started: %s\n" % testname)
+
+    url = "http"
+    if secure:
+        url += "s"
+    url += "://httpbin.org/"
+    if method == "HEAD":
+        url += "get"
+    else:
+        url += method.lower()
+    url += "?param1=val1"
+    data = ""
+    if method in ["PUT", "POST", "PATCH"]:
+        data = str(uuid.uuid4())
+
+    aret, adata = curl(url, method, data)
+    if aret != 0:
+        writeflush("%s: Curl failed direct: %d\n" % (testname, aret))
+        return False
+    a = filterHeaders(adata)
+
+    bret, bdata = curl(url, method, data, proxy = "localhost:" + str(port))
+    if bret != 0:
+        writeflush("%s: Curl failed thru proxy: %d\n" % (testname, bret))
+        return False
+    b = filterHeaders(bdata)
+
+    if a != b:
+        for diff in difflib.unified_diff(a, b):
+            writeflush(diff + "\n")
+        writeflush("%s: Failed for %s\n" % (testname, url))
+        return False
+
+    writeflush("%s: Passed\n" % testname)
+    if not secure:
+        return checkMethod(method, port, True)
+
+    return True
+
+def run(port):
     if not checkPxStart("localhost", port):
         return False
 
-    start = time.time()
-    pop = ""
-    while True:
-        pop = curl(base, proxy="localhost:%d" % port)
-        if pop == "":
-            time.sleep(0.5)
-        else:
-            break
+    for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+        if not checkMethod(method, port):
+            return False
 
-    procs = []
-    #urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', pop)
-    urls = re.findall("http[s]?://[a-zA-Z_./0-9-]+", pop)
-    if len(urls) == 0:
-        print("No urls found")
-        return False
+    return True
 
-    for url in set(urls):
-        p = multiprocessing.Process(target=check, args=(url, PROXY, port))
-        #p.daemon = True
-        p.start()
-        procs.append(p)
+def writeflush(data):
+    STDOUT.write(data)
+    STDOUT.flush()
 
-        time.sleep(0.5)
+def runTest(test, cmd, count, port):
+    global PORT
+    global STDOUT
 
-    ret = True
-    if not waitprocs(procs):
-        ret = False
+    PORT = port
+    if  "--norun" not in sys.argv:
+        # Multiple tests in parallel, each on their own port
+        PORT += count
 
-    end = time.time()
-    print(("  Time: %.2fs" % (end-start)) + " sec")
+    cmd += "--debug --uniqlog --port=%d %s" % (PORT, test[0])
 
-    return ret
-
-def runPxTest(cmd, testproc, ips, port, proxy):
-    global PROXY
-    PROXY = proxy
-
-    pipe = subprocess.Popen("cmd /k start /wait /min " + cmd + " --port=" + str(port), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    ret = testproc(ips, port)
-
-    pxproc = psutil.Process(pipe.pid)
-    for child in pxproc.children(recursive=True):
-        try:
-            child.kill()
-        except psutil.NoSuchProcess:
-            pass
-    try:
-        pxproc.kill()
-    except:
-        pass
-
-    time.sleep(0.5)
-
-    return ret
-
-def runTest(test, python, count):
-    port = 3129
-    cmd = "px "
-    if python:
-        port = getPyversion(python) * 10
-        cmd = python + " px.py "
-
-    cmd += "--debug --uniqlog " + test[0] + " --port=" + str(port)
     testproc = test[1]
     ips = test[2]
 
-    print("Test %d: \"" % count + test[0] + "\" on port " + str(port))
-    p = multiprocessing.Process(target=runPxTest, args=(cmd, testproc, ips, port, PROXY))
-    p.start()
+    # Output to file
+    STDOUT = open("test-%d.log" % PORT, "w")
+    writeflush("Test %s on port %d\ncmd: %s\n" % (testproc.__name__, PORT, cmd))
 
-    return p
+    print("Starting test %s on port %d" % (testproc.__name__, PORT))
+
+    if sys.platform == "win32":
+        cmd = "cmd /k start /wait /min " + cmd
+    if "--norun" not in sys.argv:
+        pipe = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        ret = testproc(ips, PORT)
+
+        pxproc = psutil.Process(pipe.pid)
+        for child in pxproc.children(recursive=True):
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        try:
+            pxproc.kill()
+        except:
+            pass
+
+        time.sleep(0.5)
+    else:
+        ret = testproc(ips, PORT)
+
+    STDOUT.close()
+
+    return ret
 
 def getips():
-    localips = [ip[4][0] for ip in socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)]
-    localips.insert(0, "127.0.0.1")
+    ip_list = []
+    if sys.platform == "linux":
+        for interface in netifaces.interfaces():
+            for link in netifaces.ifaddresses(interface)[socket.AF_INET]:
+                ip_list.append(link['addr'])
+        return ip_list
+    elif sys.platform == "win32":
+        ip_list = [ip[4][0] for ip in socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)]
+        ip_list.insert(0, "127.0.0.1")
 
-    return localips
+    return ip_list
 
 def checkPxStart(ip, port):
     # Make sure Px starts
@@ -192,13 +214,13 @@ def checkPxStart(ip, port):
             time.sleep(1)
             retry -= 1
             if retry == 0:
-                print("Px didn't start @ %s:%d" % (ip, port))
+                writeflush("Px didn't start @ %s:%d\n" % (ip, port))
                 return False
 
     return True
 
 # Test --listen and --port, --hostonly, --gateway and --allow
-def checkCommon(ips, port, checkProc):
+def checkCommon(name, ips, port, checkProc):
     if ips == [""]:
         ips = ["127.0.0.1"]
 
@@ -211,15 +233,15 @@ def checkCommon(ips, port, checkProc):
 
     localips = getips()
     for lip in localips:
-        for pport in set([3128, port]):
-            sys.stdout.write("  Checking: " + lip + ":" + str(pport) + " = ")
+        for pport in set([3000, port]):
+            writeflush("Checking %s: %s:%d\n" % (name, lip, pport))
             ret = checkProc(lip, pport)
 
-            sys.stdout.write(str(ret) + ": ")
+            writeflush(str(ret) + ": ")
             if ((lip not in ips or port != pport) and ret is False) or (lip in ips and port == pport and ret is True):
-                print("Passed")
+                writeflush("Passed\n")
             else:
-                print("Failed")
+                writeflush("Failed\n")
                 return False
 
     return True
@@ -233,36 +255,36 @@ def checkSocket(ips, port):
 
         return True
 
-    return checkCommon(ips, port, checkProc)
+    return checkCommon("checkSocket", ips, port, checkProc)
 
 def checkFilter(ips, port):
     def checkProc(lip, port):
-        rcode = subprocess.call("curl --proxy " + lip + ":" + str(port) + " http://google.com",
-            stdout=DEVNULL, stderr=DEVNULL)
-        sys.stdout.write(str(rcode) + " ")
+        rcode, _ = curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
+        writeflush("Returned %d\n" % rcode)
         if rcode == 0:
             return True
         elif rcode in [7, 52, 56]:
             return False
         else:
-            print("Weird curl return " + str(rcode))
+            writeflush("Failed: curl return code is not 0, 7, 52, 56\n")
             sys.exit()
 
-    return checkCommon(ips, port, checkProc)
+    return checkCommon("checkFilter", ips, port, checkProc)
 
 def remoteTest(port, fail=False):
     lip = 'echo $SSH_CLIENT ^| cut -d \\\" \\\" -f 1,1'
     cmd = os.getenv("REMOTE_SSH")
     if cmd is None:
-        print("  Skipping: Remote test - REMOTE_SSH not set")
+        writeflush("Skipping: Remote test - REMOTE_SSH not set\n")
+        writeflush("  E.g. export REMOTE_SSH=plink user:pass@\n")
         return
     cmd = cmd + " curl --proxy `%s`:%s --connect-timeout 2 -s http://google.com" % (lip, port)
-    sys.stdout.write("  Checking: Remote:" + str(port) + " = ")
+    writeflush("Checking: Remote: %d\n" % port)
     ret = subprocess.call(cmd, stdout=DEVNULL, stderr=DEVNULL)
     if (ret == 0 and fail == False) or (ret != 0 and fail == True) :
-        print(str(ret) + ": Passed")
+        writeflush("Returned %d: Passed\n" % ret)
     else:
-        print(str(ret) + ": Failed")
+        writeflush("Returned %d: Failed\n" % ret)
         return False
 
     return True
@@ -285,28 +307,34 @@ def listenTestLocal(ip, port):
 def listenTestRemote(ip, port):
     return checkSocket([ip], port) and remoteTest(port)
 
-def proxyTest(base, port):
-    return run(base, port)
+def httpTest(skip, port):
+    del skip
+    return run(port)
 
-def noproxyTest(base, port):
-    return run(base, port)
+def getproxyarg():
+    proxyarg = ("--proxy=" + PROXY) if len(PROXY) != 0 else ""
+    proxyarg += (" --username=" + USERNAME) if len(USERNAME) != 0 else ""
+    proxyarg += (" --auth=" + AUTH) if len(AUTH) != 0 else ""
+    return proxyarg
 
 def socketTestSetup():
+    proxyarg = getproxyarg()
     if "--nohostonly" not in sys.argv:
-        TESTS.append(("--proxy=" + PROXY + " --hostonly", hostonlyTest, getips()))
+        TESTS.append((proxyarg + " --hostonly", hostonlyTest, getips()))
 
     if "--nogateway" not in sys.argv:
-        TESTS.append(("--proxy=" + PROXY + " --gateway", gatewayTest, getips()))
+        TESTS.append((proxyarg + " --gateway", gatewayTest, getips()))
 
     if "--noallow" not in sys.argv:
         for ip in getips():
-            oct = ip.split(".")[0]
+            spl = ip.split(".")
+            oct = ".".join(spl[0:2])
 
             atest = allowTestFail
-            if oct in ["192"]:
+            if oct in ["172"]:
                 atest = allowTest
 
-            TESTS.append(("--proxy=" + PROXY + " --gateway --allow=%s.*.*.*" % oct,
+            TESTS.append((proxyarg + " --gateway --allow=%s.*.*" % oct,
                 atest, list(filter(lambda x: oct in x, getips()))))
 
     if "--nolisten" not in sys.argv:
@@ -314,68 +342,96 @@ def socketTestSetup():
         localips.insert(0, "")
         localips.remove("127.0.0.1")
         for ip in localips[:3]:
-            cmd = "--proxy=" + PROXY
+            cmd = proxyarg
             if ip != "":
                 cmd += " --listen=" + ip
 
             testproc = listenTestLocal
-            if "192" in ip:
+            if "172" in ip:
                 testproc = listenTestRemote
 
             TESTS.append((cmd, testproc, ip))
 
 def auto():
-    # Make temp directory
-    try:
-        shutil.rmtree("testrun")
-    except:
-        pass
-    time.sleep(1)
-    try:
-        os.makedirs("testrun", exist_ok=True)
-    except TypeError:
+    if "--norun" not in sys.argv:
+        did = distro.id().replace("32", "")
+        testdir = "test-%s-%s" % (did, platform.machine().lower())
+
+        # Make temp directory
+        while os.path.exists(testdir):
+            try:
+                shutil.rmtree(testdir)
+            except:
+                pass
+            time.sleep(1)
         try:
-            os.makedirs("testrun")
-        except WindowsError:
-            pass
+            os.makedirs(testdir, exist_ok=True)
+        except TypeError:
+            try:
+                os.makedirs(testdir)
+            except WindowsError:
+                pass
 
-    os.chdir("testrun")
-
-    # Load base px.ini
-    shutil.copy("../px.ini", ".")
-    shutil.copy("../px.py", ".")
-    shutil.copy("../dist/px.exe", ".")
+        os.chdir(testdir)
 
     # Setup tests
-    socketTestSetup()
-    if "--noproxy" not in sys.argv:
-        TESTS.append(("--workers=4 --proxy=" + PROXY, proxyTest, BASEURL))
-    if "--nonoproxy" not in sys.argv:
-        TESTS.append(("--workers=4 --threads=30 --noproxy=*.*.*.*", noproxyTest, BASEURL))
+    if "--nosocket" not in sys.argv:
+        socketTestSetup()
+    proxyargs = set([getproxyarg()])
+    if "--nodirect" not in sys.argv:
+        proxyargs.add("")
+    for proxyarg in proxyargs:
+        if "--noproxy" not in sys.argv:
+            TESTS.append((proxyarg + " --workers=2", httpTest, None))
+        if len(proxyarg):
+            if "--nonoproxy" not in sys.argv:
+                TESTS.append((proxyarg + " --workers=2 --threads=30 --noproxy=*.*.*.*", httpTest, None))
 
-    count = 1
-    for test in TESTS:
-        procs = []
+    workers = get_argval("workers") or "4"
+    pool = multiprocessing.Pool(processes = int(workers))
 
-        # Latest version
-        procs.append(runTest(test, PYTHON + "/python.exe", count))
-        count += 1
+    # Script test
+    offset = 0
+    results = []
+    if "--noscript" not in sys.argv:
+        cmd = sys.executable + " ../px.py "
+        results = [pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))]
 
-        if "--envs" in sys.argv:
-            # Test different versions of Python
-            pys = ["27", "35", "37"]
-            for py in pys:
-                procs.append(runTest(test, PYTHON + "/envs/%s/python.exe" % py, count))
-                count += 1
+    if "--binary" in sys.argv or len(BINARY) != 0:
+        # Nuitka binary test
+        did = BINARY or distro.id().replace("32", "")
+        outdir = "px.dist-%s-%s" % (did, platform.machine().lower())
 
-        # Run px.exe
-        procs.append(runTest(test, None, count))
-        count += 1
+        offset += len(TESTS)
+        cmd = os.path.join("..", outdir, "px.dist", "px ")
+        results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
 
-        if not waitprocs(procs):
-            break
+    if "--pip" in sys.argv:
+        # Wheel pip installed test
+        cmd = sys.executable + " -m pip install ../wheel/"
+        if sys.platform == "win32":
+            cmd += "px_proxy-%s-py3-none-win_amd64.whl" % __version__
+        elif sys.platform == "linux":
+            cmd += "px_proxy-%s-py2.py3-none-any.whl" % __version__
+        os.system(cmd)
 
-    os.chdir("..")
+        offset += len(TESTS)
+        cmd = sys.executable + " -m px "
+        results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
+
+    if not waitasync(results):
+        print("Some tests failed")
+
+    if "--pip" in sys.argv:
+        cmd = sys.executable + " -m pip uninstall px-proxy -y"
+        os.system(cmd)
+
+    if "--norun" not in sys.argv:
+        os.system("grep Failed *.log")
+        os.system("grep Traceback *.log")
+        os.system("grep error -i *.log")
+
+        os.chdir("..")
 
 def get_argval(name):
     for i in range(len(sys.argv)):
@@ -386,25 +442,76 @@ def get_argval(name):
 
     return ""
 
-if __name__ == "__main__":
-    """python test.py --proxy=testproxy.org:80 --baseurl=http://baseurl.com [--all]
-        Point test.py to the NTLM proxy server that Px should connect through
+def main():
+    """
+    python test.py
 
-        Base URL is some base webpage which will be spidered for URLs to
-        compare results directly through proxy and through Px"""
+    --proxy=testproxy.org:80
+        Point to the NTLM proxy server that Px should connect through
 
+    --port=3128
+        Run Px on this port
+
+    --username=domain\\username
+        Use specified username
+
+    --auth=NTLM
+        Use specified auth method with proxy
+
+    --binary
+        Test Px binary for this distro
+
+    --binary=centos
+        Test Px binary in px.dist-centos-{platform}/px.dist/px
+
+    --pip
+        Test Px after installing with pip: python -m px
+
+    --noscript
+        Skip direct script mode test
+
+    --norun
+        If specified, Px is not started and expected to be running
+
+    --nosocket
+        Skip all socket tests
+
+    --nohostonly --nogateway --noallow --nolisten
+        Skip specific socket tests
+
+    --noproxy
+        Skip HTTP(s) tests through proxy
+
+    --nodirect
+        Skip HTTP(s) direct tests
+
+    --nonoproxy
+        Skip HTTP(s) tests bypassing proxy using noproxy
+
+    --workers=4
+        Number of parallel tests to run
+    """
+
+    global PROXY
+    global PORT
+    global USERNAME
+    global AUTH
+    global BINARY
     PROXY = get_argval("proxy")
-    BASEURL = get_argval("baseurl")
-    PYTHON = get_argval("python")
+    PORT = get_argval("port")
+    if len(PORT):
+        PORT = int(PORT)
+    else:
+        PORT = 3128
+    USERNAME = get_argval("username")
+    AUTH = get_argval("auth")
+    BINARY = get_argval("binary")
 
-    if PROXY == "":
-        sys.argv.append("--noproxy")
-
-    if BASEURL == "":
-        sys.argv.append("--noproxy")
-        sys.argv.append("--nonoproxy")
-
-    if PYTHON == "":
-        PYTHON = "c:/Miniconda"
+    if "--help" in sys.argv:
+        print(main.__doc__)
+        sys.exit()
 
     auto()
+
+if __name__ == "__main__":
+    main()

@@ -6,25 +6,14 @@
 ## What is Px?
 Px is a HTTP(s) proxy server that allows applications to authenticate through
 an NTLM or Kerberos proxy server, typically used in corporate deployments,
-without having to deal with the actual handshake. It is primarily designed to
-run on Windows systems and automatically authenticates on using the currently
-logged in Windows user account. It is also possible to run Px on Windows, Linux
-and MacOS when single signon is not available by configuring the domain, username
-and password to authenticate with.
+without having to deal with the actual handshake. Px leverages Windows SSPI or
+single sign-on and automatically authenticates using the currently logged in
+Windows user account. It is also possible to run Px on Windows, Linux and MacOS
+without single sign-on by configuring the domain, username and password to
+authenticate with.
 
-Px is similar to "NTLM Authorization Proxy Server" [NTLMAPS](http://ntlmaps.sourceforge.net/)
-and [Cntlm](http://cntlm.sourceforge.net/) in that it sits between the corporate
-proxy and applications and offloads authentication. The advantage is that Px is
-able to use the currently logged in user's credentials automatically without
-requiring any user supplied credentials. This is accomplished by using Microsoft
-SSPI to generate the tokens and signatures required to authenticate with the proxy.
-
-Px also supports Kerberos and works with user supplied credentials for cases
-where SSPI is not available. Kerberos/Negotiate support is only available on
-Windows at this time.
-
-Microsoft provides a good starting point to understand how NTLM [authentication](https://msdn.microsoft.com/en-us/library/dd925287.aspx)
-works. And similarly for [Kerberos](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc772815(v=ws.10)) (warning: long!)
+Px uses libcurl and as a result supports all the authentication mechanisms
+supported by [libcurl](https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html).
 
 ## Installation
 
@@ -32,15 +21,31 @@ If Python is already available, Px can be easily installed using the Python
 package manager `pip`. This will download and install Px as a Python module
 along with all dependencies:
 
-- Latest:
+	`python -m pip install px-proxy`
 
-	`pip install git+https://github.com/genotrance/px`
+Once installed, Px can be run as follows:
+- Running `px` directly
+- In the background: `pythonw -m px`
+- In the foreground in a console window: `python -m px`
 
-- Stable:
+If Python is not available, get the latest binary from the [releases](https://github.com/genotrance/px/releases)
+page. These binaries are compiled with [Nuitka](https://nuitka.net) and contain
+everything needed to run standalone.
 
-	`pip install px-proxy`
+Px requires [libcurl](https://curl.se/libcurl/) and the Windows builds ship with
+a copy. On Linux, it is required to install libcurl using the package manager:
 
-The latest Px version can also be downloaded and installed from source:
+- RHEL: `yum install libcurl`
+- Ubuntu: `apt install libcurl4`
+- Alpine: `apk add libcurl`
+
+### Source install
+
+The latest Px version can be downloaded and installed from source via pip:
+
+	`python -m pip install git+https://github.com/genotrance/px`
+
+Source can also be downloaded separately and installed:
 
 - Via git:
 
@@ -50,40 +55,44 @@ The latest Px version can also be downloaded and installed from source:
 
 	`https://github.com/genotrance/px/archive/master.zip`
 
-Once downloaded, Px can be installed as a standard Python module along
-with all dependencies :
+Once downloaded, Px can be installed as a standard Python module along with all
+dependencies :
 
-  `python setup.py install`
+  `python -m pip install .`
 
-Once installed, Px can be run as follows:
-- In the background: `pythonw -m px`
-- In the foreground in a console window: `python -m px`
+Note that libcurl will need to be installed on Linux, as described earlier,
+using the package manager. For Windows, [download](https://curl.se/windows/) and
+extract `libcurl.dll` and `libcurl-x64.dll` to `$PATH`.
 
-Lastly, Px can be run as a local Python script without installation. Download the source
-as described above, install all dependencies manually using `pip` and then run Px:
+### Without installation
+
+Px can be run as a local Python script without installation. Download the source
+as described above, install all dependencies and then run Px:
 
 ```
-pip install keyring netaddr ntlm-auth psutil pywin32 winkerberos futures
+pip install keyring netaddr psutil futures
+
+# Download/install libcurl
 
 pythonw px.py # run in the background
 python px.py # run in a console window
 ```
 
-If installed, Px can be uninstalled as follows:
+### Uninstallation
 
-```
-python -m px --uninstall
-pip uninstall px-proxy
-```
+If Px has been installed to the Windows registry to start on boot, it should be
+removed before uninstallation:
 
-If Python is not available, download the latest binary ZIP from the [releases](https://github.com/genotrance/px/releases)
-page. This binary is compiled using [Nuitka](https://nuitka.net) and contains everything
-needed to run standalone.
+  `python -m px --uninstall`
+
+Px can then be uninstalled using `pip` as follows:
+
+  `python -m pip uninstall px-proxy`
 
 ## Configuration
 
 Px requires only one piece of information in order to function - the server
-name and port of the proxy server. This needs to be configured in px.ini. If not
+name and port of the proxy server. This needs to be configured in `px.ini`. If not
 specified, Px will check Internet Options or environment variables for any proxy
 definitions and use them. Without this, Px will try to connect to sites directly.
 
@@ -96,35 +105,55 @@ client or at the proxy.
 
 If SSPI is not available or not preferred, providing a `username` in `domain\username`
 format allows Px to authenticate as that user. The corresponding password is
-retrieved using Python keyring and needs to be setup directly in the appropriate
-OS specific backend.
+retrieved using Python keyring and needs to be setup in the appropriate OS specific
+backend.
 
-On Windows, Credential Manager is the backend and Px looks for a 'generic credential'
-type with 'Px' as the network address name. Credential Manager and can be accessed
-as follows:
+Credentials can be setup with the command line:
+
+  `px --username=domain\username --password`
+
+If username is already defined in `px.ini`:
+
+  `px --password`
+
+Information on keyring backends can be found [here](https://pypi.org/project/keyring).
+
+#### Windows
+
+Credential Manager is the recommended backend for Windows and the password is stored
+as a 'Generic Credential' type with 'Px' as the network address name. Credential Manager
+can be accessed as follows:
 
   Control Panel > User Accounts > Credential Manager > Windows Credentials
 
   Or on the command line: `rundll32.exe keymgr.dll, KRShowKeyMgr`
 
-On Linux, Gnome Keyring or KWallet can be used to store passwords.
+### Linux
 
-If Python is available, credentials can be setup with:
+Gnome Keyring or KWallet is used to store passwords on Linux. For systems without
+a GUI (headless, docker), refer to these [instructions](https://github.com/jaraco/keyring#using-keyring-on-headless-linux-systems-in-a-docker-container)
+to start the SecretService backend.
 
-  `python -m keyring set Px username`
+If the default SecretService keyring backend does not work, the [keyring_jeepney](https://pypi.org/project/keyring_jeepney)
+package might provide an alternative.
 
-More information on keyring backends can be found [here](https://pypi.org/project/keyring).
+  `python -m pip install keyring_jeepney`
+
+Worst case, the [keyrings.alt](https://pypi.org/project/keyrings.alt/) package can
+be used.
+
+  `python -m pip install keyrings.alt`
 
 ### Misc
 
-There are a few other settings to tweak in the INI file but most are obvious.
+There are a few other settings to tweak in `px.ini` file but most are obvious.
 All settings can be specified on the command line for convenience. The INI file
 can also be created or updated from the command line using `--save`.
 
 The binary distribution of Px runs in the background once started and can be
-quit by running `px --quit`. When run directly using Python, use `CTRL-C` to quit.
+quit by running `px --quit`. When running in the foreground, use `CTRL-C`.
 
-Px can also be setup to automatically run on startup with the --install flag.
+Px can also be setup to automatically run on startup with the `--install` flag.
 This is done by adding an entry into the Window registry which can be removed
 with `--uninstall`.
 
@@ -153,6 +182,10 @@ Actions:
 
   --quit
   Quit a running instance of Px.exe
+
+  --password
+  Collect and save password to default keyring. Username needs to be provided
+  via --username or already specified in the config file
 
 Configuration:
   --config=
@@ -210,17 +243,23 @@ Configuration:
   Service name "Px" and this username are used to retrieve the password using
   Python keyring. Px only retrieves credentials and storage should be done
   directly in the keyring backend.
-    On Windows, Credential Manager is the backed and can be accessed from
-    Control Panel > User Accounts > Credential Manager > Windows Credentials.
+    On Windows, Credential Manager is the recommended backed and can be accessed
+    from Control Panel > User Accounts > Credential Manager > Windows Credentials.
     Create a generic credential with Px as the network address, this username
     and corresponding password.
+    On Linux, Gnome Keyring or KWallet can be used to store passwords. For headless
+    systems, the keyring_jeepney or keyrings.alt package might be needed.
 
   --auth=  proxy:auth=
   Force instead of discovering upstream proxy type
-    By default, Px will attempt to discover the upstream proxy type and either
-    use pywin32/ntlm-auth for NTLM auth or winkerberos for Kerberos or Negotiate
-    auth. This option will force either NTLM, Kerberos or Basic and not query the
-    upstream proxy type.
+    By default, Px will attempt to discover the upstream proxy type. This
+    option can be used to force either NTLM, KERBEROS, DIGEST, BASIC or the
+    other libcurl supported upstream proxy types. See:
+      https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html
+    To control which methods are available during proxy detection:
+      Prefix NO to avoid method - e.g. NONTLM => ANY - NTLM
+      Prefix SAFENO to avoid method - e.g. SAFENONTLM => ANYSAFE - NTLM
+      Prefix ONLY to support only that method - e.g ONLYNTLM => ONLY + NTLM
 
   --workers=  settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
@@ -243,13 +282,16 @@ Configuration:
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 
+  --verbose  settings:verbose=
+  Enable debug output. default: 0
+
   --debug  settings:log=
   Enable debug logging. default: 0
     Logs are written to working directory and over-written on startup
     A log is automatically created if Px crashes for some reason
 
   --uniqlog
-  Generate unique log file names
+  Generate unique log file names in current working directory
     Prevents logs from being overwritten on subsequent runs. Also useful if
     running multiple instances of Px
 ```
@@ -291,21 +333,24 @@ Workaround:
 Px doesn't have any GUI and runs completely in the background. It depends on
 the following Python packages:
 
-  `keyring`, `netaddr`, `ntlm-auth`, `psutil`
+- [keyring](https://pypi.org/project/keyring/)
+- [netaddr](https://pypi.org/project/netaddr/)
+- [psutil](https://pypi.org/project/psutil/)
+- [futures](https://pypi.org/project/futures/) on Python 2.x
 
-  `pywin32`, `winkerberos` on Windows
+Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP
+connections and proxy authentication.
 
-  `futures` on Python 2.x
+## Limitations
 
-In order to make Px a capable proxy server, it is designed to run in multiple
-processes. The number of parallel workers or processes is configurable. However,
-this only works on Python 3.3+ since that's when support was added to share
-sockets across processes in Windows. On older versions of Python, Px will run
-multi-threaded but in a single process. The number of threads per process is
-also configurable.
+There is currently no PAC support on Linux.
 
-On Linux, Px only supports NTLM and BASIC auth and there is no PAC support.
-These limitations should be removed over time.
+Windows multiprocessing only works on Python 3.3+ since that's when support was
+added to share sockets across processes. On older versions of Python, Px will run
+multi-threaded but in a single process.
+
+MacOSX socket sharing is not implemented at this time and is limited to running
+in a single process.
 
 While it should mostly work, Px is not tested on MacOSX since there's no test
 environment available at this time to verify functionality. PRs are welcome to
@@ -329,26 +374,4 @@ to chat about Px.
 
 Thank you to all [contributors](https://github.com/genotrance/px/graphs/contributors) for their PRs and all issue submitters.
 
-Px is based on code from all over the internet and especially acknowledges these sources:
-
-http://stackoverflow.com/questions/2969481/ntlm-authentication-in-python
-
-http://www.oki-osk.jp/esc/python/proxy/
-
-http://stupidpythonideas.blogspot.com/2014/09/sockets-and-multiprocessing.html
-
-https://curl.haxx.se/mail/lib-2014-09/0070.html
-
-https://github.com/fl4re/curl/blob/master/lib/curl_sasl_sspi.c
-
-https://github.com/mongodb-labs/winkerberos/issues/19
-
-https://www.tillett.info/2013/05/13/how-to-create-a-windows-program-that-works-as-both-as-a-gui-and-console-application/
-
-http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
-
-https://stackoverflow.com/questions/42108978/what-is-the-priority-mechanism-in-proxy-settings-of-internet-explorer-browser
-
-https://gist.github.com/mgeeky/8960f4fa3f9462ae7bcd6db4ce42a8d3
-
-https://github.com/pypa/sampleproject/
+Px is based on code from all over the internet and acknowledges innumerable sources.

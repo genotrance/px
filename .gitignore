@@ -54,6 +54,8 @@ wheel/
 debug-*
 *.pyc
 .vscode
-testrun
+test-*/
 *.egg-info
 _*.stats
+*.dll
+*.log

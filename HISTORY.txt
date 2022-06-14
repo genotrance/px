@@ -1,3 +1,11 @@
+v0.7.1 - 2022-06-13
+- Fixed #146 - px --install was broken when run in cmd.exe, also when
+  run as `python -m px`
+- Fixed #148 - 407 proxy required was not being detected generically
+- Fixed #151 - handle older versions of libcurl gracefully
+- Fixed issues with --quit not exiting child processes or working correctly
+  in binary mode
+
 v0.7.0 - 2022-05-12
 - Switched to using libcurl for all outbound HTTP connections and proxy auth
 - Removed dependency on ntlm-auth, pywin32 and winkerberos

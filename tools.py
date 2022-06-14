@@ -9,7 +9,6 @@ import urllib.request
 import zipfile
 
 try:
-    import distro
     import requests
 except ModuleNotFoundError as exc:
     if "--setup" not in sys.argv:
@@ -107,12 +106,25 @@ def wheel():
 
     rmtree("build px_proxy.egg-info")
 
+def get_os():
+    if sys.platform == "linux":
+        if os.system("ldd /bin/ls | grep musl > /dev/null") == 0:
+            return "linux-musl"
+        else:
+            return "linux-glibc"
+    elif sys.platform == "win32":
+        return "windows"
+    elif sys.platform == "darwin":
+        return "osx"
+
+    return "unsupported"
+
 def pyinstaller():
-    did = distro.id().replace("32", "")
-    dist = "pyinst-%s-%s" % (did, platform.machine().lower())
+    osname = get_os()
+    dist = "pyinst-%s-%s" % (osname, platform.machine().lower())
     rmtree("build dist " + dist)
 
-    os.system("pyinstaller --clean --noupx -w -F px.py --hidden-import win32timezone")
+    os.system("pyinstaller --clean --noupx -w px.py")
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "dist")
 
     time.sleep(1)
@@ -121,15 +133,13 @@ def pyinstaller():
     os.rename("dist", dist)
 
 def nuitka():
-    did = distro.id().replace("32", "")
-    outdir = "px.dist-%s-%s" % (did, platform.machine().lower())
+    osname = get_os()
+    outdir = "px.dist-%s-%s" % (osname, platform.machine().lower())
     dist = os.path.join(outdir, "px.dist")
     shutil.rmtree(outdir, True)
 
     # Build
     flags = ""
-    if sys.platform == "win32":
-        flags = "--include-module=win32timezone"
     os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
     copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
     if sys.platform == "win32":
@@ -155,7 +165,7 @@ def nuitka():
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"
-    shutil.make_archive("px-v%s-%s" % (__version__, did), arch, "px.dist")
+    shutil.make_archive("px-v%s-%s" % (__version__, osname), arch, "px.dist")
     os.chdir("..")
 
 # Github related
@@ -323,7 +333,7 @@ def main():
     # Setup
     if "--setup" in sys.argv:
         os.system(sys.executable + " -m pip install --upgrade keyring netaddr psutil")
-        os.system(sys.executable + " -m pip install --upgrade build distro nuitka requests twine wheel")
+        os.system(sys.executable + " -m pip install --upgrade build nuitka requests twine wheel")
         if sys.platform == "linux":
             os.system(sys.executable + " -m pip install --upgrade keyrings.alt keyring_jeepney netifaces")
 
@@ -378,7 +388,7 @@ Setup:
 Build:
 --wheel		Build wheels for pypi.org
 --pyinst	Build px.exe using PyInstaller
---nuitka	Build px distro using Nuitka
+--nuitka	Build px distribution using Nuitka
 
 Post:
 --twine		Post wheels to pypi.org

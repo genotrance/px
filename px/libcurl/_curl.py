@@ -41,7 +41,7 @@ NULL = ct.c_void_p(0)
 CURL_STRICTER = 1
 #endif
 
-from ._curlver import * # libcurl version defines  
+from ._curlver import * # libcurl version defines
 #include "system.h"     # determine things run-time
 off_t = ct.c_int64
 
@@ -709,7 +709,7 @@ proxytype = ct.c_int
     CURLPROXY_HTTP,            # added in 7.10, new in 7.19.4 default is to use
                                # CONNECT HTTP/1.1
     CURLPROXY_HTTP_1_0,        # added in 7.19.4, force to use CONNECT
-                               # HTTP/1.0 
+                               # HTTP/1.0
     CURLPROXY_HTTPS,           # added in 7.52.0
     CURLPROXY_SOCKS4,          # support added in 7.15.2, enum existed already
                                # in 7.10
@@ -928,7 +928,7 @@ class hstsentry(ct.Structure):
     ("name",              ct.c_char_p),
     ("namelen",           ct.c_size_t),
     ("includeSubDomains", ct.c_uint, 1),
-    ("expire",            (ct.c_char * 18))  # YYYYMMDD HH:MM:SS [null-terminated] 
+    ("expire",            (ct.c_char * 18))  # YYYYMMDD HH:MM:SS [null-terminated]
 ]
 
 class index(ct.Structure):
@@ -2325,184 +2325,188 @@ if 0: # deprecated
     strequal  = CFUNC(ct.c_int, ct.c_char_p, ct.c_char_p)             (("curl_strequal",  dll),)
     strnequal = CFUNC(ct.c_int, ct.c_char_p, ct.c_char_p, ct.c_size_t)(("curl_strnequal", dll),)
 
-# Mime/form handling support.
-# typedef struct curl_mime      curl_mime;      /* Mime context. */
-# typedef struct curl_mimepart  curl_mimepart;  /* Mime part context. */
-class mime(ct.Structure): pass      # Mime context.     
-class mimepart(ct.Structure): pass  # Mime part context.
+# libcurl < 7.56
+try:
+    # Mime/form handling support.
+    # typedef struct curl_mime      curl_mime;      /* Mime context. */
+    # typedef struct curl_mimepart  curl_mimepart;  /* Mime part context. */
+    class mime(ct.Structure): pass      # Mime context.
+    class mimepart(ct.Structure): pass  # Mime part context.
 
-# CURLMIMEOPT_ defines are for the CURLOPT_MIME_OPTIONS option.
-CURLMIMEOPT_FORMESCAPE = (1 << 0)  # Use backslash-escaping for forms.
+    # CURLMIMEOPT_ defines are for the CURLOPT_MIME_OPTIONS option.
+    CURLMIMEOPT_FORMESCAPE = (1 << 0)  # Use backslash-escaping for forms.
 
-# NAME curl_mime_init()
-#
-# DESCRIPTION
-#
-# Create a mime context and return its handle. The easy parameter is the
-# target handle.
+    # NAME curl_mime_init()
+    #
+    # DESCRIPTION
+    #
+    # Create a mime context and return its handle. The easy parameter is the
+    # target handle.
 
-mime_init = CFUNC(ct.POINTER(mime),
-                  ct.POINTER(CURL))(
-                  ("curl_mime_init", dll), (
-                  (1, "easy"),))
+    mime_init = CFUNC(ct.POINTER(mime),
+                    ct.POINTER(CURL))(
+                    ("curl_mime_init", dll), (
+                    (1, "easy"),))
 
-# NAME curl_mime_free()
-#
-# DESCRIPTION
-#
-# release a mime handle and its substructures.
+    # NAME curl_mime_free()
+    #
+    # DESCRIPTION
+    #
+    # release a mime handle and its substructures.
 
-mime_free = CFUNC(None,
-                  ct.POINTER(mime))(
-                  ("curl_mime_free", dll), (
-                  (1, "mime"),))
+    mime_free = CFUNC(None,
+                    ct.POINTER(mime))(
+                    ("curl_mime_free", dll), (
+                    (1, "mime"),))
 
-# NAME curl_mime_addpart()
-#
-# DESCRIPTION
-#
-# Append a new empty part to the given mime context and return a handle to
-# the created part.
+    # NAME curl_mime_addpart()
+    #
+    # DESCRIPTION
+    #
+    # Append a new empty part to the given mime context and return a handle to
+    # the created part.
 
-mime_addpart = CFUNC(ct.POINTER(mimepart),
-                     ct.POINTER(mime))(
-                     ("curl_mime_addpart", dll), (
-                     (1, "mime"),))
+    mime_addpart = CFUNC(ct.POINTER(mimepart),
+                        ct.POINTER(mime))(
+                        ("curl_mime_addpart", dll), (
+                        (1, "mime"),))
 
-# NAME curl_mime_name()
-#
-# DESCRIPTION
-#
-# Set mime/form part name.
+    # NAME curl_mime_name()
+    #
+    # DESCRIPTION
+    #
+    # Set mime/form part name.
 
-mime_name = CFUNC(CURLcode,
-                  ct.POINTER(mimepart),
-                  ct.c_char_p)(
-                  ("curl_mime_name", dll), (
-                  (1, "part"),
-                  (1, "name"),))
+    mime_name = CFUNC(CURLcode,
+                    ct.POINTER(mimepart),
+                    ct.c_char_p)(
+                    ("curl_mime_name", dll), (
+                    (1, "part"),
+                    (1, "name"),))
 
-# NAME curl_mime_filename()
-#
-# DESCRIPTION
-#
-# Set mime part remote file name.
+    # NAME curl_mime_filename()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part remote file name.
 
-mime_filename = CFUNC(CURLcode,
-                      ct.POINTER(mimepart),
-                      ct.c_char_p)(
-                      ("curl_mime_filename", dll), (
-                      (1, "part"),
-                      (1, "filename"),))
+    mime_filename = CFUNC(CURLcode,
+                        ct.POINTER(mimepart),
+                        ct.c_char_p)(
+                        ("curl_mime_filename", dll), (
+                        (1, "part"),
+                        (1, "filename"),))
 
-# NAME curl_mime_type()
-#
-# DESCRIPTION
-#
-# Set mime part type.
+    # NAME curl_mime_type()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part type.
 
-mime_type = CFUNC(CURLcode,
-                  ct.POINTER(mimepart),
-                  ct.c_char_p)(
-                  ("curl_mime_type", dll), (
-                  (1, "part"),
-                  (1, "mimetype"),))
+    mime_type = CFUNC(CURLcode,
+                    ct.POINTER(mimepart),
+                    ct.c_char_p)(
+                    ("curl_mime_type", dll), (
+                    (1, "part"),
+                    (1, "mimetype"),))
 
-# NAME curl_mime_encoder()
-#
-# DESCRIPTION
-#
-# Set mime data transfer encoder.
+    # NAME curl_mime_encoder()
+    #
+    # DESCRIPTION
+    #
+    # Set mime data transfer encoder.
 
-mime_encoder = CFUNC(CURLcode,
-                     ct.POINTER(mimepart),
-                     ct.c_char_p)(
-                     ("curl_mime_encoder", dll), (
-                     (1, "part"),
-                     (1, "encoding"),))
+    mime_encoder = CFUNC(CURLcode,
+                        ct.POINTER(mimepart),
+                        ct.c_char_p)(
+                        ("curl_mime_encoder", dll), (
+                        (1, "part"),
+                        (1, "encoding"),))
 
-# NAME curl_mime_data()
-#
-# DESCRIPTION
-#
-# Set mime part data source from memory data,
+    # NAME curl_mime_data()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part data source from memory data,
 
-mime_data = CFUNC(CURLcode,
-                  ct.POINTER(mimepart),
-                  ct.POINTER(ct.c_ubyte),
-                  ct.c_size_t)(
-                  ("curl_mime_data", dll), (
-                  (1, "part"),
-                  (1, "data"),
-                  (1, "datasize"),))
+    mime_data = CFUNC(CURLcode,
+                    ct.POINTER(mimepart),
+                    ct.POINTER(ct.c_ubyte),
+                    ct.c_size_t)(
+                    ("curl_mime_data", dll), (
+                    (1, "part"),
+                    (1, "data"),
+                    (1, "datasize"),))
 
-@CFUNC(CURLcode, ct.POINTER(mimepart), ct.c_char_p)
-def mime_string(part, data):
-    return mime_data(part,
-                     ct.cast(data, ct.POINTER(ct.c_ubyte)),
-                     CURL_ZERO_TERMINATED)
+    @CFUNC(CURLcode, ct.POINTER(mimepart), ct.c_char_p)
+    def mime_string(part, data):
+        return mime_data(part,
+                        ct.cast(data, ct.POINTER(ct.c_ubyte)),
+                        CURL_ZERO_TERMINATED)
 
-# NAME curl_mime_filedata()
-#
-# DESCRIPTION
-#
-# Set mime part data source from named file.
+    # NAME curl_mime_filedata()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part data source from named file.
 
-mime_filedata = CFUNC(CURLcode,
-                      ct.POINTER(mimepart),
-                      ct.c_char_p)(
-                      ("curl_mime_filedata", dll), (
-                      (1, "part"),
-                      (1, "filename"),))
+    mime_filedata = CFUNC(CURLcode,
+                        ct.POINTER(mimepart),
+                        ct.c_char_p)(
+                        ("curl_mime_filedata", dll), (
+                        (1, "part"),
+                        (1, "filename"),))
 
-# NAME curl_mime_data_cb()
-#
-# DESCRIPTION
-#
-# Set mime part data source from callback function.
+    # NAME curl_mime_data_cb()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part data source from callback function.
 
-mime_data_cb = CFUNC(CURLcode,
-                     ct.POINTER(mimepart),
-                     off_t,
-                     read_callback,
-                     seek_callback,
-                     free_callback,
-                     ct.c_void_p)(
-                     ("curl_mime_data_cb", dll), (
-                     (1, "part"),
-                     (1, "datasize"),
-                     (1, "readfunc"),
-                     (1, "seekfunc"),
-                     (1, "freefunc"),
-                     (1, "arg"),))
+    mime_data_cb = CFUNC(CURLcode,
+                        ct.POINTER(mimepart),
+                        off_t,
+                        read_callback,
+                        seek_callback,
+                        free_callback,
+                        ct.c_void_p)(
+                        ("curl_mime_data_cb", dll), (
+                        (1, "part"),
+                        (1, "datasize"),
+                        (1, "readfunc"),
+                        (1, "seekfunc"),
+                        (1, "freefunc"),
+                        (1, "arg"),))
 
-# NAME curl_mime_subparts()
-#
-# DESCRIPTION
-#
-# Set mime part data source from subparts.
+    # NAME curl_mime_subparts()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part data source from subparts.
 
-mime_subparts = CFUNC(CURLcode,
-                      ct.POINTER(mimepart),
-                      ct.POINTER(mime))(
-                      ("curl_mime_subparts", dll), (
-                      (1, "part"),
-                      (1, "subparts"),))
+    mime_subparts = CFUNC(CURLcode,
+                        ct.POINTER(mimepart),
+                        ct.POINTER(mime))(
+                        ("curl_mime_subparts", dll), (
+                        (1, "part"),
+                        (1, "subparts"),))
 
-# NAME curl_mime_headers()
-#
-# DESCRIPTION
-#
-# Set mime part headers.
+    # NAME curl_mime_headers()
+    #
+    # DESCRIPTION
+    #
+    # Set mime part headers.
 
-mime_headers = CFUNC(CURLcode,
-                     ct.POINTER(mimepart),
-                     ct.POINTER(slist),
-                     ct.c_int)(
-                     ("curl_mime_headers", dll), (
-                     (1, "part"),
-                     (1, "headers"),
-                     (1, "take_ownership"),))
+    mime_headers = CFUNC(CURLcode,
+                        ct.POINTER(mimepart),
+                        ct.POINTER(slist),
+                        ct.c_int)(
+                        ("curl_mime_headers", dll), (
+                        (1, "part"),
+                        (1, "headers"),
+                        (1, "take_ownership"),))
+except AttributeError:
+    pass
 
 CURLformoption = ct.c_int
 (
@@ -2582,7 +2586,7 @@ CURLFORMcode = ct.c_int
 #
 # DESCRIPTION
 #
-# This function is deprecated. Do not use. See curl_mime_init instead. 
+# This function is deprecated. Do not use. See curl_mime_init instead.
 #
 # Pretty advanced function for building multi-part formposts. Each invoke
 # adds one part that together construct a full post. Then use
@@ -2795,53 +2799,57 @@ global_cleanup = CFUNC(None)(
                        ("curl_global_cleanup", dll), (
                        ))
 
-# NAME curl_global_sslset()
-#
-# DESCRIPTION
-#
-# When built with multiple SSL backends, curl_global_sslset() allows to
-# choose one. This function can only be called once, and it must be called
-# *before* curl_global_init().
-#
-# The backend can be identified by the id (e.g. CURLSSLBACKEND_OPENSSL). The
-# backend can also be specified via the name parameter (passing -1 as id).
-# If both id and name are specified, the name will be ignored. If neither id
-# nor name are specified, the function will fail with
-# CURLSSLSET_UNKNOWN_BACKEND and set the "avail" pointer to the
-# NULL-terminated list of available backends.
-#
-# Upon success, the function returns CURLSSLSET_OK.
-#
-# If the specified SSL backend is not available, the function returns
-# CURLSSLSET_UNKNOWN_BACKEND and sets the "avail" pointer to a NULL-terminated
-# list of available SSL backends.
-#
-# The SSL backend can be set only once. If it has already been set, a
-# subsequent attempt to change it will result in a CURLSSLSET_TOO_LATE.
+# libcurl < 7.56
+try:
+    # NAME curl_global_sslset()
+    #
+    # DESCRIPTION
+    #
+    # When built with multiple SSL backends, curl_global_sslset() allows to
+    # choose one. This function can only be called once, and it must be called
+    # *before* curl_global_init().
+    #
+    # The backend can be identified by the id (e.g. CURLSSLBACKEND_OPENSSL). The
+    # backend can also be specified via the name parameter (passing -1 as id).
+    # If both id and name are specified, the name will be ignored. If neither id
+    # nor name are specified, the function will fail with
+    # CURLSSLSET_UNKNOWN_BACKEND and set the "avail" pointer to the
+    # NULL-terminated list of available backends.
+    #
+    # Upon success, the function returns CURLSSLSET_OK.
+    #
+    # If the specified SSL backend is not available, the function returns
+    # CURLSSLSET_UNKNOWN_BACKEND and sets the "avail" pointer to a NULL-terminated
+    # list of available SSL backends.
+    #
+    # The SSL backend can be set only once. If it has already been set, a
+    # subsequent attempt to change it will result in a CURLSSLSET_TOO_LATE.
 
-class ssl_backend(ct.Structure):
-    _fields_ = [
-    ("id",   sslbackend),
-    ("name", ct.c_char_p),
-]
-# typedef struct curl_ssl_backend curl_ssl_backend;
+    class ssl_backend(ct.Structure):
+        _fields_ = [
+        ("id",   sslbackend),
+        ("name", ct.c_char_p),
+    ]
+    # typedef struct curl_ssl_backend curl_ssl_backend;
 
-CURLsslset = ct.c_int
-(
-    CURLSSLSET_OK,
-    CURLSSLSET_UNKNOWN_BACKEND,
-    CURLSSLSET_TOO_LATE,
-    CURLSSLSET_NO_BACKENDS  # libcurl was built without any SSL support
-) = range(0, 4)
+    CURLsslset = ct.c_int
+    (
+        CURLSSLSET_OK,
+        CURLSSLSET_UNKNOWN_BACKEND,
+        CURLSSLSET_TOO_LATE,
+        CURLSSLSET_NO_BACKENDS  # libcurl was built without any SSL support
+    ) = range(0, 4)
 
-global_sslset = CFUNC(CURLsslset,
-                      sslbackend,
-                      ct.c_char_p,
-                      ct.POINTER(ct.POINTER(ct.POINTER(ssl_backend))))(
-                      ("curl_global_sslset", dll), (
-                      (1, "id"),
-                      (1, "name"),
-                      (1, "avail"),))
+    global_sslset = CFUNC(CURLsslset,
+                        sslbackend,
+                        ct.c_char_p,
+                        ct.POINTER(ct.POINTER(ct.POINTER(ssl_backend))))(
+                        ("curl_global_sslset", dll), (
+                        (1, "id"),
+                        (1, "name"),
+                        (1, "avail"),))
+except AttributeError:
+    pass
 
 # NAME curl_slist_append()
 #
@@ -3283,7 +3291,11 @@ CURLPAUSE_CONT      = (CURLPAUSE_RECV_CONT | CURLPAUSE_SEND_CONT)
 # stuff before they can be included!
 from ._easy    import *  # nothing in curl is fun without the easy stuff
 from ._multi   import *
-from ._urlapi  import *
+# libcurl < 7.62
+try:
+    from ._urlapi  import *
+except AttributeError:
+    pass
 from ._options import *
 from ._system  import *
 

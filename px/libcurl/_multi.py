@@ -211,36 +211,44 @@ multi_wait = CFUNC(CURLMcode,
                    (1, "timeout_ms"),
                    (1, "ret"),))
 
-# Name:     curl_multi_poll()
-#
-# Desc:     Poll on all fds within a CURLM set as well as any
-#           additional fds passed to the function.
-#
-# Returns:  CURLMcode type, general multi error code.
+# libcurl < 7.66
+try:
+    # Name:     curl_multi_poll()
+    #
+    # Desc:     Poll on all fds within a CURLM set as well as any
+    #           additional fds passed to the function.
+    #
+    # Returns:  CURLMcode type, general multi error code.
 
-multi_poll = CFUNC(CURLMcode,
-                   ct.POINTER(CURLM) ,
-                   ct.POINTER(waitfd),
-                   ct.c_uint ,
-                   ct.c_int ,
-                   ct.POINTER(ct.c_int))(
-                   ("curl_multi_poll", dll), (
-                   (1, "multi_handle"),
-                   (1, "extra_fds"),
-                   (1, "extra_nfds"),
-                   (1, "timeout_ms"),
-                   (1, "ret"),))
+    multi_poll = CFUNC(CURLMcode,
+                    ct.POINTER(CURLM) ,
+                    ct.POINTER(waitfd),
+                    ct.c_uint ,
+                    ct.c_int ,
+                    ct.POINTER(ct.c_int))(
+                    ("curl_multi_poll", dll), (
+                    (1, "multi_handle"),
+                    (1, "extra_fds"),
+                    (1, "extra_nfds"),
+                    (1, "timeout_ms"),
+                    (1, "ret"),))
+except AttributeError:
+    pass
 
-# Name:     curl_multi_wakeup()
-#
-# Desc:     wakes up a sleeping curl_multi_poll call.
-#
-# Returns:  CURLMcode type, general multi error code.
+# libcurl < 7.68
+try:
+    # Name:     curl_multi_wakeup()
+    #
+    # Desc:     wakes up a sleeping curl_multi_poll call.
+    #
+    # Returns:  CURLMcode type, general multi error code.
 
-multi_wakeup = CFUNC(CURLMcode,
-                     ct.POINTER(CURLM))(
-                     ("curl_multi_wakeup", dll), (
-                     (1, "multi_handle"),))
+    multi_wakeup = CFUNC(CURLMcode,
+                        ct.POINTER(CURLM))(
+                        ("curl_multi_wakeup", dll), (
+                        (1, "multi_handle"),))
+except AttributeError:
+    pass
 
 # Name:    curl_multi_perform()
 #

@@ -152,7 +152,8 @@ def _header_callback(buffer, size, nitems, userdata):
                 # Done sending headers
                 dprint(curl.easyhash + ": Done sending headers")
                 curl.sentheaders = True
-            elif b"407 Proxy Authentication Required" in data:
+            elif data[0] == 72 and b"407" in data:
+                # Starts with H and has 407 - HTTP/x.x 407 (issue #148)
                 # Don't send back proxy headers
                 dprint(curl.easyhash + ": Suppressing headers")
                 curl.suppress = True
@@ -323,7 +324,7 @@ class Curl:
             if password is not None:
                 libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPASSWORD, password.encode("utf-8"))
             else:
-                dprint("Blank password")
+                dprint("Blank password for user")
         if auth is not None:
             self.auth = auth
 

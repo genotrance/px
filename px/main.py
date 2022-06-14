@@ -11,6 +11,8 @@ import sys
 import threading
 import time
 import traceback
+import warnings
+warnings.filterwarnings("ignore")
 
 from .debug import pprint, Debug
 from .version import __version__
@@ -52,7 +54,7 @@ except ImportError:
 try:
     import keyring
 
-    # Explicit imports for Nuitka/PyInstaller
+    # Explicit imports for Nuitka
     if sys.platform == "win32":
         import keyring.backends.Windows
     elif sys.platform.startswith("linux"):
@@ -199,7 +201,7 @@ Configuration:
     Proxy info reloaded from manual proxy info defined in Internet Options
 
   --foreground  settings:foreground=
-  Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
+  Run in foreground when compiled or run with pythonw.exe. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 
@@ -254,7 +256,7 @@ class State(object):
 dprint = lambda x: None
 
 def dfile():
-    """Generate filename for debug output"""
+    "Generate filename for debug output"
 
     name = multiprocessing.current_process().name
     if "--quit" in sys.argv:
@@ -271,11 +273,15 @@ def dfile():
     logfile = os.path.join(path, "debug-%s.log" % name)
     return logfile
 
+def is_compiled():
+    "Return True if compiled with PyInstaller or Nuitka"
+    return getattr(sys, "frozen", False) or "__compiled__" in globals()
+
 ###
 # Proxy handler
 
 class Proxy(httpserver.BaseHTTPRequestHandler):
-    """Handler for each proxy connection - unique instance for each thread in each process"""
+    "Handler for each proxy connection - unique instance for each thread in each process"
 
     protocol_version = "HTTP/1.1"
 
@@ -332,8 +338,6 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
             if len(key) == 0:
                 dprint("Using SSPI to login")
                 key = ":"
-            elif len(pwd) == 0:
-                dprint("Blank password for user")
             self.curl.set_auth(user = key, password = pwd, auth = State.auth)
         else:
             dprint("Skipping auth proxying")
@@ -476,7 +480,7 @@ def print_banner():
     )
 
     if sys.platform == "win32":
-        if getattr(sys, "frozen", False) != False or "pythonw.exe" in sys.executable:
+        if is_compiled() or "pythonw.exe" in sys.executable:
             if State.config.getint("settings", "foreground") == 0:
                 detach_console()
 
@@ -710,7 +714,7 @@ def parse_config():
         dprint = State.debug.get_print()
 
     if sys.platform == "win32":
-        if getattr(sys, "frozen", False) is not False or "pythonw.exe" in sys.executable:
+        if is_compiled() or "pythonw.exe" in sys.executable:
             attach_console()
 
     if "-h" in sys.argv or "--help" in sys.argv:
@@ -868,50 +872,65 @@ def parse_config():
 ###
 # Exit related
 
-def quit(force=False):
+def quit(checkOnly = False):
     count = 0
     mypids = [os.getpid(), os.getppid()]
+    mypath = os.path.realpath(sys.executable).lower()
+
+    # Add .exe for Windows
+    ext = ""
+    if sys.platform == "win32":
+        ext = ".exe"
+        _, tail = os.path.splitext(mypath)
+        if len(tail) == 0:
+            mypath += ext
+    mybin = os.path.basename(mypath)
+
     for pid in sorted(psutil.pids(), reverse=True):
         if pid in mypids:
             continue
 
         try:
             p = psutil.Process(pid)
-            if p.exe().lower() == os.path.realpath(sys.executable).lower():
-                sel = sys.executable.lower()
+            exepath = p.exe().lower()
+            if sys.platform == "win32":
+                # Set \IP to \\IP for Windows shares
+                if len(exepath) > 1 and exepath[0] == "\\" and exepath[1] != "\\":
+                    exepath = "\\" + exepath
+            if exepath == mypath:
                 qt = False
-                if "python.exe" in sel or "pythonw.exe" in sel:
+                if "python" in mybin:
                     # Verify px is the script being run by this instance of Python
-                    cmdline = p.cmdline()
-                    if "px" in cmdline or "px.py" in cmdline:
+                    if "-m" in p.cmdline() and "px" in p.cmdline():
                         qt = True
-                else:
-                    # PyInstaller case
+                    else:
+                        for param in p.cmdline():
+                            if param.endswith("px.py") or param.endswith("px" + ext):
+                                qt = True
+                                break
+                elif is_compiled():
+                    # Binary
                     qt = True
                 if qt:
                     count += 1
-                    if force:
-                        p.kill()
-                    else:
-                        if sys.platform == "win32":
-                            p.send_signal(signal.CTRL_C_EVENT)
-                        else:
-                            p.send_signal(signal.SIGINT)
+                    for child in p.children(recursive=True):
+                        child.kill()
+                    p.kill()
         except (psutil.AccessDenied, psutil.NoSuchProcess, PermissionError, SystemError):
             pass
         except:
             traceback.print_exc(file=sys.stdout)
 
     if count != 0:
-        if force:
-            sys.stdout.write(".")
+        if checkOnly:
+            pprint(" Failed")
         else:
             sys.stdout.write("Quitting Px ..")
+            sys.stdout.flush()
             time.sleep(4)
-        sys.stdout.flush()
-        quit(True)
+            quit(checkOnly = True)
     else:
-        if force:
+        if checkOnly:
             pprint(" DONE")
         else:
             pprint("Px is not running")
@@ -939,19 +958,22 @@ def handle_exceptions(extype, value, tb):
 # Install Px to startup
 
 def get_script_path():
-    if getattr(sys, "frozen", False) is False:
-        # Script mode
-        return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
-
-    # Frozen mode
-    return sys.executable
+    "Get full path of running script or compiled executable"
+    return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
 
 if sys.platform == "win32":
     def get_script_cmd():
         spath = get_script_path()
-        if os.path.splitext(spath)[1].lower() == ".py":
-            return sys.executable + ' "%s"' % spath
+        if spath[-3:] == ".py":
+            if "__main__.py" in spath:
+                # Case "python -m px"
+                return sys.executable + ' -m px'
+            else:
+                # Case: "python px.py"
+                return sys.executable + ' "%s"' % spath
 
+        # Case: "px.exe" from pip
+        # Case: "px.exe" from nuitka
         return spath
 
     def check_installed():

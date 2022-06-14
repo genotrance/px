@@ -153,15 +153,19 @@ easy_send = CFUNC(CURLcode,
                   (1, "buflen"),
                   (1, "n"),))
 
-# NAME curl_easy_upkeep()
-#
-# DESCRIPTION
-#
-# Performs connection upkeep for the given session handle.
+# libcurl < 7.62
+try:
+    # NAME curl_easy_upkeep()
+    #
+    # DESCRIPTION
+    #
+    # Performs connection upkeep for the given session handle.
 
-easy_upkeep = CFUNC(CURLcode,
-                    ct.POINTER(CURL))(
-                    ("curl_easy_upkeep", dll), (
-                    (1, "curl"),))
+    easy_upkeep = CFUNC(CURLcode,
+                        ct.POINTER(CURL))(
+                        ("curl_easy_upkeep", dll), (
+                        (1, "curl"),))
+except AttributeError:
+    pass
 
 # eof

@@ -11,12 +11,13 @@ import sys
 import time
 import uuid
 
-import distro
 import psutil
 if sys.platform == "linux":
     import netifaces
 
 from px.version import __version__
+
+import tools
 
 PROXY = ""
 PORT = 3128
@@ -36,9 +37,14 @@ try:
 except AttributeError:
     DEVNULL = open(os.devnull, 'wb')
 
-def exec(cmd):
-    p = subprocess.run(cmd, stdout = subprocess.PIPE, stderr = subprocess.STDOUT, check = False, timeout = 30)
-    return p.returncode, p.stdout
+def exec(cmd, shell = True):
+    p = subprocess.run(cmd, shell = shell, stdout = subprocess.PIPE, stderr = subprocess.STDOUT, check = False, timeout = 60)
+    try:
+        data = p.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        data = ""
+
+    return p.returncode, data
 
 def curl(url, method = "GET", data = "", proxy = ""):
     cmd = ["curl", "-s", "-L", "-k", url]
@@ -53,7 +59,10 @@ def curl(url, method = "GET", data = "", proxy = ""):
 
     writeflush(" ".join(cmd) + "\n")
 
-    return exec(cmd)
+    try:
+        return exec(cmd, shell = False)
+    except subprocess.TimeoutExpired:
+        return -1, "Subprocess timed out"
 
 def waitasync(results):
     ret = True
@@ -77,7 +86,7 @@ def filterHeaders(a):
         "X-Amzn", "X-Bluecoat"
     ]
     lines = []
-    for line in a.decode("utf-8").split("\n"):
+    for line in a.split("\n"):
         line = line.rstrip()
         isign = False
         for ign in ignore:
@@ -108,13 +117,13 @@ def checkMethod(method, port, secure = False):
 
     aret, adata = curl(url, method, data)
     if aret != 0:
-        writeflush("%s: Curl failed direct: %d\n" % (testname, aret))
+        writeflush("%s: Curl failed direct: %d\n%s\n" % (testname, aret, adata))
         return False
     a = filterHeaders(adata)
 
     bret, bdata = curl(url, method, data, proxy = "localhost:" + str(port))
     if bret != 0:
-        writeflush("%s: Curl failed thru proxy: %d\n" % (testname, bret))
+        writeflush("%s: Curl failed thru proxy: %d\n%s\n" % (testname, bret, bdata))
         return False
     b = filterHeaders(bdata)
 
@@ -144,47 +153,50 @@ def writeflush(data):
     STDOUT.write(data)
     STDOUT.flush()
 
-def runTest(test, cmd, count, port):
-    global PORT
+def runTest(test, cmd, offset, port):
     global STDOUT
 
-    PORT = port
     if  "--norun" not in sys.argv:
         # Multiple tests in parallel, each on their own port
-        PORT += count
+        port += offset
 
-    cmd += "--debug --uniqlog --port=%d %s" % (PORT, test[0])
+    cmd += "--debug --uniqlog --port=%d %s" % (port, test[0])
 
     testproc = test[1]
-    ips = test[2]
+    data = test[2]
 
     # Output to file
-    STDOUT = open("test-%d.log" % PORT, "w")
-    writeflush("Test %s on port %d\ncmd: %s\n" % (testproc.__name__, PORT, cmd))
+    STDOUT = open("test-%d.log" % port, "w")
+    writeflush("Test %s on port %d\ncmd: %s\n" % (testproc.__name__, port, cmd))
 
-    print("Starting test %s on port %d" % (testproc.__name__, PORT))
+    print("Starting test %s on port %d" % (testproc.__name__, port))
 
     if sys.platform == "win32":
-        cmd = "cmd /k start /wait /min " + cmd
+        cmd = "cmd /c start /wait /min " + cmd
     if "--norun" not in sys.argv:
-        pipe = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subp = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        ret = testproc(ips, PORT)
+        if testproc in [installTest, uninstallTest]:
+            # Wait for Px to exit for these tests
+            subp.wait()
 
-        pxproc = psutil.Process(pipe.pid)
-        for child in pxproc.children(recursive=True):
-            try:
-                child.kill()
-            except psutil.NoSuchProcess:
-                pass
+        ret = testproc(data, port)
+
         try:
+            # Kill Px since runtime test is done
+            pxproc = psutil.Process(subp.pid)
+            for child in pxproc.children(recursive=True):
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
             pxproc.kill()
-        except:
+        except psutil.NoSuchProcess:
             pass
 
         time.sleep(0.5)
     else:
-        ret = testproc(ips, PORT)
+        ret = testproc(data, port)
 
     STDOUT.close()
 
@@ -311,6 +323,40 @@ def httpTest(skip, port):
     del skip
     return run(port)
 
+def installTest(cmd, skip):
+    del skip
+    time.sleep(1)
+    ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px")
+    if ret != 0:
+        writeflush("Failed: registry query failed: %d\n%s\n" % (ret, data))
+        return False
+    if cmd.strip().replace("powershell -Command ", "") not in data.replace('"', ""):
+        writeflush("Failed: %s --install\n%s\n" % (cmd, data))
+        return False
+    return True
+
+def uninstallTest(cmd, skip):
+    del skip
+    time.sleep(1)
+    ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px")
+    if ret == 0:
+        writeflush("reg query passed after uninstall\n%s\n" % data)
+        return False
+    return True
+
+def quitTest(cmd, port):
+    if not checkPxStart("localhost", port):
+        writeflush("Px did not start\n")
+        return False
+
+    writeflush("cmd: " + cmd + "--quit\n")
+    ret, data = exec(cmd + "--quit")
+    if ret != 0 or "Quitting Px .. DONE" not in data:
+        writeflush("Failed: Unable to --quit Px: %d\n%s\n" % (ret, data + "\n"))
+        return False
+
+    return True
+
 def getproxyarg():
     proxyarg = ("--proxy=" + PROXY) if len(PROXY) != 0 else ""
     proxyarg += (" --username=" + USERNAME) if len(USERNAME) != 0 else ""
@@ -353,9 +399,9 @@ def socketTestSetup():
             TESTS.append((cmd, testproc, ip))
 
 def auto():
+    osname = tools.get_os()
     if "--norun" not in sys.argv:
-        did = distro.id().replace("32", "")
-        testdir = "test-%s-%s" % (did, platform.machine().lower())
+        testdir = "test-%s-%d-%s" % (osname, PORT, platform.machine().lower())
 
         # Make temp directory
         while os.path.exists(testdir):
@@ -387,60 +433,103 @@ def auto():
             if "--nonoproxy" not in sys.argv:
                 TESTS.append((proxyarg + " --workers=2 --threads=30 --noproxy=*.*.*.*", httpTest, None))
 
-    workers = get_argval("workers") or "4"
+    workers = tools.get_argval("workers") or "4"
     pool = multiprocessing.Pool(processes = int(workers))
 
-    # Script test
     offset = 0
     results = []
+    cmds = []
     if "--noscript" not in sys.argv:
-        cmd = sys.executable + " ../px.py "
+        # Run as script - python px.py
+        cmd = sys.executable + " %s " % os.path.abspath("../px.py")
+        cmds.append(cmd)
         results = [pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))]
-
-    if "--binary" in sys.argv or len(BINARY) != 0:
-        # Nuitka binary test
-        did = BINARY or distro.id().replace("32", "")
-        outdir = "px.dist-%s-%s" % (did, platform.machine().lower())
-
         offset += len(TESTS)
-        cmd = os.path.join("..", outdir, "px.dist", "px ")
+
+    if "--binary" in sys.argv:
+        # Nuitka binary test
+        outdir = "px.dist-%s-%s" % (osname, platform.machine().lower())
+
+        cmd = os.path.abspath(os.path.join("..", outdir, "px.dist", "px")) + " "
+        cmds.append(cmd)
         results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
+        offset += len(TESTS)
 
     if "--pip" in sys.argv:
         # Wheel pip installed test
+
+        # Uninstall if already installed
+        cmd = sys.executable + " -m pip uninstall px-proxy -y"
+        exec(cmd)
+
+        # Install Px
         cmd = sys.executable + " -m pip install ../wheel/"
         if sys.platform == "win32":
             cmd += "px_proxy-%s-py3-none-win_amd64.whl" % __version__
         elif sys.platform == "linux":
             cmd += "px_proxy-%s-py2.py3-none-any.whl" % __version__
-        os.system(cmd)
+        ret, data = exec(cmd)
+        if ret != 0:
+            print("Failed: pip install: %d\n%s" % (ret, data))
+        else:
+            # Run as module - python -m px
+            cmd = sys.executable + " -m px "
+            cmds.append(cmd)
+            results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
+            offset += len(TESTS)
 
-        offset += len(TESTS)
-        cmd = sys.executable + " -m px "
-        results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
+            # Run as Python console script
+            cmd = shutil.which("px").replace(".EXE", "")
+            if len(cmd) != 0:
+                cmd += " "
+                cmds.append(cmd)
+                results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
+                offset += len(TESTS)
+            else:
+                print("Skipped: console script could not be found")
 
     if not waitasync(results):
         print("Some tests failed")
+    pool.close()
+
+    if "--norun" not in sys.argv:
+        # Sequential tests - cannot parallelize
+        if sys.platform == "win32" and "--noinstall" not in sys.argv:
+            for shell in ["", "powershell -Command "]:
+                for cmd in cmds:
+                    cmd = shell + cmd
+                    runTest(("--install", installTest, cmd), cmd, offset, PORT)
+                    offset += 1
+
+                    runTest(("--uninstall", uninstallTest, cmd), cmd, offset, PORT)
+                    offset += 1
+
+        if "--noquit" not in sys.argv:
+            shell = "powershell -Command "
+            for cmd in cmds:
+                    runTest(("", quitTest, cmd), cmd, offset, PORT)
+                    offset += 1
+
+                    if sys.platform == "win32":
+                        runTest(("", quitTest, shell + cmd), cmd, offset, PORT)
+                        offset += 1
+
+                        runTest(("", quitTest, cmd), shell + cmd, offset, PORT)
+                        offset += 1
+
+                        runTest(("", quitTest, shell + cmd), shell + cmd, offset, PORT)
+                        offset += 1
 
     if "--pip" in sys.argv:
         cmd = sys.executable + " -m pip uninstall px-proxy -y"
-        os.system(cmd)
+        exec(cmd)
 
     if "--norun" not in sys.argv:
-        os.system("grep Failed *.log")
-        os.system("grep Traceback *.log")
+        os.system("grep failed -i *.log")
+        os.system("grep traceback -i *.log")
         os.system("grep error -i *.log")
 
         os.chdir("..")
-
-def get_argval(name):
-    for i in range(len(sys.argv)):
-        if "=" in sys.argv[i]:
-            val = sys.argv[i].split("=")[1]
-            if ("--%s=" % name) in sys.argv[i]:
-                return val
-
-    return ""
 
 def main():
     """
@@ -459,10 +548,7 @@ def main():
         Use specified auth method with proxy
 
     --binary
-        Test Px binary for this distro
-
-    --binary=centos
-        Test Px binary in px.dist-centos-{platform}/px.dist/px
+        Test Px binary
 
     --pip
         Test Px after installing with pip: python -m px
@@ -488,6 +574,12 @@ def main():
     --nonoproxy
         Skip HTTP(s) tests bypassing proxy using noproxy
 
+    --noinstall
+        Skip --install tests
+
+    --noquit
+        Skip --quit tests
+
     --workers=4
         Number of parallel tests to run
     """
@@ -497,15 +589,15 @@ def main():
     global USERNAME
     global AUTH
     global BINARY
-    PROXY = get_argval("proxy")
-    PORT = get_argval("port")
+    PROXY = tools.get_argval("proxy")
+    PORT = tools.get_argval("port")
     if len(PORT):
         PORT = int(PORT)
     else:
         PORT = 3128
-    USERNAME = get_argval("username")
-    AUTH = get_argval("auth")
-    BINARY = get_argval("binary")
+    USERNAME = tools.get_argval("username").replace("\\", "\\\\")
+    AUTH = tools.get_argval("auth")
+    BINARY = tools.get_argval("binary")
 
     if "--help" in sys.argv:
         print(main.__doc__)

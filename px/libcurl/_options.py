@@ -59,19 +59,23 @@ class easyoption(ct.Structure):
     ("flags", ct.c_uint),
 ]
 
-# easy_option_by_name = CFUNC(ct.POINTER(easyoption),
-#                             ct.c_char_p)(
-#                             ("curl_easy_option_by_name", dll), (
-#                             (1, "name"),))
+# libcurl < 7.73
+try:
+    easy_option_by_name = CFUNC(ct.POINTER(easyoption),
+                                ct.c_char_p)(
+                                ("curl_easy_option_by_name", dll), (
+                                (1, "name"),))
 
-# easy_option_by_id = CFUNC(ct.POINTER(easyoption),
-#                           CURLoption)(
-#                           ("curl_easy_option_by_id", dll), (
-#                           (1, "id"),))
+    easy_option_by_id = CFUNC(ct.POINTER(easyoption),
+                              CURLoption)(
+                              ("curl_easy_option_by_id", dll), (
+                              (1, "id"),))
 
-# easy_option_next = CFUNC(ct.POINTER(easyoption),
-#                          ct.POINTER(easyoption))(
-#                          ("curl_easy_option_next", dll), (
-#                          (1, "prev"),))
+    easy_option_next = CFUNC(ct.POINTER(easyoption),
+                            ct.POINTER(easyoption))(
+                            ("curl_easy_option_next", dll), (
+                            (1, "prev"),))
+except AttributeError:
+    pass
 
 # eof

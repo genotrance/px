@@ -125,8 +125,8 @@ def _write_callback(buffer, size, nitems, userdata):
         if curl.sentheaders:
             try:
                 tsize = curl.client_wfile.write(bytes(buffer[:tsize]))
-            except (ConnectionError, BrokenPipeError) as exc:
-                dprint(curl.easyhash + ": Write error: " + str(exc))
+            except ConnectionError as exc:
+                dprint(curl.easyhash + ": Error writing to client: " + str(exc))
                 return 0
         else:
             dprint(curl.easyhash + ": Skipped %d bytes" % tsize)
@@ -160,8 +160,8 @@ def _header_callback(buffer, size, nitems, userdata):
                 return tsize
         try:
             return curl.client_wfile.write(data)
-        except (ConnectionError, BrokenPipeError) as exc:
-            dprint("Header write error: " + str(exc))
+        except ConnectionError as exc:
+            dprint(curl.easyhash + ": Error writing header to client: " + str(exc))
             return 0
 
     return 0
@@ -298,7 +298,7 @@ class Curl:
         Set proxy options - returns False if this proxy server has auth failures
         """
         if proxy in MCURL.failed:
-            dprint("Authentication issues with this proxy server")
+            dprint(self.easyhash + ": Authentication issues with this proxy server")
             return False
 
         self.proxy = proxy
@@ -324,7 +324,7 @@ class Curl:
             if password is not None:
                 libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPASSWORD, password.encode("utf-8"))
             else:
-                dprint("Blank password for user")
+                dprint(self.easyhash + ": Blank password for user")
         if auth is not None:
             self.auth = auth
 
@@ -697,7 +697,12 @@ class MCurl:
                         wdata = sdata
                         source = "client"
 
-                    data = i.recv(4096)
+                    try:
+                        data = i.recv(4096)
+                    except ConnectionError as exc:
+                        # Fix #152 - handle connection errors gracefully
+                        dprint(curl.easyhash + ": Read error from %s: " % source + str(exc))
+                        data = ""
                     datalen = len(data)
                     if datalen != 0:
                         cl += datalen

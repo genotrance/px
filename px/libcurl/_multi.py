@@ -47,6 +47,7 @@
 #include "curl.h"
 
 import ctypes as ct
+from xml.dom.minidom import Attr
 
 from ._platform import CFUNC, defined
 from ._dll      import dll
@@ -524,45 +525,49 @@ multi_assign = CFUNC(CURLMcode,
                      (1, "sockfd"),
                      (1, "sockp"),))
 
-# Name: curl_push_callback
-#
-# Desc: This callback gets called when a new stream is being pushed by the
-#       server. It approves or denies the new stream. It can also decide
-#       to completely fail the connection.
-#
-# Returns: CURL_PUSH_OK, CURL_PUSH_DENY or CURL_PUSH_ERROROUT
+# libcurl < 7.44
+try:
+    # Name: curl_push_callback
+    #
+    # Desc: This callback gets called when a new stream is being pushed by the
+    #       server. It approves or denies the new stream. It can also decide
+    #       to completely fail the connection.
+    #
+    # Returns: CURL_PUSH_OK, CURL_PUSH_DENY or CURL_PUSH_ERROROUT
 
-CURL_PUSH_OK       = 0
-CURL_PUSH_DENY     = 1
-CURL_PUSH_ERROROUT = 2  # added in 7.72.0
+    CURL_PUSH_OK       = 0
+    CURL_PUSH_DENY     = 1
+    CURL_PUSH_ERROROUT = 2  # added in 7.72.0
 
-# forward declaration only
-class pushheaders(ct.Structure): pass
+    # forward declaration only
+    class pushheaders(ct.Structure): pass
 
-pushheader_bynum  = CFUNC(ct.c_char_p,
-                          ct.POINTER(pushheaders),
-                          ct.c_size_t)(
-                          ("curl_pushheader_bynum", dll), (
-                          (1, "h"),
-                          (1, "num"),))
+    pushheader_bynum  = CFUNC(ct.c_char_p,
+                            ct.POINTER(pushheaders),
+                            ct.c_size_t)(
+                            ("curl_pushheader_bynum", dll), (
+                            (1, "h"),
+                            (1, "num"),))
 
-pushheader_byname = CFUNC(ct.c_char_p,
-                          ct.POINTER(pushheaders),
-                          ct.c_char_p)(
-                          ("curl_pushheader_byname", dll), (
-                          (1, "h"),
-                          (1, "name"),))
+    pushheader_byname = CFUNC(ct.c_char_p,
+                            ct.POINTER(pushheaders),
+                            ct.c_char_p)(
+                            ("curl_pushheader_byname", dll), (
+                            (1, "h"),
+                            (1, "name"),))
 
-# typedef int (*curl_push_callback)(CURL *parent,
-#                                   CURL *easy,
-#                                   size_t num_headers,
-#                                   ct.POINTER(curl_pushheaders) headers,
-#                                   void *userp);
-push_callback = CFUNC(ct.c_int,
-                      ct.POINTER(CURL),         # parent
-                      ct.POINTER(CURL),         # easy
-                      ct.c_size_t,              # num_headers
-                      ct.POINTER(pushheaders),  # headers
-                      ct.c_void_p)              # userp
+    # typedef int (*curl_push_callback)(CURL *parent,
+    #                                   CURL *easy,
+    #                                   size_t num_headers,
+    #                                   ct.POINTER(curl_pushheaders) headers,
+    #                                   void *userp);
+    push_callback = CFUNC(ct.c_int,
+                        ct.POINTER(CURL),         # parent
+                        ct.POINTER(CURL),         # easy
+                        ct.c_size_t,              # num_headers
+                        ct.POINTER(pushheaders),  # headers
+                        ct.c_void_p)              # userp
+except AttributeError:
+    pass
 
 # eof

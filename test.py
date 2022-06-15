@@ -19,6 +19,7 @@ from px.version import __version__
 
 import tools
 
+COUNT = 0
 PROXY = ""
 PORT = 3128
 USERNAME = ""
@@ -37,17 +38,19 @@ try:
 except AttributeError:
     DEVNULL = open(os.devnull, 'wb')
 
-def exec(cmd, shell = True):
-    p = subprocess.run(cmd, shell = shell, stdout = subprocess.PIPE, stderr = subprocess.STDOUT, check = False, timeout = 60)
-    try:
-        data = p.stdout.decode("utf-8")
-    except UnicodeDecodeError:
-        data = ""
+def exec(cmd, port = 0, shell = True):
+    global COUNT
+    log = "%d-%d.txt" % (port, COUNT)
+    COUNT += 1
+    with open(log, "wb") as l:
+        p = subprocess.run(cmd, shell = shell, stdout = l, stderr = subprocess.STDOUT, check = False, timeout = 60)
 
+    with open(log, "r") as l:
+        data = l.read()
     return p.returncode, data
 
-def curl(url, method = "GET", data = "", proxy = ""):
-    cmd = ["curl", "-s", "-L", "-k", url]
+def curl(url, port, method = "GET", data = "", proxy = ""):
+    cmd = ["curl", "-s", "-k", url]
     if method == "HEAD":
         cmd.append("--head")
     else:
@@ -60,7 +63,7 @@ def curl(url, method = "GET", data = "", proxy = ""):
     writeflush(" ".join(cmd) + "\n")
 
     try:
-        return exec(cmd, shell = False)
+        return exec(cmd, port, shell = False)
     except subprocess.TimeoutExpired:
         return -1, "Subprocess timed out"
 
@@ -115,13 +118,13 @@ def checkMethod(method, port, secure = False):
     if method in ["PUT", "POST", "PATCH"]:
         data = str(uuid.uuid4())
 
-    aret, adata = curl(url, method, data)
+    aret, adata = curl(url, port, method, data)
     if aret != 0:
         writeflush("%s: Curl failed direct: %d\n%s\n" % (testname, aret, adata))
         return False
     a = filterHeaders(adata)
 
-    bret, bdata = curl(url, method, data, proxy = "localhost:" + str(port))
+    bret, bdata = curl(url, port, method, data, proxy = "localhost:" + str(port))
     if bret != 0:
         writeflush("%s: Curl failed thru proxy: %d\n%s\n" % (testname, bret, bdata))
         return False
@@ -174,7 +177,7 @@ def runTest(test, cmd, offset, port):
     if sys.platform == "win32":
         cmd = "cmd /c start /wait /min " + cmd
     if "--norun" not in sys.argv:
-        subp = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subp = subprocess.Popen(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
 
         if testproc in [installTest, uninstallTest]:
             # Wait for Px to exit for these tests
@@ -271,7 +274,7 @@ def checkSocket(ips, port):
 
 def checkFilter(ips, port):
     def checkProc(lip, port):
-        rcode, _ = curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
+        rcode, _ = curl(url = "http://google.com", port = port, proxy = "%s:%d" % (lip, port))
         writeflush("Returned %d\n" % rcode)
         if rcode == 0:
             return True
@@ -323,10 +326,9 @@ def httpTest(skip, port):
     del skip
     return run(port)
 
-def installTest(cmd, skip):
-    del skip
+def installTest(cmd, port):
     time.sleep(1)
-    ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px")
+    ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px", port)
     if ret != 0:
         writeflush("Failed: registry query failed: %d\n%s\n" % (ret, data))
         return False
@@ -335,10 +337,10 @@ def installTest(cmd, skip):
         return False
     return True
 
-def uninstallTest(cmd, skip):
+def uninstallTest(skip, port):
     del skip
     time.sleep(1)
-    ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px")
+    ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px", port)
     if ret == 0:
         writeflush("reg query passed after uninstall\n%s\n" % data)
         return False
@@ -350,7 +352,7 @@ def quitTest(cmd, port):
         return False
 
     writeflush("cmd: " + cmd + "--quit\n")
-    ret, data = exec(cmd + "--quit")
+    ret, data = exec(cmd + "--quit", port)
     if ret != 0 or "Quitting Px .. DONE" not in data:
         writeflush("Failed: Unable to --quit Px: %d\n%s\n" % (ret, data + "\n"))
         return False

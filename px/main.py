@@ -294,14 +294,17 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
         try:
             httpserver.BaseHTTPRequestHandler.handle_one_request(self)
         except socket.error as error:
+            self.close_connection = True
+            easyhash = ""
+            if self.curl is not None:
+                easyhash = self.curl.easyhash + ": "
+                State.mcurl.stop(self.curl)
+                self.curl = None
             if "forcibly closed" in str(error):
-                dprint("Connection closed by client")
+                dprint(easyhash + "Connection closed by client")
             else:
                 traceback.print_exc(file=sys.stdout)
-                dprint("Socket error: %s" % error)
-            self.close_connection = True
-            State.mcurl.stop(self.curl)
-            self.curl = None
+                dprint(easyhash + "Socket error: %s" % error)
 
     def address_string(self):
         host, port = self.client_address[:2]
@@ -312,16 +315,16 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
         dprint(format % args)
 
     def do_curl(self):
-        dprint("Path = " + self.path)
         if self.curl is None:
             self.curl = mcurl.Curl(self.path, self.command, self.request_version, State.socktimeout)
         else:
             self.curl.reset(self.path, self.command, self.request_version, State.socktimeout)
         self.curl.set_debug()
 
+        dprint(self.curl.easyhash + ": Path = " + self.path)
         ipport = self.get_destination()
         if ipport is None:
-            dprint("Configuring proxy settings")
+            dprint(self.curl.easyhash + ": Configuring proxy settings")
             server = self.proxy_servers[0][0]
             port = self.proxy_servers[0][1]
             ret = self.curl.set_proxy(proxy = server, port = port)
@@ -336,11 +339,11 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
                 key = State.username
                 pwd = keyring.get_password("Px", key)
             if len(key) == 0:
-                dprint("Using SSPI to login")
+                dprint(self.curl.easyhash + ": Using SSPI to login")
                 key = ":"
             self.curl.set_auth(user = key, password = pwd, auth = State.auth)
         else:
-            dprint("Skipping auth proxying")
+            dprint(self.curl.easyhash + ": Skipping auth proxying")
 
         # Plain HTTP can be bridged directly
         if not self.curl.is_connect():
@@ -353,10 +356,10 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
         self.curl.set_useragent(State.useragent)
 
         if not State.mcurl.do(self.curl):
-            dprint("Connection failed: " + self.curl.errstr)
+            dprint(self.curl.easyhash + ": Connection failed: " + self.curl.errstr)
             self.send_error(self.curl.resp, self.curl.errstr)
         elif self.curl.is_connect():
-            dprint("Connected")
+            dprint(self.curl.easyhash + ": SSL connected")
             self.send_response(200, "Connection established")
             self.send_header("Proxy-Agent", self.version_string())
             self.end_headers()
@@ -377,7 +380,7 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
                 self.send_response(200)
 
                 for key, value in headers.items():
-                    dprint("Returning %s: %s" % (key, value))
+                    dprint(self.curl.easyhash + ": Returning %s: %s" % (key, value))
                     self.send_header(key, value)
 
                 self.end_headers()
@@ -419,10 +422,10 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
         servers, netloc, path = State.wproxy.find_proxy_for_url(
             ("https://" if "://" not in self.path else "") + self.path)
         if servers[0] == wproxy.DIRECT:
-            dprint("Direct connection")
+            dprint(self.curl.easyhash + ": Direct connection")
             return netloc
         else:
-            dprint("Proxy = " + str(servers))
+            dprint(self.curl.easyhash + ": Proxy = " + str(servers))
             self.proxy_servers = servers
             return None
 

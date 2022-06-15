@@ -1,4 +1,5 @@
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -162,10 +163,21 @@ def nuitka():
 
     # Create archive
     os.chdir("..")
+    archfile = "px-v%s-%s" % (__version__, osname)
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"
-    shutil.make_archive("px-v%s-%s" % (__version__, osname), arch, "px.dist")
+    shutil.make_archive(archfile, arch, "px.dist")
+
+    # Create hashfile
+    if arch == "gztar":
+        arch = "tar.gz"
+    archfile += "." + arch
+    with open(archfile, "rb") as afile:
+        sha256sum = hashlib.sha256(afile.read()).hexdigest()
+    with open(archfile + ".sha256", "w") as shafile:
+        shafile.write(sha256sum)
+
     os.chdir("..")
 
 # Github related

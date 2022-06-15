@@ -21,7 +21,7 @@ If Python is already available, Px can be easily installed using the Python
 package manager `pip`. This will download and install Px as a Python module
 along with all dependencies:
 
-	`python -m pip install px-proxy`
+	python -m pip install px-proxy
 
 Once installed, Px can be run as follows:
 - Running `px` directly
@@ -43,7 +43,7 @@ a copy. On Linux, it is required to install libcurl using the package manager:
 
 The latest Px version can be downloaded and installed from source via pip:
 
-	`python -m pip install git+https://github.com/genotrance/px`
+	python -m pip install git+https://github.com/genotrance/px
 
 Source can also be downloaded separately and installed:
 
@@ -58,7 +58,7 @@ Source can also be downloaded separately and installed:
 Once downloaded, Px can be installed as a standard Python module along with all
 dependencies :
 
-  `python -m pip install .`
+	python -m pip install .
 
 Note that libcurl will need to be installed on Linux, as described earlier,
 using the package manager. For Windows, [download](https://curl.se/windows/) and
@@ -83,11 +83,11 @@ python px.py # run in a console window
 If Px has been installed to the Windows registry to start on boot, it should be
 removed before uninstallation:
 
-  `python -m px --uninstall`
+	python -m px --uninstall
 
 Px can then be uninstalled using `pip` as follows:
 
-  `python -m pip uninstall px-proxy`
+	python -m pip uninstall px-proxy
 
 ## Configuration
 
@@ -110,11 +110,11 @@ backend.
 
 Credentials can be setup with the command line:
 
-  `px --username=domain\username --password`
+	px --username=domain\username --password
 
 If username is already defined in `px.ini`:
 
-  `px --password`
+	px --password
 
 Information on keyring backends can be found [here](https://pypi.org/project/keyring).
 
@@ -124,9 +124,9 @@ Credential Manager is the recommended backend for Windows and the password is st
 as a 'Generic Credential' type with 'Px' as the network address name. Credential Manager
 can be accessed as follows:
 
-  Control Panel > User Accounts > Credential Manager > Windows Credentials
+	Control Panel > User Accounts > Credential Manager > Windows Credentials
 
-  Or on the command line: `rundll32.exe keymgr.dll, KRShowKeyMgr`
+	Or on the command line: `rundll32.exe keymgr.dll, KRShowKeyMgr`
 
 ### Linux
 
@@ -137,12 +137,12 @@ to start the SecretService backend.
 If the default SecretService keyring backend does not work, the [keyring_jeepney](https://pypi.org/project/keyring_jeepney)
 package might provide an alternative.
 
-  `python -m pip install keyring_jeepney`
+	python -m pip install keyring_jeepney
 
 Worst case, the [keyrings.alt](https://pypi.org/project/keyrings.alt/) package can
 be used.
 
-  `python -m pip install keyrings.alt`
+	python -m pip install keyrings.alt
 
 ### Misc
 
@@ -300,33 +300,45 @@ Configuration:
 
 Use `proxyserver.com:80` and allow requests from localhost only:
 
-  `px --proxy=proxyserver.com:80`
+	px --proxy=proxyserver.com:80
 
 Don't use any forward proxy at all, just log what's going on:
 
-  `px --noproxy=0.0.0.0/0 --debug`
+	px --noproxy=0.0.0.0/0 --debug
 
 Allow requests from `localhost` and all locally assigned IP addresses. This
 is very useful for Docker for Windows and VMs in a NAT configuration because
 all requests originate from the host's IP:
 
-  `px --proxy=proxyserver.com:80 --hostonly`
+	px --proxy=proxyserver.com:80 --hostonly
 
 Allow requests from `localhost`, locally assigned IP addresses and the IPs
 specified in the allow list outside the host:
 
-  `px --proxy=proxyserver:80 --hostonly --gateway --allow=172.*.*.*`
+	px --proxy=proxyserver:80 --hostonly --gateway --allow=172.*.*.*
 
 Allow requests from everywhere. Be careful, every client will use your login:
 
-  `px --proxy=proxyserver.com:80 --gateway`
+	px --proxy=proxyserver.com:80 --gateway
 
 NOTE: In Docker for Windows you need to set your proxy to `http://host.docker.internal:3128` or `http://<your_ip>:3128`
 (or actual port Px is listening to) in your containers and be aware of https://github.com/docker/for-win/issues/1380.
 
 Workaround:
 
-`docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile`
+	docker build --build-arg http_proxy=http://<your ip>:3128 --build-arg https_proxy=http://<your ip>:3128 -t containername ../dir/with/Dockerfile
+
+NOTE: In WSL2 you can setup your proxy in `/etc/profile` as follows:
+
+```
+export http_proxy="http://$(tail -1 /etc/resolv.conf | cut -d' ' -f2):3128"
+export https_proxy="http://$(tail -1 /etc/resolv.conf | cut -d' ' -f2):3128"
+```
+
+NOTE: When running MQTT over websockets, it will help to increase the idle
+timeout to 120 seconds: `--idle=120`. The default value of 30 will cause the
+websocket connection to disconnect since the default MQTT keepalive period
+is 60 seconds.
 
 ## Dependencies
 

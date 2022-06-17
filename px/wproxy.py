@@ -17,6 +17,9 @@ except ImportError:
     print("Requires module netaddr")
     sys.exit()
 
+# PAC processing using quickjs
+from .pac import Pac
+
 # Proxy modes - source of proxy info
 MODE_NONE = 0
 MODE_AUTO = 1
@@ -107,13 +110,27 @@ def parse_noproxy(noproxystr, iponly = False):
 
     return noproxy, noproxy_hosts
 
-class _WproxyBase(object):
-    "Load proxy information using urllib.request.getproxies()"
+class _WproxyBase:
+    """
+    Load proxy information from configuration or environment
+        Returns MODE_NONE, MODE_ENV
+
+    Mode can be set to MODE_CONFIG or MODE_CONFIG_PAC
+        MODE_CONFIG expects servers = [(proxy1, port), (proxy2, port)]
+        MODE_CONFIG_PAC expects servers = [pac_url]
+
+    Order of proxy priority:
+    - Configuration - MODE_CONFIG, MODE_CONFIG_PAC
+    - Environment - MODE_ENV - uses urllib.request.getproxies()
+
+    Proxy and noproxy details need to come from the same source - they are not merged
+    """
 
     mode = MODE_NONE
     servers = None
     noproxy = None
     noproxy_hosts = None
+    pac = None
 
     def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, debug_print = None):
         global dprint
@@ -130,6 +147,7 @@ class _WproxyBase(object):
             self.servers = servers or []
             self.noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
         else:
+            # MODE_ENV
             proxy = request.getproxies()
             if "http" in proxy:
                 self.mode = MODE_ENV
@@ -224,6 +242,19 @@ class _WproxyBase(object):
             # Return proxy from environment or configuration
             return copy.deepcopy(self.servers), netloc, path
 
+        if self.mode == MODE_CONFIG_PAC:
+            # Return proxy from configured PAC URL/file
+            if self.pac is None:
+                # Load PAC file
+                self.pac = Pac(debug_print = dprint)
+                if self.servers[0].startswith("http"):
+                    self.pac.load_url(self.servers[0])
+                else:
+                    self.pac.load_jsfile(self.servers[0])
+
+            if self.pac is not None:
+                return parse_proxy(self.pac.find_proxy_for_url(url, netloc[0])), netloc, path
+
         return None, netloc, path
 
 if sys.platform == "win32":
@@ -297,14 +328,10 @@ if sys.platform == "win32":
             Load proxy information from Windows Internet Options
               Returns MODE_NONE, MODE_ENV, MODE_AUTO, MODE_PAC, MODE_MANUAL
 
-            Mode can be set to MODE_CONFIG or MODE_CONFIG_PAC
-              MODE_CONFIG expects servers = [(proxy1, port), (proxy2, port)]
-              MODE_CONFIG_PAC expects servers = [pac_url]
-
             Order of proxy priority:
             - Configuration - MODE_CONFIG, MODE_CONFIG_PAC
             - Internet Options - MODE_AUTO, MODE_PAC, MODE_MANUAL
-            - Environment - MODE_ENV
+            - Environment - MODE_ENV - uses urllib.request.getproxies()
 
             Proxy and noproxy details need to come from the same source - they are not merged
             """

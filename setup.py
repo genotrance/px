@@ -70,13 +70,14 @@ setup(
         "Programming Language :: Python :: 3.11",
         "Topic :: Internet :: Proxy Servers"
     ],
-    keywords = "proxy ntlm kerberos",
+    keywords = "proxy ntlm kerberos pac negotiate http",
     packages = find_packages(),
     install_requires = [
         'futures;python_version<"3.0"',
         "keyring",
         "netaddr",
-        "psutil"
+        "psutil",
+        "quickjs"
     ],
     data_files = data_files,
     entry_points = {

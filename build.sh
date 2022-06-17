@@ -6,12 +6,13 @@ if [ -f "/.dockerenv" ]; then
     SHELL="bash"
 
     export PROXY="$1"
-    export USERNAME="$2"
+    export PAC="$2"
+    export USERNAME="$3"
 
     # build or test
     COMMAND="test"
-    if [ ! -z "$3" ]; then
-        COMMAND="$3"
+    if [ ! -z "$4" ]; then
+        COMMAND="$4"
     fi
 
     if [ "$DISTRO" = "alpine" ]; then
@@ -93,10 +94,15 @@ else
         exit
     fi
 
+    if [ -z "$PAC" ]; then
+        echo "PAC not configured"
+        exit
+    fi
+
     if [ -z "$USERNAME" ]; then
         echo "USERNAME not configured"
         exit
     fi
 
-    docker run -it --rm --network host --privileged -v `pwd`:/px $1 /px/build.sh "$PROXY" "$USERNAME" $2
+    docker run -it --rm --network host --privileged -v `pwd`:/px $1 /px/build.sh "$PROXY" "$PAC" "$USERNAME" $2
 fi

@@ -70,7 +70,7 @@ Px can be run as a local Python script without installation. Download the source
 as described above, install all dependencies and then run Px:
 
 ```
-pip install keyring netaddr psutil futures
+pip install keyring netaddr psutil quickjs futures
 
 # Download/install libcurl
 
@@ -198,8 +198,8 @@ Configuration:
 
   --pac=  proxy:pac=
   PAC file to use to connect
-    Use in place of server if PAC file should be loaded from a custom URL or
-    file location instead of from Internet Options
+    Use in place of --server if PAC file should be loaded from a URL or local
+    file. Relative paths will be relative to the Px script or binary
 
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
@@ -348,14 +348,13 @@ the following Python packages:
 - [keyring](https://pypi.org/project/keyring/)
 - [netaddr](https://pypi.org/project/netaddr/)
 - [psutil](https://pypi.org/project/psutil/)
+- [quickjs](https://pypi.org/project/quickjs/)
 - [futures](https://pypi.org/project/futures/) on Python 2.x
 
 Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP
 connections and proxy authentication.
 
 ## Limitations
-
-There is currently no PAC support on Linux.
 
 Windows multiprocessing only works on Python 3.3+ since that's when support was
 added to share sockets across processes. On older versions of Python, Px will run

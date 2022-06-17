@@ -121,8 +121,8 @@ Configuration:
 
   --pac=  proxy:pac=
   PAC file to use to connect
-    Use in place of server if PAC file should be loaded from a custom URL or
-    file location instead of from Internet Options
+    Use in place of --server if PAC file should be loaded from a URL or local
+    file. Relative paths will be relative to the Px script or binary
 
   --listen=  proxy:listen=
   IP interface to listen on - default: 127.0.0.1
@@ -218,7 +218,7 @@ Configuration:
     Prevents logs from being overwritten on subsequent runs. Also useful if
     running multiple instances of Px""" % __version__
 
-class State(object):
+class State:
     """Stores runtime state per process - shared across threads"""
 
     # Config
@@ -347,10 +347,13 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
 
         # Plain HTTP can be bridged directly
         if not self.curl.is_connect():
-            self.curl.bridge(self.rfile, self.wfile)
+            self.curl.bridge(self.rfile, self.wfile, self.wfile)
 
         # Set headers for request
         self.curl.set_headers(self.headers)
+
+        # Turn off transfer decoding
+        self.curl.set_transfer_decoding(False)
 
         # Set user agent if configured
         self.curl.set_useragent(State.useragent)
@@ -367,34 +370,8 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
 
         State.mcurl.remove(self.curl)
 
-    def do_PAC(self):
-        resp = 404
-        if State.wproxy.mode in [wproxy.MODE_CONFIG_PAC]:
-            try:
-                with open(State.pac) as p:
-                    data = p.read().encode("utf-8")
-                headers = {
-                    "Content-Length": len(data),
-                    "Content-Type": "application/x-ns-proxy-autoconfig"
-                }
-                self.send_response(200)
-
-                for key, value in headers.items():
-                    dprint(self.curl.easyhash + ": Returning %s: %s" % (key, value))
-                    self.send_header(key, value)
-
-                self.end_headers()
-                self.wfile.write(data)
-            except:
-                traceback.print_exc(file=sys.stdout)
-
-        self.send_error(404)
-
     def do_GET(self):
-        if "/PxPACFile.pac" in self.path:
-            self.do_PAC()
-        else:
-            self.do_curl()
+        self.do_curl()
 
     def do_HEAD(self):
         self.do_curl()
@@ -633,10 +610,20 @@ def set_pac(pac):
 
     pacproxy = False
     if pac.startswith("http"):
+        # URL
         pacproxy = True
 
     elif pac.startswith("file"):
+        # file://
         pac = file_url_to_local_path(pac)
+        if os.path.exists(pac):
+            pacproxy = True
+
+    else:
+        # Local file
+        if not os.path.isabs(pac):
+            # Relative to Px script / binary
+            pac = os.path.normpath(os.path.join(os.path.dirname(get_script_path()), pac))
         if os.path.exists(pac):
             pacproxy = True
 
@@ -851,13 +838,7 @@ def parse_config():
     if len(servers) != 0:
         State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, State.noproxy, debug_print = dprint)
     elif len(State.pac) != 0:
-        pac = State.pac
-        if "file://" in State.pac or not State.pac.startswith("http"):
-            host = State.config.get("proxy", "listen") or "localhost"
-            port = State.config.getint("proxy", "port")
-            pac = "http://%s:%d/PxPACFile.pac" % (host, port)
-            dprint("PAC URL is local: " + pac)
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [pac], debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], debug_print = dprint)
     else:
         State.wproxy = wproxy.Wproxy(debug_print = dprint)
         State.proxy_last_reload = time.time()

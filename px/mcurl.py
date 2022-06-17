@@ -2,6 +2,7 @@
 
 import ctypes
 import hashlib
+import io
 import select
 import socket
 import sys
@@ -109,8 +110,16 @@ def _read_callback(buffer, size, nitems, userdata):
         else:
             tsize = curl.size
             curl.size = None
-        ctypes.memmove(buffer,
-            curl.client_rfile.read(tsize), tsize)
+        if curl.client_rfile is not None:
+            try:
+                data = curl.client_rfile.read(tsize)
+                ctypes.memmove(buffer, data, tsize)
+            except ConnectionError as exc:
+                dprint(curl.easyhash + ": Error reading from client: " + str(exc))
+                tsize = 0
+        else:
+            dprint(curl.easyhash + ": Read expected but no client")
+            tsize = 0
     else:
         tsize = 0
 
@@ -123,11 +132,15 @@ def _write_callback(buffer, size, nitems, userdata):
     curl = MCURL.handles[libcurl.from_oid(userdata)]
     if tsize > 0:
         if curl.sentheaders:
-            try:
-                tsize = curl.client_wfile.write(bytes(buffer[:tsize]))
-            except ConnectionError as exc:
-                dprint(curl.easyhash + ": Error writing to client: " + str(exc))
-                return 0
+            if curl.client_wfile is not None:
+                try:
+                    tsize = curl.client_wfile.write(bytes(buffer[:tsize]))
+                except ConnectionError as exc:
+                    dprint(curl.easyhash + ": Error writing to client: " + str(exc))
+                    return 0
+            else:
+                dprint(curl.easyhash + ": Ignored %d bytes" % tsize)
+                return tsize
         else:
             dprint(curl.easyhash + ": Skipped %d bytes" % tsize)
             return tsize
@@ -158,11 +171,15 @@ def _header_callback(buffer, size, nitems, userdata):
                 dprint(curl.easyhash + ": Suppressing headers")
                 curl.suppress = True
                 return tsize
-        try:
-            return curl.client_wfile.write(data)
-        except ConnectionError as exc:
-            dprint(curl.easyhash + ": Error writing header to client: " + str(exc))
-            return 0
+        if curl.client_hfile is not None:
+            try:
+                return curl.client_hfile.write(data)
+            except ConnectionError as exc:
+                dprint(curl.easyhash + ": Error writing header to client: " + str(exc))
+                return 0
+        else:
+            dprint(curl.easyhash + ": Ignored %d bytes" % tsize)
+            return tsize
 
     return 0
 
@@ -177,6 +194,7 @@ class Curl:
     # For plain HTTP
     client_rfile = None
     client_wfile = None
+    client_hfile = None
 
     # Request info
     method = None
@@ -259,10 +277,16 @@ class Curl:
         dprint(self.easyhash + ": Resetting curl")
         libcurl.easy_reset(self.easy)
         self.sock_fd = None
+        self.client_rfile = None
+        self.client_wfile = None
+        self.client_hfile = None
         self.proxy = None
         self.size = None
+        self.user = None
+        self.auth = None
         self.done = False
         self.errstr = ""
+        self.resp = 503
         self.sentheaders = False
         self.suppress = False
 
@@ -374,29 +398,81 @@ class Curl:
         else:
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, None)
 
-    def bridge(self, client_rfile, client_wfile):
-        "Bridge curl reads/writes to socket specified"
+    def bridge(self, client_rfile = None, client_wfile = None, client_hfile = None):
+        """
+        Bridge curl reads/writes to sockets specified
+
+        Reads POST/PATCH data from client_rfile
+        Writes data back to client_wfile
+        Writes headers back to client_hfile
+        """
         dprint(self.easyhash + ": Setting up bridge")
-        self.client_rfile = client_rfile
-        self.client_wfile = client_wfile
 
         # Setup read/write callbacks
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_READFUNCTION, _read_callback)
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_READDATA, id(self.easyhash))
+        if client_rfile is not None:
+            self.client_rfile = client_rfile
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_READFUNCTION, _read_callback)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_READDATA, id(self.easyhash))
 
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_WRITEFUNCTION, _write_callback)
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_WRITEDATA, id(self.easyhash))
+        if client_wfile is not None:
+            self.client_wfile = client_wfile
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_WRITEFUNCTION, _write_callback)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_WRITEDATA, id(self.easyhash))
 
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HEADERFUNCTION, _header_callback)
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HEADERDATA, id(self.easyhash))
+        if client_hfile is not None:
+            self.client_hfile = client_hfile
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HEADERFUNCTION, _header_callback)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HEADERDATA, id(self.easyhash))
+        else:
+            self.sentheaders = True
 
-        # Turn off transfer decoding - let client do it
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_TRANSFER_DECODING, False)
+    def buffer(self, data = None):
+        "Setup buffers to bridge curl perform"
+        dprint(self.easyhash + ": Setting up buffers for bridge")
+        rfile = None
+        if data is not None:
+            rfile = io.BytesIO()
+            rfile.write(data)
+            rfile.seek(0)
+
+        wfile = io.BytesIO()
+        hfile = io.BytesIO()
+
+        self.bridge(rfile, wfile, hfile)
+
+    def get_data(self):
+        "Return data written by curl perform to buffer()"
+        if isinstance(self.client_wfile, io.BytesIO):
+            return self.client_wfile.getvalue().decode("utf-8")
+        else:
+            return ""
+
+    def get_headers(self):
+        "Return headers written by curl to buffer()"
+        if isinstance(self.client_wfile, io.BytesIO):
+            return self.client_wfile.getvalue().decode("utf-8")
+        else:
+            return ""
+
+    def set_transfer_decoding(self, enable = False):
+        "Set curl to turn off transfer decoding - let client do it"
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_TRANSFER_DECODING, enable)
 
     def set_useragent(self, useragent):
         "Set user agent to send"
         if len(useragent) != 0:
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_USERAGENT, useragent.encode("utf-8"))
+
+    def set_follow(self, enable = True):
+        "Set curl to follow 3xx responses"
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_FOLLOWLOCATION, enable)
+
+    def perform(self):
+        "Perform the easy handle"
+        if MCURL.do(self) == False:
+            dprint(self.easyhash + ": Connection failed: " + self.errstr)
+            return False
+        return True
 
 @libcurl.socket_callback
 def _socket_callback(easy, sock_fd, ev_bitmask, userp, socketp):
@@ -769,6 +845,9 @@ class MCurl:
         for easyhash in tuple(self.handles):
             self.stop(self.handles[easyhash])
         libcurl.multi_cleanup(self._multi)
+
+        global MCURL
+        MCURL = None
 
 def tester(multi, url):
     curl = Curl(url)

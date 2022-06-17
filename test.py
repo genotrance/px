@@ -21,6 +21,7 @@ import tools
 
 COUNT = 0
 PROXY = ""
+PAC = ""
 PORT = 3128
 USERNAME = ""
 AUTH = ""
@@ -540,6 +541,9 @@ def main():
     --proxy=testproxy.org:80
         Point to the NTLM proxy server that Px should connect through
 
+    --pac=pacurl
+        Point to the PAC file to determine proxy info
+
     --port=3128
         Run Px on this port
 
@@ -587,11 +591,13 @@ def main():
     """
 
     global PROXY
+    global PAC
     global PORT
     global USERNAME
     global AUTH
     global BINARY
     PROXY = tools.get_argval("proxy")
+    PAC = tools.get_argval("pac")
     PORT = tools.get_argval("port")
     if len(PORT):
         PORT = int(PORT)

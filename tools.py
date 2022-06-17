@@ -344,7 +344,7 @@ def post():
 def main():
     # Setup
     if "--setup" in sys.argv:
-        os.system(sys.executable + " -m pip install --upgrade keyring netaddr psutil")
+        os.system(sys.executable + " -m pip install --upgrade keyring netaddr psutil quickjs")
         os.system(sys.executable + " -m pip install --upgrade build nuitka requests twine wheel")
         if sys.platform == "linux":
             os.system(sys.executable + " -m pip install --upgrade keyrings.alt keyring_jeepney netifaces")

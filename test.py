@@ -15,6 +15,7 @@ import psutil
 if sys.platform == "linux":
     import netifaces
 
+from px import mcurl
 from px.version import __version__
 
 import tools
@@ -50,23 +51,24 @@ def exec(cmd, port = 0, shell = True):
         data = l.read()
     return p.returncode, data
 
-def curl(url, port, method = "GET", data = "", proxy = ""):
-    cmd = ["curl", "-s", "-k", url]
-    if method == "HEAD":
-        cmd.append("--head")
-    else:
-        cmd.extend(["-X", method])
+def curl(url, port, method = "GET", data = None, proxy = ""):
+    if mcurl.MCURL is None:
+        mc = mcurl.MCurl(debug_print = writeflush)
+    ec = mcurl.Curl(url, method)
+    if "--debug" in sys.argv:
+        ec.set_debug()
     if len(proxy) != 0:
-        cmd.extend(["--proxy", proxy])
+        ec.set_proxy(proxy)
     if len(data) != 0:
-        cmd.extend(["-d", data])
+        ec.buffer(data.encode("utf-8"))
+        ec.set_headers({"Content-Length": len(data)})
+    else:
+        ec.buffer()
+    if not ec.perform():
+        ret = int(ec.errstr.split(";")[0])
+        return ret, ""
 
-    writeflush(" ".join(cmd) + "\n")
-
-    try:
-        return exec(cmd, port, shell = False)
-    except subprocess.TimeoutExpired:
-        return -1, "Subprocess timed out"
+    return 0, ec.get_data()
 
 def waitasync(results):
     ret = True
@@ -155,6 +157,8 @@ def run(port):
 
 def writeflush(data):
     STDOUT.write(data)
+    if data[-1] != "\n":
+        STDOUT.write("\n")
     STDOUT.flush()
 
 def runTest(test, cmd, offset, port):
@@ -360,19 +364,29 @@ def quitTest(cmd, port):
 
     return True
 
-def getproxyarg():
-    proxyarg = ("--proxy=" + PROXY) if len(PROXY) != 0 else ""
+def getproxyargs():
+    proxyargs = []
+    proxyarg = ""
     proxyarg += (" --username=" + USERNAME) if len(USERNAME) != 0 else ""
     proxyarg += (" --auth=" + AUTH) if len(AUTH) != 0 else ""
-    return proxyarg
+
+    if "--noserver" not in sys.argv and len(PROXY) != 0:
+        proxyargs.append("--proxy=" + PROXY + proxyarg)
+
+    if "--nopac" not in sys.argv and len(PAC) != 0:
+        proxyargs.append("--pac=" + PAC + proxyarg)
+
+    if "--nodirect" not in sys.argv:
+        proxyargs.append("")
+
+    return proxyargs
 
 def socketTestSetup():
-    proxyarg = getproxyarg()
     if "--nohostonly" not in sys.argv:
-        TESTS.append((proxyarg + " --hostonly", hostonlyTest, getips()))
+        TESTS.append(("--hostonly", hostonlyTest, getips()))
 
     if "--nogateway" not in sys.argv:
-        TESTS.append((proxyarg + " --gateway", gatewayTest, getips()))
+        TESTS.append(("--gateway", gatewayTest, getips()))
 
     if "--noallow" not in sys.argv:
         for ip in getips():
@@ -383,7 +397,7 @@ def socketTestSetup():
             if oct in ["172"]:
                 atest = allowTest
 
-            TESTS.append((proxyarg + " --gateway --allow=%s.*.*" % oct,
+            TESTS.append(("--gateway --allow=%s.*.*" % oct,
                 atest, list(filter(lambda x: oct in x, getips()))))
 
     if "--nolisten" not in sys.argv:
@@ -391,9 +405,9 @@ def socketTestSetup():
         localips.insert(0, "")
         localips.remove("127.0.0.1")
         for ip in localips[:3]:
-            cmd = proxyarg
+            cmd = ""
             if ip != "":
-                cmd += " --listen=" + ip
+                cmd = "--listen=" + ip
 
             testproc = listenTestLocal
             if "172" in ip:
@@ -426,14 +440,10 @@ def auto():
     # Setup tests
     if "--nosocket" not in sys.argv:
         socketTestSetup()
-    proxyargs = set([getproxyarg()])
-    if "--nodirect" not in sys.argv:
-        proxyargs.add("")
-    for proxyarg in proxyargs:
-        if "--noproxy" not in sys.argv:
+    if "--noproxy" not in sys.argv:
+        for proxyarg in getproxyargs():
             TESTS.append((proxyarg + " --workers=2", httpTest, None))
-        if len(proxyarg):
-            if "--nonoproxy" not in sys.argv:
+            if "--nonoproxy" not in sys.argv and len(proxyarg) != 0:
                 TESTS.append((proxyarg + " --workers=2 --threads=30 --noproxy=*.*.*.*", httpTest, None))
 
     workers = tools.get_argval("workers") or "4"
@@ -572,13 +582,16 @@ def main():
         Skip specific socket tests
 
     --noproxy
-        Skip HTTP(s) tests through proxy
+        Skip all proxy tests
+
+    --noserver
+        Skip proxy tests through upstream proxy
 
     --nodirect
-        Skip HTTP(s) direct tests
+        Skip direct proxy tests
 
     --nonoproxy
-        Skip HTTP(s) tests bypassing proxy using noproxy
+        Skip proxy tests bypassing upstream proxy using noproxy
 
     --noinstall
         Skip --install tests

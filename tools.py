@@ -6,7 +6,6 @@ import platform
 import shutil
 import sys
 import time
-import urllib.request
 import zipfile
 
 try:
@@ -15,9 +14,12 @@ except ModuleNotFoundError as exc:
     if "--setup" not in sys.argv:
         raise exc
 
+from px import mcurl
 from px.version import __version__
 
 REPO = "genotrance/px"
+
+# CLI
 
 def get_argval(name):
     for i in range(len(sys.argv)):
@@ -36,6 +38,8 @@ def get_auth():
     print("No --token= specified")
 
     sys.exit(1)
+
+# File utils
 
 def rmtree(dirs):
     for dir in dirs.split(" "):
@@ -70,6 +74,47 @@ def extract(zfile, cfile):
                 with open(cfile, "wb") as dll:
                     shutil.copyfileobj(member, dll)
 
+# OS
+
+def get_os():
+    if sys.platform == "linux":
+        if os.system("ldd /bin/ls | grep musl > /dev/null") == 0:
+            return "linux-musl"
+        else:
+            return "linux-glibc"
+    elif sys.platform == "win32":
+        return "windows"
+    elif sys.platform == "darwin":
+        return "osx"
+
+    return "unsupported"
+
+# URL
+
+def curl(url, method = "GET", data = "", proxy = "", wfile = None):
+    if mcurl.MCURL is None:
+        mc = mcurl.MCurl(debug_print = None)
+    ec = mcurl.Curl(url, method)
+    if "--debug" in sys.argv:
+        ec.set_debug()
+    if len(proxy) != 0:
+        ec.set_proxy(proxy)
+    if len(data) != 0:
+        ec.buffer(data.encode("utf-8"))
+        ec.set_headers({"Content-Length": len(data)})
+    elif wfile is not None:
+        ec.bridge(client_wfile = wfile)
+    else:
+        ec.buffer()
+    if not ec.perform():
+        ret = int(ec.errstr.split(";")[0])
+        return ret, ""
+
+    if wfile is not None:
+        return 0, ""
+
+    return 0, ec.get_data()
+
 def get_curl():
     os.chdir("px/libcurl")
 
@@ -79,17 +124,25 @@ def get_curl():
             lcurlzip = "curl%s.zip" % bit
             if not os.path.exists(lcurl):
                 if not os.path.exists(lcurlzip):
-                    urllib.request.urlretrieve("https://curl.se/windows/curl-win%s-latest.zip" % bit, lcurlzip)
+                    with open(lcurlzip, "wb") as lcz:
+                        ret, _ = curl("https://curl.se/windows/curl-win%s-latest.zip" % bit, wfile = lcz)
                 extract(lcurlzip, lcurl)
-                os.remove(lcurlzip)
+
+                while not os.path.exists(lcurl):
+                    time.sleep(0.5)
 
                 if shutil.which("strip") is not None:
                     os.system("strip -s " + lcurl)
                 if shutil.which("upx") is not None:
                     os.system("upx --best " + lcurl)
 
+                if os.path.exists(lcurl):
+                    os.remove(lcurlzip)
+
     finally:
         os.chdir("../..")
+
+# Build
 
 def wheel():
     rmtree("build wheel")
@@ -106,19 +159,6 @@ def wheel():
     os.system(sys.executable + " -m twine check wheel/*")
 
     rmtree("build px_proxy.egg-info")
-
-def get_os():
-    if sys.platform == "linux":
-        if os.system("ldd /bin/ls | grep musl > /dev/null") == 0:
-            return "linux-musl"
-        else:
-            return "linux-glibc"
-    elif sys.platform == "win32":
-        return "windows"
-    elif sys.platform == "darwin":
-        return "osx"
-
-    return "unsupported"
 
 def pyinstaller():
     osname = get_os()

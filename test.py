@@ -15,7 +15,6 @@ import psutil
 if sys.platform == "linux":
     import netifaces
 
-from px import mcurl
 from px.version import __version__
 
 import tools
@@ -50,25 +49,6 @@ def exec(cmd, port = 0, shell = True):
     with open(log, "r") as l:
         data = l.read()
     return p.returncode, data
-
-def curl(url, port, method = "GET", data = None, proxy = ""):
-    if mcurl.MCURL is None:
-        mc = mcurl.MCurl(debug_print = writeflush)
-    ec = mcurl.Curl(url, method)
-    if "--debug" in sys.argv:
-        ec.set_debug()
-    if len(proxy) != 0:
-        ec.set_proxy(proxy)
-    if len(data) != 0:
-        ec.buffer(data.encode("utf-8"))
-        ec.set_headers({"Content-Length": len(data)})
-    else:
-        ec.buffer()
-    if not ec.perform():
-        ret = int(ec.errstr.split(";")[0])
-        return ret, ""
-
-    return 0, ec.get_data()
 
 def waitasync(results):
     ret = True
@@ -121,13 +101,13 @@ def checkMethod(method, port, secure = False):
     if method in ["PUT", "POST", "PATCH"]:
         data = str(uuid.uuid4())
 
-    aret, adata = curl(url, port, method, data)
+    aret, adata = tools.curl(url, method, data)
     if aret != 0:
         writeflush("%s: Curl failed direct: %d\n%s\n" % (testname, aret, adata))
         return False
     a = filterHeaders(adata)
 
-    bret, bdata = curl(url, port, method, data, proxy = "localhost:" + str(port))
+    bret, bdata = tools.curl(url, method, data, proxy = "localhost:" + str(port))
     if bret != 0:
         writeflush("%s: Curl failed thru proxy: %d\n%s\n" % (testname, bret, bdata))
         return False
@@ -279,7 +259,7 @@ def checkSocket(ips, port):
 
 def checkFilter(ips, port):
     def checkProc(lip, port):
-        rcode, _ = curl(url = "http://google.com", port = port, proxy = "%s:%d" % (lip, port))
+        rcode, _ = tools.curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
         writeflush("Returned %d\n" % rcode)
         if rcode == 0:
             return True

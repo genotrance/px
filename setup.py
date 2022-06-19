@@ -29,11 +29,12 @@ if "bdist_wheel" in sys.argv:
         dll = "libcurl-x64.dll"
 
     if len(dll) != 0:
-        dllpath = os.path.join("px/libcurl", dll)
+        dllpath = os.path.join("px", "libcurl", dll)
+        cainfo = os.path.join("px", "libcurl", "curl-ca-bundle.crt")
         if os.path.exists(os.path.join(here, dllpath)):
             data_files.append((
                 "lib/site-packages/px/libcurl",
-                [dllpath]))
+                [dllpath, cainfo]))
         else:
             print(dllpath + " missing, skipping in wheel")
 

@@ -81,7 +81,7 @@ if [ -f "/.dockerenv" ]; then
 
         python3 px.py --username=$USERNAME --password
     else
-        python3 -m pip install --upgrade pip setuptools netifaces psutil requests
+        python3 -m pip install --upgrade pip setuptools netifaces psutil
 
         $PXBIN --username=$USERNAME --password
     fi

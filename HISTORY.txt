@@ -1,6 +1,7 @@
-v0.8.0 - 2022-06-17
+v0.8.0 - 2022-06-18
 - Added PAC file support for Linux
 - Local PAC files on Windows are now processed using QuickJS instead of WinHttp
+- Added CAINFO bundle in Windows builds
 
 v0.7.2 - 2022-06-14
 - Fixed #152 - handle connection errors in select loop gracefully

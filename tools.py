@@ -8,12 +8,6 @@ import sys
 import time
 import zipfile
 
-try:
-    import requests
-except ModuleNotFoundError as exc:
-    if "--setup" not in sys.argv:
-        raise exc
-
 from px import mcurl
 from px.version import __version__
 
@@ -91,21 +85,43 @@ def get_os():
 
 # URL
 
-def curl(url, method = "GET", data = "", proxy = "", wfile = None):
+def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile = None, rfile_size = 0, wfile = None):
+    """
+    data - for POST/PUT
+    rfile - upload from open file - requires rfile_size
+    wfile - download into open file
+    """
     if mcurl.MCURL is None:
         mc = mcurl.MCurl(debug_print = None)
     ec = mcurl.Curl(url, method)
-    if "--debug" in sys.argv:
-        ec.set_debug()
-    if len(proxy) != 0:
+    ec.set_debug()
+
+    if proxy is not None:
         ec.set_proxy(proxy)
-    if len(data) != 0:
+
+    if data is not None:
+        # POST/PUT
+        if headers is None:
+            headers = {}
+        headers["Content-Length"] = len(data)
+
         ec.buffer(data.encode("utf-8"))
-        ec.set_headers({"Content-Length": len(data)})
+    elif rfile is not None:
+        # POST/PUT file
+        if headers is None:
+            headers = {}
+        headers["Content-Length"] = rfile_size
+
+        ec.bridge(client_rfile = rfile, client_wfile = wfile)
     elif wfile is not None:
         ec.bridge(client_wfile = wfile)
     else:
         ec.buffer()
+
+    if headers is not None:
+        ec.set_headers(headers)
+
+    ec.set_useragent("mcurl v" + __version__)
     if not ec.perform():
         ret = int(ec.errstr.split(";")[0])
         return ret, ""
@@ -127,6 +143,10 @@ def get_curl():
                     with open(lcurlzip, "wb") as lcz:
                         ret, _ = curl("https://curl.se/windows/curl-win%s-latest.zip" % bit, wfile = lcz)
                 extract(lcurlzip, lcurl)
+
+                if not os.path.exists("curl-ca-bundle.crt"):
+                    # Extract CAINFO bundle
+                    extract(lcurlzip, "curl-ca-bundle.crt")
 
                 while not os.path.exists(lcurl):
                     time.sleep(0.5)
@@ -190,6 +210,7 @@ def nuitka():
         os.mkdir(lcdir)
         # 64-bit only for Windows for now
         copy(os.path.join("px", "libcurl", "libcurl-x64.dll"), lcdir)
+        copy(os.path.join("px", "libcurl", "curl-ca-bundle.crt"), lcdir)
 
     time.sleep(1)
 
@@ -223,10 +244,8 @@ def nuitka():
 # Github related
 
 def get_all_releases():
-    r = requests.get("https://api.github.com/repos/" + REPO + "/releases")
-    j = r.json()
-
-    return j
+    ret, data = curl("https://api.github.com/repos/" + REPO + "/releases")
+    return json.loads(data)
 
 def get_release_by_tag(tag):
     j = get_all_releases()
@@ -246,10 +265,12 @@ def get_num_downloads(rel, aname="px-v"):
 
 def delete_release(rel):
     id = get_release_id(rel)
-    r = requests.delete("https://api.github.com/repos/" + REPO + "/releases/" + id, headers=get_auth())
-    if r.status_code != 204:
-        print("Failed to delete release " + id + " with " + str(r.status_code))
-        print(r.text)
+    ret, data = curl(
+        "https://api.github.com/repos/" + REPO + "/releases/" + id,
+        method = "DELETE", headers = get_auth())
+    if ret != 0:
+        print("Failed to delete release " + id + " with " + str(ret))
+        print(data)
         sys.exit(2)
 
     print("Deleted release " + id)
@@ -265,28 +286,28 @@ def has_downloads(rel):
 def edit_release_tag(rel, offset=""):
     new_tag_name = rel["created_at"].split("T")[0] + offset
     sha = get_tag_by_name(rel["tag_name"])["object"]["sha"]
-    body = json.dumps({
+    data = json.dumps({
       "tag_name": new_tag_name,
       "target_commitish": sha
     })
 
     id = get_release_id(rel)
-    r = requests.patch("https://api.github.com/repos/" + REPO + "/releases/" + id, headers=get_auth(), data=body)
-    if r.status_code != 200:
+    ret, data = curl(
+        "https://api.github.com/repos/" + REPO + "/releases/" + id,
+        method = "PATCH", headers = get_auth(), data = data)
+    if ret != 0:
         if offset:
             edit_release_tag(rel, "-1")
         else:
-            print("Edit release failed with " + str(r.status_code))
-            print(r.text)
+            print("Edit release failed with " + str(ret))
+            print(data)
             sys.exit(3)
 
     print("Edited release tag name to " + rel["created_at"].split("T")[0])
 
 def get_all_tags():
-    r = requests.get("https://api.github.com/repos/" + REPO + "/git/refs/tag")
-    j = r.json()
-
-    return j
+    ret, data = curl("https://api.github.com/repos/" + REPO + "/git/refs/tag")
+    return json.loads(data)
 
 def get_tag_by_name(tag):
     j = get_all_tags()
@@ -298,10 +319,12 @@ def get_tag_by_name(tag):
 
 def delete_tag(tg):
     ref = tg["ref"]
-    r = requests.delete("https://api.github.com/repos/" + REPO + "/git/" + ref, headers=get_auth())
-    if r.status_code != 204:
-        print("Failed to delete tag with " + str(r.status_code))
-        print(r.text)
+    ret, data = curl(
+        "https://api.github.com/repos/" + REPO + "/git/" + ref,
+        method = "DELETE", headers = get_auth())
+    if ret != 0:
+        print("Failed to delete tag with " + str(ret))
+        print(data)
         sys.exit(4)
 
     print("Deleted tag " + ref)
@@ -327,26 +350,30 @@ def create_release(tag, name, body, prerelease):
       "prerelease": prerelease
     })
 
-    r = requests.post("https://api.github.com/repos/" + REPO + "/releases", headers=get_auth(), data=data)
-    if r.status_code != 201:
-        print("Create release failed with " + str(r.status_code))
-        print(r.text)
+    ret, data = curl(
+        "https://api.github.com/repos/" + REPO + "/releases",
+        method = "POST", headers = get_auth(), data = data)
+    if ret != 0:
+        print("Create release failed with " + str(ret))
+        print(data)
         sys.exit(5)
-    j = r.json()
+    j = json.loads(data)
     id = str(j["id"])
     print("Created new release " + id)
 
     return id
 
 def add_asset_to_release(filename, relid):
-    with open(filename, "rb") as f:
+    rfile_size = os.stat(filename).st_size
+    with open(filename, "rb") as rfile:
         headers = get_auth()
         headers["Content-Type"] = "application/octet-stream"
-        r = requests.post("https://uploads.github.com/repos/" + REPO + "/releases/" +
-              relid + "/assets?name=" + os.path.basename(filename), headers=headers, data=f)
-        if r.status_code != 201:
-            print("Asset upload failed with " + str(r.status_code))
-            print(r.text)
+        ret, data = curl(
+            "https://uploads.github.com/repos/" + REPO + "/releases/" + relid + "/assets?name=" + os.path.basename(filename),
+            method = "POST", headers = headers, rfile = rfile, rfile_size = rfile_size)
+        if ret != 0:
+            print("Asset upload failed with " + str(ret))
+            print(data)
             sys.exit(6)
         else:
             print("Asset upload successful")
@@ -355,7 +382,7 @@ def check_code_change():
     if "--force" in sys.argv:
         return True
 
-    if os.system("git diff --name-only HEAD~1 HEAD | grep px.py") == 0:
+    if os.system("git diff --name-only HEAD~1 HEAD | grep \\.py") == 0:
         return True
 
     return False
@@ -385,7 +412,7 @@ def main():
     # Setup
     if "--setup" in sys.argv:
         os.system(sys.executable + " -m pip install --upgrade keyring netaddr psutil quickjs")
-        os.system(sys.executable + " -m pip install --upgrade build nuitka requests twine wheel")
+        os.system(sys.executable + " -m pip install --upgrade build nuitka twine wheel")
         if sys.platform == "linux":
             os.system(sys.executable + " -m pip install --upgrade keyrings.alt keyring_jeepney netifaces")
 

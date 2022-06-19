@@ -3,6 +3,7 @@
 import ctypes
 import hashlib
 import io
+import os.path
 import select
 import socket
 import sys
@@ -240,6 +241,12 @@ class Curl:
         # Timeouts
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CONNECTTIMEOUT, int(connect_timeout))
         #libcurl.easy_setopt(self.easy, libcurl.CURLOPT_TIMEOUT, 60)
+
+        # SSL CAINFO
+        if sys.platform == "win32":
+            cainfo = os.path.join(os.path.dirname(__file__), "libcurl", "curl-ca-bundle.crt")
+            if os.path.exists(cainfo):
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CAINFO, cainfo.encode("utf-8"))
 
         # Set HTTP method
         self.method = method

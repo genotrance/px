@@ -50,6 +50,24 @@ def exec(cmd, port = 0, shell = True):
         data = l.read()
     return p.returncode, data
 
+def curlcli(url, port, method = "GET", data = "", proxy = ""):
+    cmd = ["curl", "-s", "-k", url]
+    if method == "HEAD":
+        cmd.append("--head")
+    else:
+        cmd.extend(["-X", method])
+    if len(proxy) != 0:
+        cmd.extend(["--proxy", proxy])
+    if len(data) != 0:
+        cmd.extend(["-d", data])
+
+    writeflush(" ".join(cmd) + "\n")
+
+    try:
+        return exec(cmd, port, shell = False)
+    except subprocess.TimeoutExpired:
+        return -1, "Subprocess timed out"
+
 def waitasync(results):
     ret = True
     while len(results):
@@ -101,13 +119,19 @@ def checkMethod(method, port, secure = False):
     if method in ["PUT", "POST", "PATCH"]:
         data = str(uuid.uuid4())
 
-    aret, adata = tools.curl(url, method, data)
+    if "--curlcli" in sys.argv:
+        aret, adata = curlcli(url, port, method, data)
+    else:
+        aret, adata = tools.curl(url, method, data = data)
     if aret != 0:
         writeflush("%s: Curl failed direct: %d\n%s\n" % (testname, aret, adata))
         return False
     a = filterHeaders(adata)
 
-    bret, bdata = tools.curl(url, method, data, proxy = "localhost:" + str(port))
+    if "--curlcli" in sys.argv:
+        bret, bdata = curlcli(url, port, method, data, proxy = "localhost:" + str(port))
+    else:
+        bret, bdata = tools.curl(url, method, proxy = "localhost:" + str(port), data = data)
     if bret != 0:
         writeflush("%s: Curl failed thru proxy: %d\n%s\n" % (testname, bret, bdata))
         return False
@@ -259,7 +283,10 @@ def checkSocket(ips, port):
 
 def checkFilter(ips, port):
     def checkProc(lip, port):
-        rcode, _ = tools.curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
+        if "--curlcli" in sys.argv:
+            rcode, _ = curlcli(url = "http://google.com", port = port, proxy = "%s:%d" % (lip, port))
+        else:
+            rcode, _ = tools.curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
         writeflush("Returned %d\n" % rcode)
         if rcode == 0:
             return True
@@ -581,6 +608,9 @@ def main():
 
     --workers=4
         Number of parallel tests to run
+
+    --curlcli
+        Use curl command line instead of px.mcurl
     """
 
     global PROXY

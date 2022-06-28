@@ -25,7 +25,7 @@ installed by downloading the `wheels` package for the target OS from the
 [releases](https://github.com/genotrance/px/releases) page. After extraction,
 Px and all dependencies can be installed with `pip`:
 
-	python -m pip install px-proxy --no-index -f /path/to/wheels
+	`python -m pip install px-proxy --no-index -f /path/to/wheels`
 
 - If Python is not available, get the latest compiled binary from the
 [releases](https://github.com/genotrance/px/releases) page instead. These
@@ -46,7 +46,6 @@ Once installed, Px can be run as follows:
 - Running `px` directly
 - In the background: `pythonw -m px`
 - In the foreground in a console window: `python -m px`
-
 
 Px requires [libcurl](https://curl.se/libcurl/) and the Windows builds ship with
 a copy. On Linux, it is required to install libcurl using the package manager:

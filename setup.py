@@ -78,7 +78,10 @@ setup(
         "keyring",
         "netaddr",
         "psutil",
-        "quickjs"
+        "quickjs",
+        'jeepney==0.7.1;platform_system=="Linux"',
+        'keyring_jeepney==0.2;platform_system=="Linux"',
+        'keyrings.alt;platform_system=="Linux"'
     ],
     data_files = data_files,
     entry_points = {

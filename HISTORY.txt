@@ -1,3 +1,11 @@
+v0.8.1 - 2022-06-27
+- Fixed #154 - improved SSL connection handling with libcurl by querying active
+  socket to get the sock_fd in select() instead of relying on sockopt_callback()
+  which does not get called when connections get reused
+- Fixed keyring dependencies on Linux
+- Added infrastructure to generate and post binary wheels for Px and all its
+  dependencies for offline installation
+
 v0.8.0 - 2022-06-18
 - Added PAC file support for Linux
 - Local PAC files on Windows are now processed using QuickJS instead of WinHttp

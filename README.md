@@ -17,20 +17,36 @@ supported by [libcurl](https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html).
 
 ## Installation
 
-If Python is already available, Px can be easily installed using the Python
-package manager `pip`. This will download and install Px as a Python module
-along with all dependencies:
+The whole point of Px is to help tools get through a typical corporate proxy.
+This means using a package manager to install Px might not always be feasible
+which is why Px offers two binary options:
+- If Python is already available, Px and all its dependencies can be easily
+installed by downloading the `wheels` package for the target OS from the
+[releases](https://github.com/genotrance/px/releases) page. After extraction,
+Px and all dependencies can be installed with `pip`:
+
+	python -m pip install px-proxy --no-index -f /path/to/wheels
+
+- If Python is not available, get the latest compiled binary from the
+[releases](https://github.com/genotrance/px/releases) page instead. These
+binaries are compiled with [Nuitka](https://nuitka.net) and contain everything
+needed to run standalone.
+
+If direct internet access is available along with Python, Px can be easily
+installed using the Python package manager `pip`. This will download and install
+Px as a Python module along with all dependencies:
 
 	python -m pip install px-proxy
+
+On Windows, `scoop` can also be used to install Px:
+
+	scoop install px
 
 Once installed, Px can be run as follows:
 - Running `px` directly
 - In the background: `pythonw -m px`
 - In the foreground in a console window: `python -m px`
 
-If Python is not available, get the latest binary from the [releases](https://github.com/genotrance/px/releases)
-page. These binaries are compiled with [Nuitka](https://nuitka.net) and contain
-everything needed to run standalone.
 
 Px requires [libcurl](https://curl.se/libcurl/) and the Windows builds ship with
 a copy. On Linux, it is required to install libcurl using the package manager:
@@ -60,8 +76,12 @@ dependencies :
 
 	python -m pip install .
 
-Note that libcurl will need to be installed on Linux, as described earlier,
-using the package manager. For Windows, [download](https://curl.se/windows/) and
+NOOTE: Source install methods will require internet access since Python will try
+to install Px dependencies from the internet. The binaries mentioned in the
+previous section could be used to bootstrap a source install.
+
+NOTE: libcurl will need to be installed on Linux, as described earlier, using
+the package manager. For Windows, [download](https://curl.se/windows/) and
 extract `libcurl.dll` and `libcurl-x64.dll` to `$PATH`.
 
 ### Without installation
@@ -349,6 +369,10 @@ the following Python packages:
 - [netaddr](https://pypi.org/project/netaddr/)
 - [psutil](https://pypi.org/project/psutil/)
 - [quickjs](https://pypi.org/project/quickjs/)
+- Linux
+  - [jeepney](https://pypi.org/project/jeepney/)
+  - [keyring_jeepney](https://pypi.org/project/keyring_jeepney/)
+  - [keyrings.alt](https://pypi.org/project/keyrings.alt/)
 - [futures](https://pypi.org/project/futures/) on Python 2.x
 
 Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP

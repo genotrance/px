@@ -37,10 +37,9 @@ def get_auth():
 
 def rmtree(dirs):
     for dir in dirs.split(" "):
-        shutil.rmtree(dir, True)
-        time.sleep(0.1)
-        if os.path.exists(dir):
+        while os.path.exists(dir):
             shutil.rmtree(dir, True)
+            time.sleep(0.2)
 
 def copy(files, dir):
     for file in files.split(" "):
@@ -60,13 +59,13 @@ def remove(files):
             except:
                 pass
 
-def extract(zfile, cfile):
+def extract(zfile, fileend):
     with zipfile.ZipFile(zfile) as czip:
         for file in czip.namelist():
-            if file.endswith(cfile):
+            if file.endswith(fileend):
                 member = czip.open(file)
-                with open(cfile, "wb") as dll:
-                    shutil.copyfileobj(member, dll)
+                with open(os.path.basename(file), "wb") as base:
+                    shutil.copyfileobj(member, base)
 
 # OS
 
@@ -82,6 +81,13 @@ def get_os():
         return "osx"
 
     return "unsupported"
+
+def get_dirs(prefix):
+    osname = get_os()
+    outdir = "%s-%s-%s" % (prefix, osname, platform.machine().lower())
+    dist = os.path.join(outdir, prefix)
+
+    return osname, outdir, dist
 
 # URL
 
@@ -169,11 +175,12 @@ def wheel():
 
     get_curl()
 
-    os.system(sys.executable + " setup.py bdist_wheel --universal -d wheel -k")
-    rmtree("build")
-    os.system(sys.executable + " setup.py bdist_wheel -p win32 -d wheel -k")
-    rmtree("build")
-    os.system(sys.executable + " setup.py bdist_wheel -p win-amd64 -d wheel -k")
+    for args in ["--universal", "-p win32", "-p win-amd64"]:
+        while True:
+            rmtree("build")
+            if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k %s" % args) == 0:
+                break
+            time.sleep(0.5)
 
     # Check wheels
     os.system(sys.executable + " -m twine check wheel/*")
@@ -181,8 +188,7 @@ def wheel():
     rmtree("build px_proxy.egg-info")
 
 def pyinstaller():
-    osname = get_os()
-    dist = "pyinst-%s-%s" % (osname, platform.machine().lower())
+    _, dist, _ = get_dirs("pyinst")
     rmtree("build dist " + dist)
 
     os.system("pyinstaller --clean --noupx -w px.py")
@@ -194,10 +200,9 @@ def pyinstaller():
     os.rename("dist", dist)
 
 def nuitka():
-    osname = get_os()
-    outdir = "px.dist-%s-%s" % (osname, platform.machine().lower())
-    dist = os.path.join(outdir, "px.dist")
-    shutil.rmtree(outdir, True)
+    prefix = "px.dist"
+    osname, outdir, dist = get_dirs(prefix)
+    rmtree(outdir)
 
     # Build
     flags = ""
@@ -228,7 +233,96 @@ def nuitka():
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"
-    shutil.make_archive(archfile, arch, "px.dist")
+    shutil.make_archive(archfile, arch, prefix)
+
+    # Create hashfile
+    if arch == "gztar":
+        arch = "tar.gz"
+    archfile += "." + arch
+    with open(archfile, "rb") as afile:
+        sha256sum = hashlib.sha256(afile.read()).hexdigest()
+    with open(archfile + ".sha256", "w") as shafile:
+        shafile.write(sha256sum)
+
+    os.chdir("..")
+
+def deps():
+    prefix = "px.dist-wheels"
+    _, outdir, dist = get_dirs(prefix)
+    if "--force" in sys.argv:
+        rmtree(outdir)
+
+    try:
+        os.mkdir(outdir)
+    except:
+        pass
+    try:
+        os.mkdir(dist)
+    except:
+        pass
+
+    # Build
+    os.system(sys.executable + " -m pip wheel . -w " + dist)
+
+def depspkg():
+    prefix = "px.dist-wheels"
+    osname, outdir, dist = get_dirs(prefix)
+
+    if sys.platform == "linux":
+        # Use strings on Linux to reduce wheel size
+        #   Not effective on Windows
+        os.chdir(dist)
+
+        for whl in glob.glob("*.whl"):
+            size = os.stat(whl).st_size
+            wdir = os.path.basename(whl[:-4])
+            os.system(sys.executable + " -m zipfile -e " + whl + " " + wdir)
+
+            os.chdir(wdir)
+            processed = False
+            for so in glob.glob("**/*.so", recursive = True):
+                processed = True
+                strip = os.system("strip -s " + so)
+                if strip != 0:
+                    processed = False
+                    break
+                
+            os.chdir("..")
+
+            if processed:
+                os.system(sys.executable + " -m zipfile -c " + whl + ".new " + wdir + "/*")
+                new_size = os.stat(whl + ".new").st_size
+                if new_size < size:
+                    print("%s: size changed from %d to %d" % (whl, size, new_size))
+                    os.remove(whl)
+                    os.rename(whl + ".new", whl)
+                else:
+                    os.remove(whl + ".new")
+
+            rmtree(wdir)
+
+        os.chdir("..")
+    else:
+        os.chdir(outdir)
+
+    # Replace with official Px wheel
+    try:
+        os.remove(os.path.join(prefix, "px_proxy-%s-py3-none-any.whl" % __version__))
+    except:
+        pass
+    whl = "px_proxy-" + __version__
+    if sys.platform == "win32":
+        whl += "-py3-none-win_amd64.whl"
+    else:
+        whl += "-py2.py3-none-any.whl"
+    shutil.copy(os.path.join("..", "wheel", whl), prefix)
+
+    # Compress all wheels
+    archfile = "px-v%s-%s-wheels" % (__version__, osname)
+    arch = "gztar"
+    if sys.platform == "win32":
+        arch = "zip"
+    shutil.make_archive(archfile, arch, prefix)
 
     # Create hashfile
     if arch == "gztar":
@@ -410,17 +504,7 @@ def post():
 # Main
 def main():
     # Setup
-    if "--setup" in sys.argv:
-        os.system(sys.executable + " -m pip install --upgrade keyring netaddr psutil quickjs")
-        os.system(sys.executable + " -m pip install --upgrade build nuitka twine wheel")
-        if sys.platform == "linux":
-            os.system(sys.executable + " -m pip install --upgrade keyrings.alt keyring_jeepney netifaces")
-
-        get_curl()
-
-        sys.exit()
-
-    elif "--libcurl" in sys.argv:
+    if "--libcurl" in sys.argv:
         get_curl()
         sys.exit()
 
@@ -435,6 +519,12 @@ def main():
 
         if "--nuitka" in sys.argv:
             nuitka()
+
+        if "--deps" in sys.argv:
+            deps()
+
+        if "--depspkg" in sys.argv:
+            depspkg()
 
     # Delete
     if "--delete" in sys.argv:
@@ -461,13 +551,14 @@ def main():
     if len(sys.argv) == 1:
         print("""
 Setup:
---setup		Install all px runtime and development dependencies
 --libcurl	Download and extract libcurl binaries for Windows
 
 Build:
 --wheel		Build wheels for pypi.org
 --pyinst	Build px.exe using PyInstaller
 --nuitka	Build px distribution using Nuitka
+--deps		Build all wheel dependencies for this Python version
+--depspkg	Build an archive of all dependencies
 
 Post:
 --twine		Post wheels to pypi.org

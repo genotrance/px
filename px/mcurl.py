@@ -324,6 +324,15 @@ class Curl:
             ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_RESPONSE_CODE, ctypes.byref(codep))
         return ret, codep.value
 
+    def get_activesocket(self):
+        "Return active socket for this easy instance"
+        if sys.platform == "win32":
+            sock_fd = ctypes.c_uint()
+        else:
+            sock_fd = ctypes.c_int()
+        ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_ACTIVESOCKET, ctypes.byref(sock_fd))
+        return ret, sock_fd.value
+
     def set_proxy(self, proxy, port = 0, noproxy = None):
         """
         Set proxy options - returns False if this proxy server has auth failures
@@ -518,16 +527,14 @@ def _timer_callback(multi, timeout_ms, userp):
 
 @libcurl.sockopt_callback
 def _sockopt_callback(clientp, sock_fd, purpose):
-    # Associate new socket with last handle added
-    #dprint("sock_fd = %d" % sock_fd)
-    del clientp, purpose
-    if MCURL.last is not None:
-        MCURL.last.sock_fd = sock_fd
-        MCURL.last = None
+    # Associate new socket with easy handle
+    del purpose
+    curl = MCURL.handles[libcurl.from_oid(clientp)]
+    curl.sock_fd = sock_fd
 
     return libcurl.CURLE_OK
 
-def curl_version():
+def print_curl_version():
     "Display curl version information"
     dprint(libcurl.version().decode("utf-8"))
     vinfo = libcurl.version_info(libcurl.CURLVERSION_NOW).contents
@@ -541,6 +548,9 @@ def curl_version():
         dprint("%s: %s" % (feature, avail))
     dprint("Host: " + vinfo.host.decode("utf-8"))
 
+def curl_version():
+    return libcurl.version_info(libcurl.CURLVERSION_NOW).contents.version_num
+
 class MCurl:
     "Helper class to manage a curl multi instance"
 
@@ -550,7 +560,6 @@ class MCurl:
     handles = None
     proxytype = None
     failed = None # Proxy servers with auth failures
-    last = None
     timer = None
     rlist = None
     wlist = None
@@ -565,7 +574,7 @@ class MCurl:
         global MCURL
         MCURL = self
 
-        curl_version()
+        print_curl_version()
         self._multi = libcurl.multi_init()
 
         # Set a callback for registering or unregistering socket events.
@@ -626,31 +635,22 @@ class MCurl:
         dprint(curl.easyhash + ": Add handle")
         if curl.easyhash not in self.handles:
             self.handles[curl.easyhash] = curl
-            if curl.is_connect():
+            if curl.is_connect() and curl_version() < 0x072D00:
                 # Need to know socket assigned for CONNECT since used later in select()
-                self.last = curl
+                # CURLINFO_ACTIVESOCKET not available on libcurl < v7.45  so need this
+                # hack for older versions
                 libcurl.easy_setopt(curl.easy, libcurl.CURLOPT_SOCKOPTFUNCTION, _sockopt_callback)
+                libcurl.easy_setopt(curl.easy, libcurl.CURLOPT_SOCKOPTDATA, id(curl.easyhash))
             libcurl.multi_add_handle(self._multi, curl.easy)
             dprint(curl.easyhash + ": Added handle")
         else:
             dprint(curl.easyhash + ": Active handle")
 
     def add(self, curl: Curl):
-        """
-        Add a Curl handle to perform
-
-        Waits until multi instance is ready to add a handle
-        """
-        while True:
-            with self._lock:
-                dprint(curl.easyhash + ": Handles = %d" % len(self.handles))
-                if self.last is not None:
-                    dprint(curl.easyhash + ": Multi not ready for new curl")
-                else:
-                    self._add_handle(curl)
-                    break
-            self.perform()
-            time.sleep(0.01)
+        "Add a Curl handle to perform"
+        with self._lock:
+            dprint(curl.easyhash + ": Handles = %d" % len(self.handles))
+            self._add_handle(curl)
 
     # Removing from multi
 
@@ -668,7 +668,7 @@ class MCurl:
         dprint(curl.easyhash + ": Remove handle: " + curl.errstr)
         if len(curl.errstr) == 0:
             libcurl.multi_remove_handle(self._multi, curl.easy)
-        curl.sock_fd = None
+
         self.handles.pop(curl.easyhash)
 
     def remove(self, curl: Curl):
@@ -745,9 +745,20 @@ class MCurl:
         "Run select loop between client and curl"
         # TODO figure out if IPv6 or IPv4
         if curl.sock_fd is None:
-            # Reusing a CONNECT!?
-            dprint(curl.easyhash + ": sock_fd is None")
-            return
+            if curl_version() < 0x072D00:
+                # Reusing an SSL connection but no way to get active socket since
+                # CURLINFO_ACTIVESOCKET was only added in libcurl v7.45
+                dprint(curl.easyhash + ": unable to reuse SSL connection with libcurl < v7.45")
+                return
+
+            # Need to get the active socket using getinfo()
+            dprint(curl.easyhash + ": Getting active socket")
+            ret, sock_fd = curl.get_activesocket()
+            if ret == libcurl.CURLE_OK:
+                curl.sock_fd = sock_fd
+            else:
+                dprint(curl.easyhash + ": Failed to get active socket: %d, %d" % (ret, sock_fd))
+                return
 
         dprint(curl.easyhash + ": Starting select loop")
         curl_sock = socket.fromfd(curl.sock_fd, socket.AF_INET, socket.SOCK_STREAM)

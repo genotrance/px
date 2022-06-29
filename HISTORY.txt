@@ -1,3 +1,6 @@
+v0.8.2 - 2022-06-29
+- Fixed #155 - prevent SSL connection reuse for libcurl < v7.45
+
 v0.8.1 - 2022-06-27
 - Fixed #154 - improved SSL connection handling with libcurl by querying active
   socket to get the sock_fd in select() instead of relying on sockopt_callback()

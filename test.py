@@ -41,7 +41,7 @@ try:
 except AttributeError:
     DEVNULL = open(os.devnull, 'wb')
 
-def exec(cmd, port = 0, shell = True):
+def exec(cmd, port = 0, shell = True, delete = False):
     global COUNT
     log = "%d-%d.txt" % (port, COUNT)
     COUNT += 1
@@ -50,6 +50,10 @@ def exec(cmd, port = 0, shell = True):
 
     with open(log, "r") as l:
         data = l.read()
+
+    if delete:
+        os.remove(log)
+
     return p.returncode, data
 
 def curlcli(url, port, method = "GET", data = "", proxy = ""):
@@ -442,8 +446,13 @@ def socketTestSetup():
             TESTS.append((cmd, testproc, ip))
 
 def auto():
-    osname = tools.get_os()
+    prefix = "px.dist"
+    osname, _, dist = tools.get_dirs(prefix)
     if "--norun" not in sys.argv:
+        if sys.platform == "linux":
+            _, distro = exec("cat /etc/os-release | grep ^ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
+            _, version = exec("cat /etc/os-release | grep ^VERSION_ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
+            osname += "-%s-%s" % (distro.strip(), version.strip())
         testdir = "test-%s-%d-%s" % (osname, PORT, platform.machine().lower())
 
         # Make temp directory
@@ -487,9 +496,7 @@ def auto():
 
     if "--binary" in sys.argv:
         # Nuitka binary test
-        outdir = "px.dist-%s-%s" % (osname, platform.machine().lower())
-
-        cmd = os.path.abspath(os.path.join("..", outdir, "px.dist", "px")) + " "
+        cmd = os.path.abspath(os.path.join(dist, "px")) + " "
         cmds.append(cmd)
         results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
         offset += len(TESTS)

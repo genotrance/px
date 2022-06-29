@@ -16,7 +16,7 @@
 #
 # Commands
 #   build - sub-commands: deps nuitka
-#   test
+#   test - sub-commands: alpine ubuntu debian opensuse, test.py flags
 
 if [ -f "/.dockerenv" ]; then
     # Running inside container
@@ -35,6 +35,7 @@ if [ -f "/.dockerenv" ]; then
     fi
 
     # build sub-commands: nuitka or deps
+    # test sub-commands passed as flags to test.py
     SUBCOMMAND=""
     if [ ! -z "$5" ]; then
         SUBCOMMAND="$5"
@@ -47,7 +48,7 @@ if [ -f "/.dockerenv" ]; then
         python3 -m ensurepip
         if [ "$COMMAND" = "build" ]; then
             apk add ccache gcc musl-dev patchelf python3-dev upx
-        elif [ "$COMMAND" = "test" ]; then
+        else
             apk add dbus gnome-keyring
         fi
 
@@ -66,7 +67,7 @@ if [ -f "/.dockerenv" ]; then
         python3 -m ensurepip
         if [ "$COMMAND" = "build" ]; then
             yum install -y ccache libffi-devel patchelf python3-devel upx
-        elif [ "$COMMAND" = "test" ]; then
+        else
             yum install -y gnome-keyring
         fi
 
@@ -107,7 +108,7 @@ if [ -f "/.dockerenv" ]; then
     export PXBIN="/px/px.dist-linux-$ABI-x86_64/px.dist/px"
     export WHEELS="/px/px.dist-wheels-linux-$ABI-x86_64/px.dist-wheels"
 
-    if [ "$COMMAND" = "test" ]; then
+    if [ "$COMMAND" != "build" ]; then
         dbus-run-session -- $SHELL -c 'echo "abc" | gnome-keyring-daemon --unlock'
     fi
 
@@ -147,7 +148,7 @@ if [ -f "/.dockerenv" ]; then
         python3 -m pip install px-proxy --no-index -f $WHEELS
 
         if [ "$COMMAND" = "test" ]; then
-            python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH
+            python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
         else
             $SHELL
         fi
@@ -181,9 +182,24 @@ else
             $DOCKERCMD $image /px/build.sh "$PROXY" "$PAC" "$USERNAME" build $1
         done
     elif [ "$1" = "test" ]; then
-        for image in alpine alpine:3.11 voidlinux/voidlinux-musl ubuntu ubuntu:bionic debian debian:oldstable linuxmintd/mint20.3-amd64 opensuse/tumbleweed opensuse/leap:15.1
+        SUBCOMMAND="$3"
+        if [ "$2" = "alpine" ]; then
+            IMAGES="alpine alpine:3.11"
+        elif [ "$2" = "ubuntu" ]; then
+            IMAGES="ubuntu ubuntu:focal"
+        elif [ "$2" = "debian" ]; then
+            IMAGES="debian debian:oldstable"
+        elif [ "$2" = "mint" ]; then
+            IMAGES="linuxmintd/mint20.3-amd64"
+        elif [ "$2" = "opensuse" ]; then
+            IMAGES="opensuse/tumbleweed opensuse/leap:15.1"
+        else
+            SUBCOMMAND="$2"
+            IMAGES="alpine ubuntu debian opensuse/tumbleweed"
+        fi
+        for image in $IMAGES
         do
-            $DOCKERCMD $image /px/build.sh "$PROXY" "$PAC" "$USERNAME" test
+            $DOCKERCMD $image /px/build.sh "$PROXY" "$PAC" "$USERNAME" test "$SUBCOMMAND"
         done
     else
         if [ "$1" = "musl" ]; then

@@ -253,6 +253,12 @@ class Curl:
         if method == "CONNECT":
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CONNECT_ONLY, True)
 
+            if curl_version() < 0x072D00:
+                # libcurl < v7.45 does not support CURLINFO_ACTIVESOCKET so it is not possible
+                # to reuse existing connections
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_FRESH_CONNECT, True)
+                dprint(self.easyhash + ": Fresh connection requested")
+
             # We want libcurl to make a simple HTTP connection to auth
             # with the upstream proxy and let client establish SSL
             if "://" not in url:
@@ -485,10 +491,11 @@ class Curl:
 
     def perform(self):
         "Perform the easy handle"
-        if MCURL.do(self) == False:
+        ret = MCURL.do(self)
+        MCURL.remove(self)
+        if ret is False:
             dprint(self.easyhash + ": Connection failed: " + self.errstr)
-            return False
-        return True
+        return ret
 
 @libcurl.socket_callback
 def _socket_callback(easy, sock_fd, ev_bitmask, userp, socketp):
@@ -666,8 +673,7 @@ class MCurl:
             curl.errstr += errstr + "; "
 
         dprint(curl.easyhash + ": Remove handle: " + curl.errstr)
-        if len(curl.errstr) == 0:
-            libcurl.multi_remove_handle(self._multi, curl.easy)
+        libcurl.multi_remove_handle(self._multi, curl.easy)
 
         self.handles.pop(curl.easyhash)
 
@@ -683,8 +689,8 @@ class MCurl:
 
     # Executing multi
 
-    def perform(self):
-        "Perform all tasks in the multi instance"
+    def _perform(self):
+        # Perform all tasks in the multi instance
         with self._lock:
             rlen = len(self.rlist)
             wlen = len(self.wlist)
@@ -716,7 +722,7 @@ class MCurl:
         while True:
             if curl.done:
                 break
-            self.perform()
+            self._perform()
             time.sleep(0.01)
 
         if "timed out" in curl.errstr:
@@ -739,26 +745,36 @@ class MCurl:
                 with self._lock:
                     self.failed.append(curl.proxy)
 
+        if curl.is_connect() and curl.sock_fd is None:
+            # Need sock_fd for select()
+            if curl_version() < 0x072D00:
+                # This should never happen since we have set CURLOPT_FRESH_CONNECT = True
+                # for CONNECT
+                out = "Cannot reuse an SSL connection with libcurl < v7.45 - should never happen"
+                dprint(curl.easyhash + ": " + out)
+                curl.errstr += out + "; "
+                curl.resp = 500
+            else:
+                # Get the active socket using getinfo() for select()
+                dprint(curl.easyhash + ": Getting active socket")
+                ret, sock_fd = curl.get_activesocket()
+                if ret == libcurl.CURLE_OK:
+                    curl.sock_fd = sock_fd
+                else:
+                    out = "Failed to get active socket: %d, %d" % (ret, sock_fd)
+                    dprint(curl.easyhash + ": " + out)
+                    curl.errstr += out + "; "
+                    curl.resp = 503
+
         return len(curl.errstr) == 0
 
     def select(self, curl: Curl, client_sock, idle = 30):
         "Run select loop between client and curl"
         # TODO figure out if IPv6 or IPv4
         if curl.sock_fd is None:
-            if curl_version() < 0x072D00:
-                # Reusing an SSL connection but no way to get active socket since
-                # CURLINFO_ACTIVESOCKET was only added in libcurl v7.45
-                dprint(curl.easyhash + ": unable to reuse SSL connection with libcurl < v7.45")
-                return
+            dprint(curl.easyhash + ": Cannot select() without active socket")
+            return
 
-            # Need to get the active socket using getinfo()
-            dprint(curl.easyhash + ": Getting active socket")
-            ret, sock_fd = curl.get_activesocket()
-            if ret == libcurl.CURLE_OK:
-                curl.sock_fd = sock_fd
-            else:
-                dprint(curl.easyhash + ": Failed to get active socket: %d, %d" % (ret, sock_fd))
-                return
 
         dprint(curl.easyhash + ": Starting select loop")
         curl_sock = socket.fromfd(curl.sock_fd, socket.AF_INET, socket.SOCK_STREAM)

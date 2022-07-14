@@ -1,3 +1,7 @@
+v0.8.3 - 2022-07-14
+- Fixed #157 - libcurl wrapper was missing socket definitions for OSX
+- Fixed #158 - win32ctypes was not being included in Windows binary
+
 v0.8.2 - 2022-06-29
 - Fixed #155 - prevent SSL connection reuse for libcurl < v7.45
 

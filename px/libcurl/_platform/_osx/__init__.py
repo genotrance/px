@@ -46,6 +46,28 @@ class timeval(ct.Structure):
     ("tv_usec", suseconds_t),  # microseconds
 ]
 
+# Taken from the file libpcap's "socket.h"
+
+# Some minor differences between sockets on various platforms.
+# We include whatever sockets are needed for Internet-protocol
+# socket access.
+
+# In UN*X, a socket handle is a file descriptor, and therefore
+# a signed integer.
+SOCKET = ct.c_int
+
+# In UN*X, the error return if socket() fails is -1.
+INVALID_SOCKET = SOCKET(-1).value
+
+class sockaddr(ct.Structure):
+    _fields_ = [
+    ("sa_family", ct.c_short),
+    ("__pad1",    ct.c_ushort),
+    ("ipv4_addr", ct.c_byte * 4),
+    ("ipv6_addr", ct.c_byte * 16),
+    ("__pad2",    ct.c_ulong),
+]
+
 fd_mask = ct.c_long
 
 class fd_set(ct.Structure):

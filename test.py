@@ -12,10 +12,6 @@ import time
 import uuid
 
 import psutil
-if sys.platform == "linux":
-    import fcntl
-    import struct
-    import array
 
 from px.version import __version__
 
@@ -221,32 +217,14 @@ def runTest(test, cmd, offset, port):
     return ret
 
 def getips():
-    ip_list = []
-    if sys.platform == "linux":
-        # https://gist.github.com/pklaus/289646
-        max_possible = 128  # arbitrary. raise if needed.
-        obytes = max_possible * 32
-        deb = b'\0'
-
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        names = array.array('B', deb * obytes)
-        outbytes = struct.unpack('iL', fcntl.ioctl(
-            s.fileno(),
-            0x8912,  # SIOCGIFCONF
-            struct.pack('iL', obytes, names.buffer_info()[0])
-        ))[0]
-
-        namestr = names.tobytes()
-
-        for i in range(0, outbytes, 40):
-            name = namestr[ i: i+16 ].split( deb, 1)[0]
-            name = name.decode()
-            #iface_name = namestr[ i : i+16 ].split( deb, 1 )[0]
-            ip   = namestr[i+20:i+24]
-            ip_list.append(".".join([str(i) for i in ip]))
-    elif sys.platform == "win32":
-        ip_list = [ip[4][0] for ip in socket.getaddrinfo(socket.gethostname(), 80, socket.AF_INET)]
-        ip_list.insert(0, "127.0.0.1")
+    ip_list = ["127.0.0.1"]
+    ifs = psutil.net_if_addrs()
+    for ifname in ifs:
+        for addr in ifs[ifname]:
+            if addr.family == socket.AddressFamily.AF_INET:
+                ip = addr.address
+                if ip not in ip_list:
+                    ip_list.append(ip)
 
     return ip_list
 

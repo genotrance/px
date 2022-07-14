@@ -191,7 +191,7 @@ def pyinstaller():
     _, dist, _ = get_dirs("pyinst")
     rmtree("build dist " + dist)
 
-    os.system("pyinstaller --clean --noupx -w px.py")
+    os.system("pyinstaller --clean --noupx -w px.py --collect-submodules win32ctypes")
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "dist")
 
     time.sleep(1)
@@ -206,6 +206,9 @@ def nuitka():
 
     # Build
     flags = ""
+    if sys.platform == "win32":
+        # keyring dependency
+        flags = "--include-package=win32ctypes"
     os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
     copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
     if sys.platform == "win32":
@@ -286,7 +289,7 @@ def depspkg():
                 if strip != 0:
                     processed = False
                     break
-                
+
             os.chdir("..")
 
             if processed:

@@ -461,6 +461,7 @@ def create_release(tag, name, body, prerelease):
     return id
 
 def add_asset_to_release(filename, relid):
+    print("Uploading " + filename)
     rfile_size = os.stat(filename).st_size
     with open(filename, "rb") as rfile:
         headers = get_auth()

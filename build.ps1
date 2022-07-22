@@ -42,3 +42,6 @@ Invoke-Expression "$PY tools.py --depspkg"
 
 # Build Nuitka
 Invoke-Expression "$PY tools.py --nuitka"
+
+# Uninstall Px
+Invoke-Expression "$PY -m pip uninstall px-proxy -y"

@@ -54,10 +54,23 @@ class Pac:
 
     def find_proxy_for_url(self, url, host):
         """
-        Return list of proxy servers to use for this url
+        Return comma-separated list of proxy servers to use for this url
             DIRECT can be returned as one of the options in the response
         """
-        return self.ctxt.eval("FindProxyForURL")(url, host)
+        proxies = self.ctxt.eval("FindProxyForURL")(url, host)
+
+        # Fix #160 - convert PAC return values into CURLOPT_PROXY schemes
+        for ptype in ["PROXY", "HTTP"]:
+            proxies = proxies.replace(ptype + " ", "")
+        for ptype in ["HTTPS", "SOCKS4", "SOCKS5"]:
+            proxies = proxies.replace(ptype + " ", ptype.lower() + "://")
+        proxies = proxies.replace("SOCKS ", "socks5://")
+
+        # Not sure if SOCKS proxies will be used with Px since they are not
+        # relevant for NTLM/Kerberos authentication over HTTP but libcurl can
+        # deal with it for now
+
+        return proxies.replace(" ", ",").replace(";", ",")
 
     # Python callables from JS
 

@@ -464,9 +464,9 @@ if sys.platform == "win32":
 
             servers, netloc, path = super().find_proxy_for_url(url)
             if servers is not None:
-                # MODE_NONE, MODE_ENV, MODE_CONFIG or url in no_proxy
+                # MODE_NONE, MODE_ENV, MODE_CONFIG, MODE_CONFIG_PAC or url in no_proxy
                 return servers, netloc, path
-            elif self.mode in [MODE_AUTO, MODE_PAC, MODE_CONFIG_PAC]:
+            elif self.mode in [MODE_AUTO, MODE_PAC]:
                 # Use proxies as resolved via WinHttp
                 return parse_proxy(self.winhttp_find_proxy_for_url(url)), netloc, path
             elif self.mode in [MODE_MANUAL]:

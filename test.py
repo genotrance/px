@@ -223,7 +223,7 @@ def getips():
         for addr in ifs[ifname]:
             if addr.family == socket.AddressFamily.AF_INET:
                 ip = addr.address
-                if ip not in ip_list:
+                if ip not in ip_list and not ip.startswith("169"):
                     ip_list.append(ip)
 
     return ip_list
@@ -474,7 +474,7 @@ def auto():
 
     if "--binary" in sys.argv:
         # Nuitka binary test
-        cmd = os.path.abspath(os.path.join(dist, "px")) + " "
+        cmd = os.path.abspath(os.path.join("..", dist, "px")) + " "
         cmds.append(cmd)
         results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
         offset += len(TESTS)
@@ -487,11 +487,9 @@ def auto():
         exec(cmd)
 
         # Install Px
-        cmd = sys.executable + " -m pip install ../wheel/"
-        if sys.platform == "win32":
-            cmd += "px_proxy-%s-py3-none-win_amd64.whl" % __version__
-        elif sys.platform == "linux":
-            cmd += "px_proxy-%s-py2.py3-none-any.whl" % __version__
+        prefix = "px.dist-wheels"
+        _, _, wdist = tools.get_dirs(prefix)
+        cmd = sys.executable + " -m pip install --upgrade px-proxy --no-index -f ../" + wdist
         ret, data = exec(cmd)
         if ret != 0:
             print("Failed: pip install: %d\n%s" % (ret, data))
@@ -503,9 +501,9 @@ def auto():
             offset += len(TESTS)
 
             # Run as Python console script
-            cmd = shutil.which("px").replace(".EXE", "")
-            if len(cmd) != 0:
-                cmd += " "
+            cmd = shutil.which("px")
+            if cmd is not None:
+                cmd = cmd.replace(".EXE", "") + " "
                 cmds.append(cmd)
                 results.extend([pool.apply_async(runTest, args = (TESTS[count], cmd, count + offset, PORT)) for count in range(len(TESTS))])
                 offset += len(TESTS)
@@ -630,7 +628,9 @@ def main():
         PORT = int(PORT)
     else:
         PORT = 3128
-    USERNAME = tools.get_argval("username").replace("\\", "\\\\")
+    USERNAME = tools.get_argval("username")
+    if sys.platform != "win32":
+        USERNAME = USERNAME.replace("\\", "\\\\")
     AUTH = tools.get_argval("auth")
     BINARY = tools.get_argval("binary")
 

@@ -8,6 +8,9 @@
 # Build nuitka binaries for glibc and musl
 # ./build.sh nuitka
 #
+# Build both wheels and nuita binaries for glibc and musl
+# ./build.sh all
+#
 # Run test across all distros
 # ./build.sh test
 #
@@ -15,8 +18,10 @@
 # ./build.sh IMAGE command subcommand
 #
 # Commands
-#   build - sub-commands: deps nuitka
+#   build - sub-commands: deps nuitka all
 #   test - sub-commands: alpine ubuntu debian opensuse, test.py flags
+
+OS=`uname -s`
 
 if [ -f "/.dockerenv" ]; then
     # Running inside container
@@ -114,18 +119,7 @@ if [ -f "/.dockerenv" ]; then
 
     cd /px
     if [ "$COMMAND" = "build" ]; then
-        if [ "$SUBCOMMAND" = "nuitka" ]; then
-            # Install tools
-            python3 -m pip install --upgrade pip setuptools build wheel
-            python3 -m pip install --upgrade nuitka
-
-            # Install wheel dependencies
-            # nuitka depends on deps - run deps first
-            python3 -m pip install px-proxy --no-index -f $WHEELS
-
-            # Build Nuitka binary
-            python3 tools.py --nuitka
-        elif [ "$SUBCOMMAND" = "deps" ]; then
+       if [ "$SUBCOMMAND" = "deps" ] || [ "$SUBCOMMAND" = "all" ]; then
             rm -rf $WHEELS
 
             # Run for all Python versions
@@ -140,7 +134,22 @@ if [ -f "/.dockerenv" ]; then
 
             # Package all wheels
             /opt/python/cp310-cp310/bin/python3 tools.py --depspkg
-        else
+        fi
+
+        if [ "$SUBCOMMAND" = "nuitka" ] || [ "$SUBCOMMAND" = "all" ]; then
+            # Install tools
+            python3 -m pip install --upgrade pip setuptools build wheel
+            python3 -m pip install --upgrade nuitka
+
+            # Install wheel dependencies
+            # nuitka depends on deps - run deps first
+            python3 -m pip install px-proxy --no-index -f $WHEELS
+
+            # Build Nuitka binary
+            python3 tools.py --nuitka
+        fi
+
+        if [ -z "$SUBCOMMAND" ]; then
             $SHELL
         fi
     else
@@ -153,6 +162,46 @@ if [ -f "/.dockerenv" ]; then
             $SHELL
         fi
     fi
+
+elif [ "$OS" = "Darwin" ]; then
+
+    # Install brew
+    if ! brew -v > /dev/null; then
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+    brew update
+
+    # Delete depspkg directory
+    rm -rf px.dist-wheels-osx-x86_64
+
+    for pyver in 3.7 3.8 3.9 3.10
+    do
+        # Install Python
+        brew install python@$pyver
+
+        PY="/usr/local/opt/python@$pyver/bin/python3"
+
+        # Tools
+        $PY -m pip install --upgrade pip setuptools build wheel
+
+        # Create wheel dependencies for this Python version
+        $PY tools.py --deps
+    done
+
+    # Install build tools
+    $PY -m pip install --upgrade nuitka twine
+
+    # Install wheel dependencies
+    $PY -m pip install --upgrade px-proxy --no-index -f px.dist-wheels-osx-x86_64/px.dist-wheels
+
+    # Create package of all dependencies
+    $PY tools.py --depspkg
+
+    # Build Nuitka
+    $PY tools.py --nuitka
+
+    # Uninstall Px
+    $PY -m pip uninstall px-proxy -y
 
 else
     # Start container
@@ -176,7 +225,7 @@ else
     GLIBC="quay.io/pypa/manylinux2014_x86_64"
 
     DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share"
-    if [ "$1" = "deps" ] || [ "$1" = "nuitka" ]; then
+    if [ "$1" = "deps" ] || [ "$1" = "nuitka" ] || [ "$1" = "all" ]; then
         for image in $MUSL $GLIBC
         do
             $DOCKERCMD $image /px/build.sh "$PROXY" "$PAC" "$USERNAME" build $1

@@ -86,4 +86,4 @@ class Pac:
 
     def myIpAddress(self):
         "Get my IP address"
-        return dnsResolve(socket.gethostname())
+        return self.dnsResolve(socket.gethostname())

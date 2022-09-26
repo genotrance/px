@@ -57,7 +57,11 @@ class Pac:
         Return comma-separated list of proxy servers to use for this url
             DIRECT can be returned as one of the options in the response
         """
-        proxies = self.ctxt.eval("FindProxyForURL")(url, host)
+        try:
+            proxies = self.ctxt.eval("FindProxyForURL")(url, host)
+        except quickjs.JSException:
+            dprint("Could not evaluate PAC file, falling back to DIRECT...")
+            return "DIRECT"
 
         # Fix #160 - convert PAC return values into CURLOPT_PROXY schemes
         for ptype in ["PROXY", "HTTP"]:

@@ -838,7 +838,7 @@ def parse_config():
     if len(servers) != 0:
         State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, State.noproxy, debug_print = dprint)
     elif len(State.pac) != 0:
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], State.noproxy, debug_print = dprint)
     else:
         State.wproxy = wproxy.Wproxy(debug_print = dprint)
         State.proxy_last_reload = time.time()

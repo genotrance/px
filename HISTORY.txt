@@ -1,3 +1,7 @@
+v0.8.4 - TBD
+- Fixed #164 - PAC function myIpAddress() was broken
+- Fixed #161 - PAC regex search was failing
+
 v0.8.3 - 2022-07-19
 - Fixed #157 - libcurl wrapper was missing socket definitions for OSX
 - Fixed #158 - win32ctypes was not being included in Windows binary

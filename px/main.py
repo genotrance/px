@@ -598,9 +598,9 @@ def set_password():
         keyring.set_password("Px", State.username, pwd)
 
         if keyring.get_password("Px", State.username) == pwd:
-            print("Saved successfully")
+            pprint("Saved successfully")
     except KeyboardInterrupt:
-        print("")
+        pprint("")
 
     sys.exit()
 

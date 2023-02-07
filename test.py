@@ -231,6 +231,9 @@ def getips():
 def checkPxStart(ip, port):
     # Make sure Px starts
     retry = 20
+    if sys.platform == "darwin":
+        # Nuitka builds take longer to start on OSX
+        retry = 40
     while True:
         try:
             socket.create_connection((ip, port), 2)
@@ -547,6 +550,7 @@ def auto():
         exec(cmd)
 
     if "--norun" not in sys.argv:
+        os.system("grep didn -i *.log")
         os.system("grep failed -i *.log")
         os.system("grep traceback -i *.log")
         os.system("grep error -i *.log")

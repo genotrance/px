@@ -462,19 +462,31 @@ class Curl:
 
         self.bridge(rfile, wfile, hfile)
 
-    def get_data(self):
-        "Return data written by curl perform to buffer()"
-        if isinstance(self.client_wfile, io.BytesIO):
-            return self.client_wfile.getvalue().decode("utf-8")
-        else:
-            return ""
+    def get_data(self, encoding = "utf-8"):
+        """
+        Return data written by curl perform to buffer()
 
-    def get_headers(self):
-        "Return headers written by curl to buffer()"
+        encoding = "utf-8" by default, change or set to None if bytes preferred
+        """
+        val = b""
         if isinstance(self.client_wfile, io.BytesIO):
-            return self.client_wfile.getvalue().decode("utf-8")
-        else:
-            return ""
+            val = self.client_wfile.getvalue()
+        if encoding is not None:
+            val = val.decode(encoding)
+        return val
+
+    def get_headers(self, encoding = "utf-8"):
+        """
+        Return headers written by curl perform to buffer()
+
+        encoding = "utf-8" by default, change or set to None if bytes preferred
+        """
+        val = b""
+        if isinstance(self.client_hfile, io.BytesIO):
+            val = self.client_hfile.getvalue()
+        if encoding is not None:
+            val = val.decode(encoding)
+        return val
 
     def set_transfer_decoding(self, enable = False):
         "Set curl to turn off transfer decoding - let client do it"

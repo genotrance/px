@@ -179,7 +179,7 @@ elif [ "$OS" = "Darwin" ]; then
         # Install Python
         brew install python@$pyver
 
-        PY="/usr/local/opt/python@$pyver/bin/python3"
+        PY="/usr/local/opt/python@$pyver/bin/python$pyver"
 
         # Tools
         $PY -m pip install --upgrade pip setuptools build wheel
@@ -190,6 +190,7 @@ elif [ "$OS" = "Darwin" ]; then
 
     # Install build tools
     $PY -m pip install --upgrade nuitka twine
+    brew install upx
 
     # Install wheel dependencies
     $PY -m pip install --upgrade px-proxy --no-index -f px.dist-wheels-osx-x86_64/px.dist-wheels

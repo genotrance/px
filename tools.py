@@ -8,7 +8,11 @@ import sys
 import time
 import zipfile
 
-from px import mcurl
+if "--libcurl" not in sys.argv:
+    from px import mcurl
+else:
+    import urllib.request
+
 from px.version import __version__
 
 REPO = "genotrance/px"
@@ -146,8 +150,7 @@ def get_curl():
             lcurlzip = "curl%s.zip" % bit
             if not os.path.exists(lcurl):
                 if not os.path.exists(lcurlzip):
-                    with open(lcurlzip, "wb") as lcz:
-                        ret, _ = curl("https://curl.se/windows/curl-win%s-latest.zip" % bit, wfile = lcz)
+                    urllib.request.urlretrieve("https://curl.se/windows/latest.cgi?p=win%s-mingw.zip" % bit, lcurlzip)
                 extract(lcurlzip, lcurl)
 
                 if not os.path.exists("curl-ca-bundle.crt"):
@@ -172,8 +175,6 @@ def get_curl():
 
 def wheel():
     rmtree("build wheel")
-
-    get_curl()
 
     for args in ["--universal", "-p win32", "-p win-amd64"]:
         while True:
@@ -228,6 +229,7 @@ def nuitka():
         if sys.platform == "win32":
             os.system("upx --best px.exe python3*.dll libcrypto*.dll")
         else:
+            os.rename("px.bin", "px")
             os.system("upx --best px")
 
     # Create archive

@@ -59,3 +59,4 @@ test-*/
 _*.stats
 *.dll
 *.log
+*.crt

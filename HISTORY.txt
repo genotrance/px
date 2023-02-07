@@ -1,6 +1,8 @@
-v0.8.4 - TBD
+v0.8.4 - 2023-02-06
+- Support for specifying PAC file encoding - #167
 - Fixed #164 - PAC function myIpAddress() was broken
 - Fixed #161 - PAC regex search was failing
+- Fixed #171 - Verbose output implies --foreground
 
 v0.8.3 - 2022-07-19
 - Fixed #157 - libcurl wrapper was missing socket definitions for OSX

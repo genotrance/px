@@ -34,6 +34,9 @@ Invoke-Expression "$PY -m pip install --upgrade nuitka twine"
 # Install wheel dependencies
 Invoke-Expression "$PY -m pip install --upgrade px-proxy --no-index -f px.dist-wheels-windows-amd64\px.dist-wheels"
 
+# Download libcurl
+Invoke-Expression "$PY tools.py --libcurl"
+
 # Build wheels
 Invoke-Expression "$PY tools.py --wheel"
 

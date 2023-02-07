@@ -220,6 +220,10 @@ Configuration:
     Use in place of --server if PAC file should be loaded from a URL or local
     file. Relative paths will be relative to the Px script or binary
 
+  --pac_encoding= proxy:pac_encoding=
+  PAC file encoding
+    Specify in case default 'utf-8' encoding does not work
+
   --listen=  proxy:listen=
   IP interface to listen on. Valid IP address, default: 127.0.0.1
 
@@ -301,8 +305,8 @@ Configuration:
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 
-  --verbose  settings:verbose=
-  Enable debug output. default: 0
+  --verbose
+  Enable debug output. default: 0. Implies --foreground
 
   --debug  settings:log=
   Enable debug logging. default: 0

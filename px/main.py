@@ -124,6 +124,10 @@ Configuration:
     Use in place of --server if PAC file should be loaded from a URL or local
     file. Relative paths will be relative to the Px script or binary
 
+  --pac_encoding= proxy:pac_encoding=
+  PAC file encoding
+    Specify in case default 'utf-8' encoding does not work
+
   --listen=  proxy:listen=
   IP interface to listen on - default: 127.0.0.1
 
@@ -205,8 +209,8 @@ Configuration:
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 
-  --verbose  settings:verbose=
-  Enable debug output. default: 0
+  --verbose
+  Enable debug output. default: 0. Implies --foreground
 
   --debug  settings:log=
   Enable debug logging. default: 0
@@ -702,6 +706,9 @@ def parse_config():
     elif "--verbose" in sys.argv:
         State.debug = Debug()
         dprint = State.debug.get_print()
+        if "--foreground" not in sys.argv:
+            # --verbose implies --foreground
+            sys.argv.append("--foreground")
 
     if sys.platform == "win32":
         if is_compiled() or "pythonw.exe" in sys.executable:
@@ -731,6 +738,7 @@ def parse_config():
 
     cfg_str_init("proxy", "server", "")
     cfg_str_init("proxy", "pac", "", set_pac)
+    cfg_str_init("proxy", "pac_encoding", "utf-8")
     cfg_int_init("proxy", "port", "3128")
     cfg_str_init("proxy", "listen", "127.0.0.1")
     cfg_str_init("proxy", "allow", "*.*.*.*", parse_allow)
@@ -765,6 +773,8 @@ def parse_config():
                 cfg_str_init("proxy", "server", val, None, True)
             elif "--pac=" in sys.argv[i]:
                 cfg_str_init("proxy", "pac", val, set_pac, True)
+            elif "--pac_encoding=" in sys.argv[i]:
+                cfg_str_init("proxy", "pac_encoding", val, None, True)
             elif "--listen=" in sys.argv[i]:
                 cfg_str_init("proxy", "listen", val, None, True)
             elif "--port=" in sys.argv[i]:
@@ -838,7 +848,8 @@ def parse_config():
     if len(servers) != 0:
         State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, State.noproxy, debug_print = dprint)
     elif len(State.pac) != 0:
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], debug_print = dprint)
+        pac_encoding = State.config.get("proxy", "pac_encoding")
+        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], pac_encoding = pac_encoding, debug_print = dprint)
     else:
         State.wproxy = wproxy.Wproxy(debug_print = dprint)
         State.proxy_last_reload = time.time()

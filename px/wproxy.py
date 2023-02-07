@@ -131,8 +131,9 @@ class _WproxyBase:
     noproxy = None
     noproxy_hosts = None
     pac = None
+    pac_encoding = None
 
-    def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, debug_print = None):
+    def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, pac_encoding = None, debug_print = None):
         global dprint
         if debug_print is not None:
             dprint = debug_print
@@ -140,6 +141,7 @@ class _WproxyBase:
         self.servers = []
         self.noproxy = netaddr.IPSet([])
         self.noproxy_hosts = []
+        self.pac_encoding = pac_encoding
 
         if mode != MODE_NONE:
             # MODE_CONFIG or MODE_CONFIG_PAC
@@ -248,9 +250,9 @@ class _WproxyBase:
                 # Load PAC file
                 self.pac = Pac(debug_print = dprint)
                 if self.servers[0].startswith("http"):
-                    self.pac.load_url(self.servers[0])
+                    self.pac.load_url(self.servers[0], self.pac_encoding)
                 else:
-                    self.pac.load_jsfile(self.servers[0])
+                    self.pac.load_jsfile(self.servers[0], self.pac_encoding)
 
             if self.pac is not None:
                 return parse_proxy(self.pac.find_proxy_for_url(url, netloc[0])), netloc, path
@@ -323,7 +325,7 @@ if sys.platform == "win32":
     class Wproxy(_WproxyBase):
         "Load proxy information from Windows Internet Options"
 
-        def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, debug_print = None):
+        def __init__(self, mode = MODE_NONE, servers = None, noproxy = None, pac_encoding = None, debug_print = None):
             """
             Load proxy information from Windows Internet Options
               Returns MODE_NONE, MODE_ENV, MODE_AUTO, MODE_PAC, MODE_MANUAL
@@ -346,7 +348,7 @@ if sys.platform == "win32":
 
             if mode != MODE_NONE:
                 # Check MODE_CONFIG and MODE_CONFIG_PAC cases
-                super().__init__(mode, servers, noproxy, debug_print)
+                super().__init__(mode, servers, noproxy, pac_encoding, debug_print)
 
             if self.mode == MODE_NONE:
                 # Get proxy info from Internet Options
@@ -392,7 +394,7 @@ if sys.platform == "win32":
             dprint("Proxy mode = " + MODES[self.mode])
 
         # Find proxy for specified URL using WinHttp API
-        #   Used internally for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC
+        #   Used internally for MODE_AUTO and MODE_PAC
         def winhttp_find_proxy_for_url(self, url, autologon=True):
             ACCESS_TYPE = WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
             if WIN_VERSION < 6.3:
@@ -408,7 +410,7 @@ if sys.platform == "win32":
                 return ""
 
             autoproxy_options = WINHTTP_AUTOPROXY_OPTIONS()
-            if self.mode in [MODE_PAC, MODE_CONFIG_PAC]:
+            if self.mode == MODE_PAC:
                 autoproxy_options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL
                 autoproxy_options.dwAutoDetectFlags = 0
                 autoproxy_options.lpszAutoConfigUrl = self.servers[0]
@@ -418,7 +420,7 @@ if sys.platform == "win32":
                     WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A)
                 autoproxy_options.lpszAutoConfigUrl = 0
             else:
-                dprint("winhttp_find_proxy_for_url only applicable for MODE_AUTO, MODE_PAC and MODE_CONFIG_PAC")
+                dprint("winhttp_find_proxy_for_url only applicable for MODE_AUTO and MODE_PAC")
                 return ""
             autoproxy_options.fAutoLogonIfChallenged = autologon
 

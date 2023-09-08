@@ -265,7 +265,7 @@ def dfile():
     name = multiprocessing.current_process().name
     if "--quit" in sys.argv:
         name = "quit"
-    path = os.path.dirname(get_script_path())
+    path = os.getcwd()
     if "--uniqlog" in sys.argv:
         for i in sys.argv:
             # Add port to filename
@@ -273,7 +273,6 @@ def dfile():
                 name = i[7:] + "-" + name
                 break
         name = "%s-%f" % (name, time.time())
-        path = os.getcwd()
     logfile = os.path.join(path, "debug-%s.log" % name)
     return logfile
 

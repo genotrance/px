@@ -77,7 +77,7 @@ def parse_noproxy(noproxystr, iponly = False):
     """
 
     noproxy = netaddr.IPSet([])
-    noproxy_hosts = []
+    noproxy_hosts = set()
 
     if noproxystr is None or len(noproxystr) == 0:
         return noproxy, noproxy_hosts
@@ -100,14 +100,19 @@ def parse_noproxy(noproxystr, iponly = False):
             if not iponly:
                 if bypass == "<local>":
                     # TODO: detect all intranet addresses
-                    noproxy_hosts.append("localhost")
+                    noproxy_hosts.add("localhost")
                     noproxy.add(netaddr.IPNetwork("127.0.0.1/24"))
+                elif "*" in bypass and len(bypass) > 1:
+                    # The only wildcard available is a single * character, which matches all hosts
+                    # and effectively disables the proxy.
+                    dprint("Bad noproxy host definition - see CURLOPT_NOPROXY documentation")
                 else:
-                    noproxy_hosts.append(bypass)
+                    noproxy_hosts.add(bypass)
             else:
                 dprint("Bad IP definition: %s" % bypass)
                 raise error
 
+    dprint(str(noproxy_hosts))
     return noproxy, noproxy_hosts
 
 class _WproxyBase:
@@ -122,8 +127,6 @@ class _WproxyBase:
     Order of proxy priority:
     - Configuration - MODE_CONFIG, MODE_CONFIG_PAC
     - Environment - MODE_ENV - uses urllib.request.getproxies()
-
-    Proxy and noproxy details need to come from the same source - they are not merged
     """
 
     mode = MODE_NONE
@@ -139,15 +142,15 @@ class _WproxyBase:
             dprint = debug_print
 
         self.servers = []
-        self.noproxy = netaddr.IPSet([])
-        self.noproxy_hosts = []
         self.pac_encoding = pac_encoding
+
+        # Load noproxy if specified
+        self.noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
 
         if mode != MODE_NONE:
             # MODE_CONFIG or MODE_CONFIG_PAC
             self.mode = mode
             self.servers = servers or []
-            self.noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
         else:
             # MODE_ENV
             proxy = request.getproxies()
@@ -156,7 +159,9 @@ class _WproxyBase:
                 self.servers = parse_proxy(proxy["http"])
 
                 if "no" in proxy:
-                    self.noproxy, self.noproxy_hosts = parse_noproxy(proxy["no"])
+                    npxy, npxy_hosts = parse_noproxy(proxy["no"])
+                    self.noproxy.update(npxy)
+                    self.noproxy_hosts.update(npxy_hosts)
 
     def get_netloc(self, url):
         "Split url into netloc = hostname:port and path"
@@ -334,8 +339,6 @@ if sys.platform == "win32":
             - Configuration - MODE_CONFIG, MODE_CONFIG_PAC
             - Internet Options - MODE_AUTO, MODE_PAC, MODE_MANUAL
             - Environment - MODE_ENV - uses urllib.request.getproxies()
-
-            Proxy and noproxy details need to come from the same source - they are not merged
             """
 
             global dprint
@@ -343,8 +346,6 @@ if sys.platform == "win32":
                 dprint = debug_print
 
             self.servers = []
-            self.noproxy = netaddr.IPSet([])
-            self.noproxy_hosts = []
 
             if mode != MODE_NONE:
                 # Check MODE_CONFIG and MODE_CONFIG_PAC cases
@@ -359,6 +360,9 @@ if sys.platform == "win32":
                 if not ok:
                     dprint("WinHttpGetIEProxyConfigForCurrentUser failed: %s" % str(ctypes.GetLastError()))
                 else:
+                    # Load noproxy if specified
+                    self.noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
+
                     if ie_proxy_config.fAutoDetect:
                         # Mode = Auto detect
                         self.mode = MODE_AUTO
@@ -385,11 +389,13 @@ if sys.platform == "win32":
 
                             # Proxy exceptions into noproxy
                             bypass_str = ie_proxy_config.lpszProxyBypass or ""
-                            self.noproxy, self.noproxy_hosts = parse_noproxy(bypass_str)
+                            npxy, npxy_hosts = parse_noproxy(bypass_str)
+                            self.noproxy.update(npxy)
+                            self.noproxy_hosts.update(npxy_hosts)
 
             if self.mode == MODE_NONE:
                 # Get from environment since nothing in Internet Options
-                super().__init__()
+                super().__init__(noproxy = noproxy)
 
             dprint("Proxy mode = " + MODES[self.mode])
 

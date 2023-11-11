@@ -53,6 +53,7 @@ pyinst*/
 wheel/
 debug-*
 *.pyc
+*.pyc.*
 .vscode
 test-*/
 *.egg-info

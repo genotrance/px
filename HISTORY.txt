@@ -1,3 +1,8 @@
+v0.9.0
+- Added support for domains in noproxy - #2
+- Expanded noproxy to work in all proxy modes - #177
+- Added --test to verify Px configuration
+
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167
 - Fixed #164 - PAC function myIpAddress() was broken

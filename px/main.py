@@ -12,10 +12,11 @@ import threading
 import time
 import traceback
 import warnings
-warnings.filterwarnings("ignore")
 
 from .debug import pprint, Debug
 from .version import __version__
+
+warnings.filterwarnings("ignore")
 
 try:
     import psutil
@@ -110,6 +111,11 @@ Actions:
   Collect and save password to default keyring. Username needs to be provided
   via --username or already specified in the config file
 
+  --test=URL
+  Test Px as configured with the URL specified. This can be used to confirm that
+  Px is configured correctly and is able to connect and authenticate with the
+  upstream proxy.
+
 Configuration:
   --config=
   Specify config file. Valid file path, default: px.ini in working directory
@@ -155,12 +161,13 @@ Configuration:
     192.168.0.1/24 - CIDR
 
   --noproxy=  proxy:noproxy=
-  Direct connect to specific subnets like a regular proxy. Comma separated
-    Skip the NTLM proxy for connections to these subnets
+  Direct connect to specific subnets or domains like a regular proxy. Comma separated
+    Skip the NTLM proxy for connections to these hosts
     127.0.0.1 - specific ip
     192.168.0.* - wildcards
     192.168.0.1-192.168.0.255 - ranges
     192.168.0.1/24 - CIDR
+    example.com - domains
 
   --useragent=  proxy:useragent=
   Override or send User-Agent header on client's behalf
@@ -331,7 +338,11 @@ class Proxy(httpserver.BaseHTTPRequestHandler):
             dprint(self.curl.easyhash + ": Configuring proxy settings")
             server = self.proxy_servers[0][0]
             port = self.proxy_servers[0][1]
-            ret = self.curl.set_proxy(proxy = server, port = port)
+            # libcurl handles noproxy domains only. IP addresses are still handled within wproxy
+            # since libcurl only supports CIDR addresses since v7.86 and does not support wildcards
+            # (192.168.0.*) or ranges (192.168.0.1-192.168.0.255)
+            noproxy_hosts = ",".join(State.wproxy.noproxy_hosts) or None
+            ret = self.curl.set_proxy(proxy = server, port = port, noproxy = noproxy_hosts)
             if not ret:
                 # Proxy server has had auth issues so returning failure to client
                 self.send_error(401, "Proxy server authentication failed: %s:%d" % (server, port))
@@ -566,7 +577,7 @@ def reload_proxy():
             return
 
         # Reload proxy information
-        State.wproxy = wproxy.Wproxy(debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(noproxy = State.noproxy, debug_print = dprint)
 
         State.proxy_last_reload = time.time()
 
@@ -646,6 +657,19 @@ def set_auth(auth):
 
     State.auth = auth
 
+def set_debug():
+    global dprint
+    State.debug = Debug(dfile(), "w")
+    dprint = State.debug.get_print()
+
+def set_verbose():
+    global dprint
+    State.debug = Debug()
+    dprint = State.debug.get_print()
+    if "--foreground" not in sys.argv:
+        # --verbose implies --foreground
+        sys.argv.append("--foreground")
+
 def cfg_int_init(section, name, default, override=False):
     val = default
     if not override:
@@ -698,17 +722,43 @@ def save():
 
     sys.exit()
 
+def test(testurl):
+    # Get Px configuration
+    listen = State.config.get("proxy", "listen")
+    port = State.config.getint("proxy", "port")
+
+    def query():
+        ec = mcurl.Curl(testurl)
+        ec.set_proxy(listen, port)
+        ec.buffer()
+        ec.set_useragent("mcurl v" + __version__)
+        ret = ec.perform()
+        if ret != 0:
+            pprint(f"Failed with error {ret}\n{ec.errstr}")
+        else:
+            pprint(f"\n{ec.get_headers()}Response length: {len(ec.get_data())}")
+
+        # Quit Px
+        p = psutil.Process(os.getpid())
+        p.kill()
+
+    # Run testurl query in a thread
+    t = threading.Thread(target = query)
+    t.daemon = True
+    t.start()
+
+    # Tweak Px configuration for test - only 1 process and thread required
+    State.config.set("settings", "workers", "1")
+    State.config.set("settings", "threads", "1")
+
+    # Run Px to respond to query
+    run_pool()
+
 def parse_config():
-    global dprint
     if "--debug" in sys.argv:
-        State.debug = Debug(dfile(), "w")
-        dprint = State.debug.get_print()
+        set_debug()
     elif "--verbose" in sys.argv:
-        State.debug = Debug()
-        dprint = State.debug.get_print()
-        if "--foreground" not in sys.argv:
-            # --verbose implies --foreground
-            sys.argv.append("--foreground")
+        set_verbose()
 
     if sys.platform == "win32":
         if is_compiled() or "pythonw.exe" in sys.executable:
@@ -762,10 +812,10 @@ def parse_config():
 
     cfg_int_init("settings", "log", "0" if State.debug is None else "1")
     if State.config.get("settings", "log") == "1" and State.debug is None:
-        State.debug = Debug(dfile(), "w")
-        dprint = State.debug.get_print()
+        set_debug()
 
     # Command line flags
+    testurl = None
     for i in range(len(sys.argv)):
         if "=" in sys.argv[i]:
             val = sys.argv[i].split("=")[1]
@@ -789,6 +839,8 @@ def parse_config():
                 cfg_str_init("proxy", "username", val, set_username, True)
             elif "--auth=" in sys.argv[i]:
                 cfg_str_init("proxy", "auth", val, set_auth, True)
+            elif "--test=" in sys.argv[i]:
+                testurl = val
             else:
                 for j in ["workers", "threads", "idle", "proxyreload"]:
                     if "--" + j + "=" in sys.argv[i]:
@@ -846,12 +898,12 @@ def parse_config():
         set_password()
 
     if len(servers) != 0:
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, State.noproxy, debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, noproxy = State.noproxy, debug_print = dprint)
     elif len(State.pac) != 0:
         pac_encoding = State.config.get("proxy", "pac_encoding")
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], pac_encoding = pac_encoding, debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], noproxy = State.noproxy, pac_encoding = pac_encoding, debug_print = dprint)
     else:
-        State.wproxy = wproxy.Wproxy(debug_print = dprint)
+        State.wproxy = wproxy.Wproxy(noproxy = State.noproxy, debug_print = dprint)
         State.proxy_last_reload = time.time()
 
     State.socktimeout = State.config.getfloat("settings", "socktimeout")
@@ -863,6 +915,10 @@ def parse_config():
 
     # Curl multi object to manage all easy connections
     State.mcurl = mcurl.MCurl(debug_print = dprint)
+
+    # Test the proxy with user specified URL
+    if testurl is not None:
+        test(testurl)
 
 ###
 # Exit related

@@ -132,9 +132,9 @@ def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile =
         ec.set_headers(headers)
 
     ec.set_useragent("mcurl v" + __version__)
-    if not ec.perform():
-        ret = int(ec.errstr.split(";")[0])
-        return ret, ""
+    ret = ec.perform()
+    if ret != 0:
+        return ret, ec.errstr
 
     if wfile is not None:
         return 0, ""

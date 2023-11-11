@@ -352,6 +352,7 @@ class Curl:
         if port != 0:
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPORT, port)
         if noproxy is not None:
+            dprint(self.easyhash + ": Set noproxy to " + noproxy)
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_NOPROXY, noproxy.encode("utf-8"))
 
         if self.is_connect():
@@ -495,6 +496,7 @@ class Curl:
     def set_useragent(self, useragent):
         "Set user agent to send"
         if len(useragent) != 0:
+            dprint(self.easyhash + ": Setting user agent to " + useragent)
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_USERAGENT, useragent.encode("utf-8"))
 
     def set_follow(self, enable = True):
@@ -503,10 +505,14 @@ class Curl:
 
     def perform(self):
         "Perform the easy handle"
-        ret = MCURL.do(self)
-        MCURL.remove(self)
-        if ret is False:
-            dprint(self.easyhash + ": Connection failed: " + self.errstr)
+
+        # Perform as a standalone easy handle, not using multi
+        # However, add easyhash to MCURL.handles since it is used in curl callbacks
+        MCURL.handles[self.easyhash] = self
+        ret = libcurl.easy_perform(self.easy)
+        if ret != libcurl.CURLE_OK:
+            dprint(self.easyhash + ": Connection failed: " + str(ret) + " - " + self.errstr)
+        MCURL.handles.pop(self.easyhash)
         return ret
 
 @libcurl.socket_callback
@@ -712,6 +718,7 @@ class MCurl:
             else:
                 rready, wready, xready = [], [], []
                 if self.timer is not None:
+                    # Sleeping within lock - needs fix
                     time.sleep(self.timer)
 
             if len(rready) == 0 and len(wready) == 0 and len(xready) == 0:
@@ -786,7 +793,6 @@ class MCurl:
         if curl.sock_fd is None:
             dprint(curl.easyhash + ": Cannot select() without active socket")
             return
-
 
         dprint(curl.easyhash + ": Starting select loop")
         curl_sock = socket.fromfd(curl.sock_fd, socket.AF_INET, socket.SOCK_STREAM)

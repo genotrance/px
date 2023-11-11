@@ -206,6 +206,11 @@ Actions:
   Collect and save password to default keyring. Username needs to be provided
   via --username or already specified in the config file
 
+  --test=URL
+  Test Px as configured with the URL specified. This can be used to confirm that
+  Px is configured correctly and is able to connect and authenticate with the
+  upstream proxy.
+
 Configuration:
   --config=
   Specify config file. Valid file path, default: px.ini in working directory
@@ -251,12 +256,13 @@ Configuration:
     192.168.0.1/24 - CIDR
 
   --noproxy=  proxy:noproxy=
-  Direct connect to specific subnets like a regular proxy. Comma separated
-    Skip the NTLM proxy for connections to these subnets
+  Direct connect to specific subnets or domains like a regular proxy. Comma separated
+    Skip the NTLM proxy for connections to these hosts
     127.0.0.1 - specific ip
     192.168.0.* - wildcards
     192.168.0.1-192.168.0.255 - ranges
     192.168.0.1/24 - CIDR
+    example.com - domains
 
   --useragent=  proxy:useragent=
   Override or send User-Agent header on client's behalf

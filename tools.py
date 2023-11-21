@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import time
@@ -95,7 +96,7 @@ def get_dirs(prefix):
 
 # URL
 
-def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile = None, rfile_size = 0, wfile = None):
+def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile = None, rfile_size = 0, wfile = None, encoding="utf-8"):
     """
     data - for POST/PUT
     rfile - upload from open file - requires rfile_size
@@ -139,7 +140,7 @@ def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile =
     if wfile is not None:
         return 0, ""
 
-    return 0, ec.get_data()
+    return 0, ec.get_data(encoding)
 
 def get_curl():
     os.chdir("px/libcurl")
@@ -251,20 +252,146 @@ def nuitka():
 
     os.chdir("..")
 
+def get_pip(executable = sys.executable):
+    # Download get-pip.py
+    url = "https://bootstrap.pypa.io/get-pip.py"
+    ret, data = curl(url)
+    if ret != 0:
+        print(f"Failed to download get-pip.py with error {ret}")
+        sys.exit()
+    with open("get-pip.py", "w") as gp:
+        gp.write(data)
+
+    # Run it with Python
+    os.system(f"{executable} get-pip.py")
+
+    # Remove get-pip.py
+    os.remove("get-pip.py")
+
+def embed():
+    # Get wheels path
+    wprefix = "px.dist-wheels"
+    _, _, wdist = get_dirs(wprefix)
+    if not os.path.exists(wdist):
+        print(f"Wheels not found at {wdist}, required to embed")
+        sys.exit()
+
+    # Destination path
+    prefix = "px.dist"
+    osname, outdir, dist = get_dirs(prefix)
+    rmtree(outdir)
+    os.makedirs(dist, exist_ok=True)
+
+    # Get latest releases from web
+    ret, data = curl("https://www.python.org/downloads/windows/")
+
+    # Get Python version from CLI if specified
+    version = get_argval("tag")
+
+    # Find all URLs for zip files in webpage
+    urls = re.findall(r'href=[\'"]?([^\'" >]+\.zip)', data)
+    dlurl = ""
+    for url in urls:
+        # Filter embedded amd64 URLs
+        if "embed" in url and "amd64" in url:
+            # Get the first or specified version URL
+            if len(version) == 0 or version in url:
+                dlurl = url
+                break
+
+    # Download zip file
+    fname = os.path.join(outdir, os.path.basename(dlurl))
+    if not os.path.exists(fname):
+        ret, data = curl(dlurl, encoding=None)
+        if ret != 0:
+            print(f"Failed to download {dlurl} with error {ret}")
+            sys.exit()
+
+        # Write data to file
+        with open(fname, "wb") as f:
+            f.write(data)
+
+        # Unzip
+        with zipfile.ZipFile(fname, "r") as z:
+            z.extractall(dist)
+
+    # Find all files ending with ._pth
+    pth = glob.glob(os.path.join(dist, "*._pth"))[0]
+
+    # Update ._pth file
+    with open(pth, "r") as f:
+        data = f.read()
+    if "Lib" not in data:
+        with open(pth, "w") as f:
+            f.write(data.replace("\n.", "\n.\nLib\nLib\\site-packages"))
+
+    # Setup pip
+    if not os.path.exists(os.path.join(dist, "Lib")):
+        executable = os.path.join(dist, "python.exe")
+        get_pip(executable)
+
+        # Setup px
+        os.system(f"{executable} -m pip install px-proxy --no-index -f {wdist} --no-warn-script-location")
+
+        # Remove pip
+        os.system(f"{executable} -m pip uninstall setuptools wheel pip -y")
+
+    # Move px.exe and update interpreter path
+    pxexe = os.path.join(dist, "px.exe")
+    os.rename(os.path.join(dist, "Scripts", "px.exe"), pxexe)
+
+    # Update px.exe
+    with open(pxexe, "rb") as f:
+        data = f.read()
+
+    dataout = bytearray()
+    skip = False
+    for i, byte in enumerate(data):
+        if byte == 0x23 and data[i+1] == 0x21:  #!
+            if (data[i+2] >= 0x41 and data[i+2] <= 0x5a) or \
+                (data[i+2] >= 0x61 and data[i+2] <= 0x7a):    # A-Za-z - drive letter
+                if data[i+3] == 0x3A: # Colon
+                    skip = True
+                    continue
+
+        if skip:
+            if byte == 0x0A:
+                skip = False
+                dataout += b"#!python.exe"
+            else:
+                continue
+
+        dataout.append(byte)
+
+    with open(pxexe, "wb") as f:
+        f.write(dataout)
+
+    # Compress some binaries
+    os.chdir(dist)
+    if shutil.which("upx") is not None:
+        os.system("upx --best python3*.dll libcrypto*.dll")
+
+    # Create archive
+    os.chdir("..")
+    archfile = "px-v%s-%s" % (__version__, osname)
+    arch = "zip"
+    shutil.make_archive(archfile, arch, prefix)
+
+    # Create hashfile
+    archfile += "." + arch
+    with open(archfile, "rb") as afile:
+        sha256sum = hashlib.sha256(afile.read()).hexdigest()
+    with open(archfile + ".sha256", "w") as shafile:
+        shafile.write(sha256sum)
+
+    os.chdir("..")
+
 def deps():
     prefix = "px.dist-wheels"
     _, outdir, dist = get_dirs(prefix)
     if "--force" in sys.argv:
         rmtree(outdir)
-
-    try:
-        os.mkdir(outdir)
-    except:
-        pass
-    try:
-        os.mkdir(dist)
-    except:
-        pass
+    os.makedirs(dist, exist_ok=True)
 
     # Build
     os.system(sys.executable + " -m pip wheel . -w " + dist)
@@ -339,6 +466,19 @@ def depspkg():
         shafile.write(sha256sum)
 
     os.chdir("..")
+
+def scoop():
+    # Delete Python lib
+    version = f"{sys.version_info.major}{sys.version_info.minor}"
+    persist = os.getenv("USERPROFILE") + f"/scoop/persist/python{version}"
+    if os.path.exists(persist):
+        shutil.rmtree(persist)
+
+    # Recreate directory structure
+    os.makedirs(os.path.join(persist, "Lib", "site-packages"), exist_ok=True)
+    os.makedirs(os.path.join(persist, "Scripts"), exist_ok=True)
+
+    get_pip()
 
 # Github related
 
@@ -523,6 +663,12 @@ def main():
             if "--pyinst" in sys.argv:
                 pyinstaller()
 
+            if "--embed" in sys.argv:
+                embed()
+
+            if "--scoop" in sys.argv:
+                scoop()
+
         if "--nuitka" in sys.argv:
             nuitka()
 
@@ -549,7 +695,8 @@ def main():
     if "--post" in sys.argv:
         bins = glob.glob("px.dist*/px-v%s*" % __version__)
         if len(bins) == 0:
-            nuitka()
+            print("No binaries found")
+            sys.exit()
         post()
 
     # Help
@@ -563,8 +710,11 @@ Build:
 --wheel		Build wheels for pypi.org
 --pyinst	Build px.exe using PyInstaller
 --nuitka	Build px distribution using Nuitka
+--embed     Build px distribution using Python Embeddable distro
+  --tag=vX.X.X	Use specified tag
 --deps		Build all wheel dependencies for this Python version
 --depspkg	Build an archive of all dependencies
+--scoop		Clean and initialize Python distro installed via scoop
 
 Post:
 --twine		Post wheels to pypi.org

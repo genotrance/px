@@ -69,6 +69,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Internet :: Proxy Servers"
     ],
     keywords = "proxy ntlm kerberos pac negotiate http",
@@ -78,7 +79,8 @@ setup(
         "keyring",
         "netaddr",
         "psutil",
-        "quickjs",
+        'quickjs;python_version>"3.7"',
+        'quickjs==1.19.2;python_version=="3.7"',
         'jeepney==0.7.1;platform_system=="Linux"',
         'keyring_jeepney==0.2;platform_system=="Linux"',
         'keyrings.alt;platform_system=="Linux"'

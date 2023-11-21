@@ -1,22 +1,30 @@
 # Install scoop
-if ((Get-Command "scoop" -ErrorAction SilentlyContinue) -eq $null) {
+if ($null -eq (Get-Command "scoop" -ErrorAction SilentlyContinue)) {
     Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-    irm get.scoop.sh | iex
+    Invoke-RestMethod get.scoop.sh | Invoke-Expression
+
+    # Install versions bucket
+    scoop bucket add versions -ErrorAction SilentlyContinue
 }
 
-# Install versions bucket
-scoop bucket add versions -ErrorAction SilentlyContinue
+# Python versions to support: 3.7 - 3.11
+$BASE = 3
+$OLDEST = 7
+$LATEST = 11
 
-# Python versions
-$PYVERSIONS = @("37", "38", "39", "310")
-$PY = "python310"
+# Generate version list
+$PYVERSIONS = @()
+for ($i = $OLDEST; $i -le $LATEST; $i++) {
+    $PYVERSIONS += "$BASE." + $i
+}
+$PY = "python$BASE$LATEST"
 
 # Delete depspkg directory
-Remove-Item -Recurse -Force px.dist-wheels-windows-amd64
+Remove-Item -Recurse -Force px.dist-wheels-windows-amd64 -ErrorAction SilentlyContinue
 
 # Setup Python and dependencies, build wheels for Px
 foreach ($pyver in $PYVERSIONS) {
-    if ((Get-Command "python$pyver" -ErrorAction SilentlyContinue) -eq $null) {
+    if ($null -eq (Get-Command "python$pyver" -ErrorAction SilentlyContinue)) {
         # Install Python
         scoop install python$pyver
     }
@@ -29,7 +37,7 @@ foreach ($pyver in $PYVERSIONS) {
 }
 
 # Install build tools
-Invoke-Expression "$PY -m pip install --upgrade nuitka twine"
+Invoke-Expression "$PY -m pip install --upgrade twine"
 
 # Install wheel dependencies
 Invoke-Expression "$PY -m pip install --upgrade px-proxy --no-index -f px.dist-wheels-windows-amd64\px.dist-wheels"
@@ -43,8 +51,8 @@ Invoke-Expression "$PY tools.py --wheel"
 # Create package of all dependencies
 Invoke-Expression "$PY tools.py --depspkg"
 
-# Build Nuitka
-Invoke-Expression "$PY tools.py --nuitka"
+# Build embedded binary
+Invoke-Expression "$PY tools.py --embed --tag=$BASE.$LATEST"
 
 # Uninstall Px
 Invoke-Expression "$PY -m pip uninstall px-proxy -y"

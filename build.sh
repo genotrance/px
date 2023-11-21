@@ -133,7 +133,7 @@ if [ -f "/.dockerenv" ]; then
             done
 
             # Package all wheels
-            /opt/python/cp310-cp310/bin/python3 tools.py --depspkg
+            /opt/python/cp312-cp312/bin/python3 tools.py --depspkg
         fi
 
         if [ "$SUBCOMMAND" = "nuitka" ] || [ "$SUBCOMMAND" = "all" ]; then
@@ -174,7 +174,7 @@ elif [ "$OS" = "Darwin" ]; then
     # Delete depspkg directory
     rm -rf px.dist-wheels-osx-x86_64
 
-    for pyver in 3.7 3.8 3.9 3.10
+    for pyver in 3.7 3.8 3.9 3.10 3.11 3.12
     do
         # Install Python
         brew install python@$pyver

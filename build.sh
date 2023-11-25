@@ -59,7 +59,7 @@ if [ -f "/.dockerenv" ]; then
 
         SHELL="sh"
 
-    elif [ "$DISTRO" = "centos" ]; then
+    elif [ "$DISTRO" = "centos" ] || [ "$DISTRO" = "rocky" ]; then
 
         # Avoid random mirror
         cd /etc/yum.repos.d
@@ -154,11 +154,15 @@ if [ -f "/.dockerenv" ]; then
         fi
     else
         python3 -m pip install --upgrade pip
-        python3 -m pip install px-proxy --no-index -f $WHEELS
 
         if [ "$COMMAND" = "test" ]; then
+            # Install wheel dependencies
+            # Test depends on deps - run deps first
+            python3 -m pip install px-proxy --no-index -f $WHEELS
             python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
         else
+            # Install Px dependencies from setup.py
+            python3 -m pip install .
             $SHELL
         fi
     fi

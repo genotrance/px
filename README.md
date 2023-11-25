@@ -89,7 +89,7 @@ Px can be run as a local Python script without installation. Download the source
 as described above, install all dependencies and then run Px:
 
 ```
-pip install keyring netaddr psutil quickjs futures
+pip install keyring netaddr psutil quickjs
 
 # Download/install libcurl
 
@@ -153,15 +153,13 @@ Gnome Keyring or KWallet is used to store passwords on Linux. For systems withou
 a GUI (headless, docker), refer to these [instructions](https://github.com/jaraco/keyring#using-keyring-on-headless-linux-systems-in-a-docker-container)
 to start the SecretService backend.
 
-If the default SecretService keyring backend does not work, the [keyring_jeepney](https://pypi.org/project/keyring_jeepney)
-package might provide an alternative.
+If the default SecretService keyring backend does not work, a third-party
+[backend](https://github.com/jaraco/keyring#third-party-backends) might be
+required. Simply install and configure one and `keyring` will use it. Remember
+to specify the environment variables they require before starting Px.
 
-	python -m pip install keyring_jeepney
-
-Worst case, the [keyrings.alt](https://pypi.org/project/keyrings.alt/) package can
-be used.
-
-	python -m pip install keyrings.alt
+This will not work for the Nuitka binaries so as a fallback and also to make life
+a bit easier, Px can also information from environment variables or dotenv files.
 
 ### Misc
 
@@ -270,14 +268,7 @@ Configuration:
   --username=  proxy:username=
   Authentication to use when SSPI is unavailable. Format is domain\\username
   Service name "Px" and this username are used to retrieve the password using
-  Python keyring. Px only retrieves credentials and storage should be done
-  directly in the keyring backend.
-    On Windows, Credential Manager is the recommended backed and can be accessed
-    from Control Panel > User Accounts > Credential Manager > Windows Credentials.
-    Create a generic credential with Px as the network address, this username
-    and corresponding password.
-    On Linux, Gnome Keyring or KWallet can be used to store passwords. For headless
-    systems, the keyring_jeepney or keyrings.alt package might be needed.
+  Python keyring if available.
 
   --auth=  proxy:auth=
   Force instead of discovering upstream proxy type
@@ -350,8 +341,10 @@ Allow requests from everywhere. Be careful, every client will use your login:
 
 	px --proxy=proxyserver.com:80 --gateway
 
-NOTE: In Docker for Windows you need to set your proxy to `http://host.docker.internal:3128` or `http://<your_ip>:3128`
-(or actual port Px is listening to) in your containers and be aware of https://github.com/docker/for-win/issues/1380.
+NOTE: In Docker for Windows you need to set your proxy to
+`http://host.docker.internal:3128` or `http://<your_ip>:3128` (or actual port
+Px is listening to) in your containers and be aware of
+https://github.com/docker/for-win/issues/1380.
 
 Workaround:
 
@@ -378,11 +371,6 @@ the following Python packages:
 - [netaddr](https://pypi.org/project/netaddr/)
 - [psutil](https://pypi.org/project/psutil/)
 - [quickjs](https://pypi.org/project/quickjs/)
-- Linux
-  - [jeepney](https://pypi.org/project/jeepney/)
-  - [keyring_jeepney](https://pypi.org/project/keyring_jeepney/)
-  - [keyrings.alt](https://pypi.org/project/keyrings.alt/)
-- [futures](https://pypi.org/project/futures/) on Python 2.x
 
 Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP
 connections and proxy authentication.
@@ -404,18 +392,21 @@ help fix any issues.
 
 To build a self-sufficient executable that does not depend on the presence of
 Python and dependency modules, both Nuitka and PyInstaller scripts are provided.
-Run `python tools.py` for more details.
+There is also a Python Embedded build that is preferable on Windows. Check out
+`python tools.py` for more details.
 
 ## Feedback
 
 Px is definitely a work in progress and any feedback or suggestions are welcome.
 It is hosted on [GitHub](https://github.com/genotrance/px) with an MIT license
-so issues, forks and PRs are most appreciated. Join us on the [discussion](https://github.com/genotrance/px/discussions)
-board, [Gitter](https://gitter.im/genotrance/px) or [Matrix](https://matrix.to/#/#genotrance_px:matrix.org)
-to chat about Px.
+so issues, forks and PRs are most appreciated. Join us on the
+[discussion](https://github.com/genotrance/px/discussions) board,
+[Gitter](https://gitter.im/genotrance/px) or
+[Matrix](https://matrix.to/#/#genotrance_px:matrix.org) to chat about Px.
 
 ## Credits
 
-Thank you to all [contributors](https://github.com/genotrance/px/graphs/contributors) for their PRs and all issue submitters.
+Thank you to all [contributors](https://github.com/genotrance/px/graphs/contributors)
+for their PRs and all issue submitters.
 
 Px is based on code from all over the internet and acknowledges innumerable sources.

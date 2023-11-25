@@ -60,7 +60,6 @@ setup(
         "Operating System :: MacOS :: MacOS X",
         "Operating System :: Microsoft :: Windows",
         "Operating System :: POSIX :: Linux",
-        "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3.4",
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
@@ -75,15 +74,11 @@ setup(
     keywords = "proxy ntlm kerberos pac negotiate http",
     packages = find_packages(),
     install_requires = [
-        'futures;python_version<"3.0"',
         "keyring",
         "netaddr",
         "psutil",
-        'quickjs;python_version>"3.7"',
         'quickjs==1.19.2;python_version=="3.7"',
-        'jeepney==0.7.1;platform_system=="Linux"',
-        'keyring_jeepney==0.2;platform_system=="Linux"',
-        'keyrings.alt;platform_system=="Linux"'
+        'quickjs'
     ],
     data_files = data_files,
     entry_points = {

@@ -4,7 +4,11 @@ v0.9.0
 - Added --test to verify Px configuration
 - Windows binary now created with embeddable Python to avoid being flagged
   by virus scanners - #182 #197
-- Added support for Python 3.11 and 3.12
+- Added support for Python 3.11 and 3.12, removed Python 2.7
+- Fixed #183 - keyring import on OSX
+- Fixed #187 - removed dependency on keyring_jeepney which is deprecated
+- Fixed #188 - removed keyrings.alt and added docs for leveraging third
+  party keyring backends
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

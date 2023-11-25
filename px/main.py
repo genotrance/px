@@ -1,7 +1,5 @@
 "Px is an HTTP proxy server to automatically authenticate through an NTLM proxy"
 
-from __future__ import print_function
-
 import getpass
 import multiprocessing
 import os
@@ -60,13 +58,8 @@ try:
         import keyring.backends.Windows
     elif sys.platform.startswith("linux"):
         import keyring.backends.SecretService
-        try:
-            import keyring_jeepney
-            import keyrings.alt.file
-        except:
-            pass
     elif sys.platform == "darwin":
-        import keyring.backends.OS_X
+        import keyring.backends.macOS
 except ImportError:
     pprint("Requires module keyring")
     sys.exit()
@@ -175,14 +168,7 @@ Configuration:
   --username=  proxy:username=
   Authentication to use when SSPI is unavailable. Format is domain\\username
   Service name "Px" and this username are used to retrieve the password using
-  Python keyring. Px only retrieves credentials and storage should be done
-  directly in the keyring backend.
-    On Windows, Credential Manager is the recommended backed and can be accessed
-    from Control Panel > User Accounts > Credential Manager > Windows Credentials.
-    Create a generic credential with Px as the network address, this username
-    and corresponding password.
-    On Linux, Gnome Keyring or KWallet can be used to store passwords. For headless
-    systems, the keyring_jeepney or keyrings.alt package might be needed.
+  Python keyring if available.
 
   --auth=  proxy:auth=
   Force instead of discovering upstream proxy type

@@ -3,13 +3,8 @@
 import copy
 import socket
 import sys
-# Python 2.x vs 3.x support
-try:
-    import urllib.parse as urlparse
-    import urllib.request as request
-except ImportError:
-    import urlparse
-    import urllib as request
+import urllib.parse
+import urllib.request
 
 try:
     import netaddr
@@ -153,7 +148,7 @@ class _WproxyBase:
             self.servers = servers or []
         else:
             # MODE_ENV
-            proxy = request.getproxies()
+            proxy = urllib.request.getproxies()
             if "http" in proxy:
                 self.mode = MODE_ENV
                 self.servers = parse_proxy(proxy["http"])
@@ -167,7 +162,7 @@ class _WproxyBase:
         "Split url into netloc = hostname:port and path"
 
         nloc = url
-        parse = urlparse.urlparse(url, allow_fragments=False)
+        parse = urllib.parse.urlparse(url, allow_fragments=False)
         if parse.netloc:
             nloc = parse.netloc
         if ":" not in nloc:

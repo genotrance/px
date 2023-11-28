@@ -9,6 +9,9 @@ v0.9.0
 - Fixed #187 - removed dependency on keyring_jeepney which is deprecated
 - Fixed #188 - removed keyrings.alt and added docs for leveraging third
   party keyring backends
+- Added support to load Px flags from environment variables and dotenv files
+- Changed loading order of px.ini - from CLI flag first, environment next,
+  working directory and finally from the Px directory
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

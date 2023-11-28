@@ -2,56 +2,86 @@
 
 # Usage
 #
+# ./build.sh [-b] [-t] [-i IMAGE] [-s SUBCOMMAND]
+#
+# Build -b
+#   IMAGE = glibc | musl | all (default) | any Docker tag
+#   SUBCOMMAND = -d = deps | -n = nuitka | all (default)
+# Test -t
+#   IMAGE = alpines | ubuntus | debians | mints | opensuses | any Docker tag
+#   SUBCOMMAND forwarded to test.py
+#
 # Build wheels of all dependencies across glibc and musl
-# ./build.sh deps
+# ./build.sh -b -d
 #
 # Build nuitka binaries for glibc and musl
-# ./build.sh nuitka
+# ./build.sh -b -n
 #
 # Build both wheels and nuita binaries for glibc and musl
-# ./build.sh all
+# ./build.sh -b
 #
 # Run test across all distros
-# ./build.sh test
+# ./build.sh -t
 #
-# Run command on specific container
-# ./build.sh IMAGE command subcommand
-#
-# Commands
-#   build - sub-commands: deps nuitka all
-#   test - sub-commands: alpine ubuntu debian opensuse, test.py flags
+# Run SHELL on specific container
+# ./build.sh -i IMAGE
 
 OS=`uname -s`
+
+# Parse command line
+while getopts 'i:btdns:' OPTION; do
+    case "$OPTION" in
+        i)
+            IMAGE="$OPTARG"
+            ;;
+        b)
+            BUILD="yes"
+            ;;
+        t)
+            TEST="yes"
+            ;;
+        d)
+            DEPS="yes"
+            ;;
+        n)
+            NUITKA="yes"
+            ;;
+        s)
+            SUBCOMMAND="$OPTARG"
+            ;;
+    esac
+done
+shift "$(($OPTIND -1))"
+
+# Check if env vars are set
+if [ -z "$PROXY" ]; then
+    echo "PROXY not configured"
+    exit
+fi
+
+if [ -z "$PAC" ]; then
+    echo "PAC not configured"
+    exit
+fi
+
+if [ -z "$USERNAME" ]; then
+    echo "USERNAME not configured"
+    exit
+fi
 
 if [ -f "/.dockerenv" ]; then
     # Running inside container
     DISTRO=`cat /etc/os-release | grep ^ID | head -n 1 | cut -d"=" -f2 | sed 's/"//g'`
     SHELL="bash"
 
-    export PROXY="$1"
-    export PAC="$2"
-    export USERNAME="$3"
     export AUTH=""
-
-    # build or test - else $SHELL
-    COMMAND=""
-    if [ ! -z "$4" ]; then
-        COMMAND="$4"
-    fi
-
-    # build sub-commands: nuitka or deps
-    # test sub-commands passed as flags to test.py
-    SUBCOMMAND=""
-    if [ ! -z "$5" ]; then
-        SUBCOMMAND="$5"
-    fi
 
     if [ "$DISTRO" = "alpine" ]; then
 
         apk update && apk upgrade
         apk add curl psmisc python3
         python3 -m ensurepip
-        if [ "$COMMAND" = "build" ]; then
+        if [ "$BUILD" = "yes" ]; then
             apk add ccache gcc musl-dev patchelf python3-dev upx
         else
             apk add dbus gnome-keyring
@@ -70,7 +100,7 @@ if [ -f "/.dockerenv" ]; then
         yum update -y
         yum install -y psmisc python3
         python3 -m ensurepip
-        if [ "$COMMAND" = "build" ]; then
+        if [ "$BUILD" = "yes" ]; then
             yum install -y ccache libffi-devel patchelf python3-devel upx
         else
             yum install -y gnome-keyring
@@ -113,13 +143,15 @@ if [ -f "/.dockerenv" ]; then
     export PXBIN="/px/px.dist-linux-$ABI-x86_64/px.dist/px"
     export WHEELS="/px/px.dist-wheels-linux-$ABI-x86_64/px.dist-wheels"
 
-    if [ "$COMMAND" != "build" ]; then
+    if [ -z "$BUILD" ]; then
+        # For test and SHELL only
         dbus-run-session -- $SHELL -c 'echo "abc" | gnome-keyring-daemon --unlock'
     fi
 
     cd /px
-    if [ "$COMMAND" = "build" ]; then
-       if [ "$SUBCOMMAND" = "deps" ] || [ "$SUBCOMMAND" = "all" ]; then
+    if [ "$BUILD" = "yes" ]; then
+        if [ "$DEPS" = "yes" ] || [ ! -d "$WHEELS" ]; then
+            # Also run if $WHEELS does not exist since NUITKA depends on wheels
             rm -rf $WHEELS
 
             # Run for all Python versions
@@ -136,33 +168,39 @@ if [ -f "/.dockerenv" ]; then
             /opt/python/cp312-cp312/bin/python3 tools.py --depspkg
         fi
 
-        if [ "$SUBCOMMAND" = "nuitka" ] || [ "$SUBCOMMAND" = "all" ]; then
+        if [ "$NUITKA" = "yes" ]; then
             # Install tools
             python3 -m pip install --upgrade pip setuptools build wheel
             python3 -m pip install --upgrade nuitka
 
             # Install wheel dependencies
-            # nuitka depends on deps - run deps first
             python3 -m pip install px-proxy --no-index -f $WHEELS
 
             # Build Nuitka binary
             python3 tools.py --nuitka
         fi
-
-        if [ -z "$SUBCOMMAND" ]; then
-            $SHELL
-        fi
     else
         python3 -m pip install --upgrade pip
 
-        if [ "$COMMAND" = "test" ]; then
+        if [ "$TEST" = "yes" ]; then
+            if [ ! -d "$WHEELS" ]; then
+                echo "Wheels missing => ./build.sh -b -d"
+                $SHELL
+                exit
+            fi
+
             # Install wheel dependencies
-            # Test depends on deps - run deps first
             python3 -m pip install px-proxy --no-index -f $WHEELS
+
+            # Run tests
             python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
         else
-            # Install Px dependencies from setup.py
-            python3 -m pip install .
+            if [ -d "$WHEELS" ]; then
+                # Install Px dependencies if available
+                python3 -m pip install px-proxy --no-index -f $WHEELS
+            fi
+
+            # Start shell
             $SHELL
         fi
     fi
@@ -210,60 +248,73 @@ elif [ "$OS" = "Darwin" ]; then
 
 else
     # Start container
-    if [ -z "$PROXY" ]; then
-        echo "PROXY not configured"
-        exit
-    fi
-
-    if [ -z "$PAC" ]; then
-        echo "PAC not configured"
-        exit
-    fi
-
-    if [ -z "$USERNAME" ]; then
-        echo "USERNAME not configured"
-        exit
-    fi
 
     # Python wheel containers for musl and glibc
     MUSL="quay.io/pypa/musllinux_1_1_x86_64"
     GLIBC="quay.io/pypa/manylinux2014_x86_64"
 
-    DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share"
-    if [ "$1" = "deps" ] || [ "$1" = "nuitka" ] || [ "$1" = "all" ]; then
-        for image in $MUSL $GLIBC
-        do
-            $DOCKERCMD $image /px/build.sh "$PROXY" "$PAC" "$USERNAME" build $1
-        done
-    elif [ "$1" = "test" ]; then
-        SUBCOMMAND="$3"
-        if [ "$2" = "alpine" ]; then
-            IMAGES="alpine alpine:3.11"
-        elif [ "$2" = "ubuntu" ]; then
-            IMAGES="ubuntu ubuntu:focal"
-        elif [ "$2" = "debian" ]; then
-            IMAGES="debian debian:oldstable"
-        elif [ "$2" = "mint" ]; then
-            IMAGES="linuxmintd/mint20.3-amd64"
-        elif [ "$2" = "opensuse" ]; then
-            IMAGES="opensuse/tumbleweed opensuse/leap:15.1"
-        else
-            SUBCOMMAND="$2"
-            IMAGES="alpine ubuntu debian opensuse/tumbleweed"
-        fi
-        for image in $IMAGES
-        do
-            $DOCKERCMD $image /px/build.sh "$PROXY" "$PAC" "$USERNAME" test "$SUBCOMMAND"
-        done
-    else
-        if [ "$1" = "musl" ]; then
+    DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share \
+                -e PROXY=\"$PROXY\" -e PAC=\"$PAC\" -e USERNAME=\"$USERNAME\""
+
+    if [ "$BUILD" = "yes" ]; then
+        # Which image to load
+        if [ -z "$IMAGE" ] || [ "$IMAGE" = "all" ]; then
+            IMAGE="$MUSL $GLIBC"
+        elif [ "$IMAGE" = "musl" ]; then
             IMAGE="$MUSL"
-        elif [ "$1" = "glibc" ]; then
+        elif [ "$IMAGE" = "glibc" ]; then
             IMAGE="$GLIBC"
-        else
-            IMAGE="$1"
         fi
 
-        $DOCKERCMD $IMAGE /px/build.sh "$PROXY" "$PAC" "$USERNAME" $2 $3
+        # What to build
+        if [ "$DEPS" = "yes" ] && [ -z "$NUITKA" ]; then
+            SUBCOMMAND="-d"
+        elif [ "$NUITKA" = "yes" ] && [ -z "$DEPS" ]; then
+            SUBCOMMAND="-n"
+        else
+            SUBCOMMAND="-d -n"
+        fi
+
+        # Build on each image
+        for image in $IMAGE
+        do
+            $DOCKERCMD $image /px/build.sh -b $SUBCOMMAND
+        done
+    elif [ "$TEST" = "yes" ]; then
+        # Which image to test
+        if [ -z "$IMAGE" ]; then
+            IMAGE="alpine ubuntu debian opensuse/tumbleweed"
+        elif [ "$SUBCOMMAND" = "alpines" ]; then
+            IMAGE="alpine alpine:3.11"
+        elif [ "$SUBCOMMAND" = "ubuntus" ]; then
+            IMAGE="ubuntu ubuntu:focal"
+        elif [ "$SUBCOMMAND" = "debians" ]; then
+            IMAGE="debian debian:oldstable"
+        elif [ "$SUBCOMMAND" = "mints" ]; then
+            IMAGE="linuxmintd/mint21.2-amd64"
+        elif [ "$SUBCOMMAND" = "opensuses" ]; then
+            IMAGE="opensuse/tumbleweed opensuse/leap:15.1"
+        fi
+
+        # Test on each image
+        for image in $IMAGE
+        do
+            # Forward any commands to test.py
+            if [ ! -z "$SUBCOMMAND" ]; then
+                SUBCOMMAND="-s \"$SUBCOMMAND\""
+            fi
+            $DOCKERCMD $image /px/build.sh -t "$SUBCOMMAND"
+        done
+    else
+        if [ -z "$IMAGE" ]; then
+            echo "No image specified"
+            exit 1
+        elif [ "$IMAGE" = "musl" ]; then
+            IMAGE="$MUSL"
+        elif [ "$IMAGE" = "glibc" ]; then
+            IMAGE="$GLIBC"
+        fi
+
+        $DOCKERCMD $IMAGE /px/build.sh
     fi
 fi

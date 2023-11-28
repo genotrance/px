@@ -28,9 +28,9 @@ Px and all dependencies can be installed with `pip`:
 	`python -m pip install px-proxy --no-index -f /path/to/wheels`
 
 - If Python is not available, get the latest compiled binary from the
-[releases](https://github.com/genotrance/px/releases) page instead. These
-binaries are compiled with [Nuitka](https://nuitka.net) and contain everything
-needed to run standalone.
+[releases](https://github.com/genotrance/px/releases) page instead. The Windows
+binary is built using Python Embedded and the Linux and OSX binaries are compiled
+with [Nuitka](https://nuitka.net) and contain everything needed to run standalone.
 
 If direct internet access is available along with Python, Px can be easily
 installed using the Python package manager `pip`. This will download and install
@@ -58,9 +58,9 @@ a copy. On Linux, it is required to install libcurl using the package manager:
 
 The latest Px version can be downloaded and installed from source via pip:
 
-	python -m pip install git+https://github.com/genotrance/px
+	python -m pip install https://github.com/genotrance/px/archive/master.zip
 
-Source can also be downloaded separately and installed:
+Source can also be downloaded and installed:
 
 - Via git:
 
@@ -75,7 +75,7 @@ dependencies :
 
 	python -m pip install .
 
-NOOTE: Source install methods will require internet access since Python will try
+NOTE: Source install methods will require internet access since Python will try
 to install Px dependencies from the internet. The binaries mentioned in the
 previous section could be used to bootstrap a source install.
 
@@ -89,7 +89,7 @@ Px can be run as a local Python script without installation. Download the source
 as described above, install all dependencies and then run Px:
 
 ```
-pip install keyring netaddr psutil quickjs
+pip install keyring netaddr psutil python-dotenv quickjs
 
 # Download/install libcurl
 
@@ -100,7 +100,7 @@ python px.py # run in a console window
 ### Uninstallation
 
 If Px has been installed to the Windows registry to start on boot, it should be
-removed before uninstallation:
+uninstalled before removal:
 
 	python -m px --uninstall
 
@@ -111,21 +111,34 @@ Px can then be uninstalled using `pip` as follows:
 ## Configuration
 
 Px requires only one piece of information in order to function - the server
-name and port of the proxy server. This needs to be configured in `px.ini`. If not
-specified, Px will check Internet Options or environment variables for any proxy
-definitions and use them. Without this, Px will try to connect to sites directly.
+name and port of the proxy server. If not specified, Px will check `Internet
+Options` or environment variables for any proxy definitions. Without this, Px
+will try to connect to sites directly.
 
-The noproxy capability allows Px to connect to hosts in the configured subnets
-directly, bypassing the proxy altogether. This allows clients to connect to
-hosts within the intranet without requiring additional configuration for each
-client or at the proxy.
+The `noproxy` capability allows Px to connect to configured hosts directly,
+bypassing the proxy altogether. This allows clients to connect to hosts within
+the intranet without requiring additional configuration for each client or at
+the proxy.
+
+Configuration can be specified in multiple ways, listed in order of precedence:
+- Command line flags
+- Environment variables
+- Variables in a dotenv file (.env)
+  - In the working directory
+  - In the Px directory
+- Configuration file `px.ini`
+  - In the working directory
+  - In the Px directory
+
+There are many configuration options to tweak - refer to the [Usage](#usage)
+section or `--help` for details and syntax.
 
 ### Credentials
 
 If SSPI is not available or not preferred, providing a `username` in `domain\username`
 format allows Px to authenticate as that user. The corresponding password is
-retrieved using Python keyring and needs to be setup in the appropriate OS specific
-backend.
+retrieved using Python keyring and needs to be setup in the appropriate OS
+specific backend.
 
 Credentials can be setup with the command line:
 
@@ -139,15 +152,15 @@ Information on keyring backends can be found [here](https://pypi.org/project/key
 
 #### Windows
 
-Credential Manager is the recommended backend for Windows and the password is stored
-as a 'Generic Credential' type with 'Px' as the network address name. Credential Manager
-can be accessed as follows:
+Credential Manager is the recommended backend for Windows and the password is
+stored as a 'Generic Credential' type with 'Px' as the network address name.
+Credential Manager can be accessed as follows:
 
 	Control Panel > User Accounts > Credential Manager > Windows Credentials
 
 	Or on the command line: `rundll32.exe keymgr.dll, KRShowKeyMgr`
 
-### Linux
+#### Linux
 
 Gnome Keyring or KWallet is used to store passwords on Linux. For systems without
 a GUI (headless, docker), refer to these [instructions](https://github.com/jaraco/keyring#using-keyring-on-headless-linux-systems-in-a-docker-container)
@@ -158,21 +171,21 @@ If the default SecretService keyring backend does not work, a third-party
 required. Simply install and configure one and `keyring` will use it. Remember
 to specify the environment variables they require before starting Px.
 
-This will not work for the Nuitka binaries so as a fallback and also to make life
-a bit easier, Px can also information from environment variables or dotenv files.
+This will not work for the Nuitka binaries so as a fallback, Px can also load
+credentials from environment variables and dotenv files. This is only recommended
+when keyring is not available though.
 
 ### Misc
 
-There are a few other settings to tweak in `px.ini` file but most are obvious.
-All settings can be specified on the command line for convenience. The INI file
-can also be created or updated from the command line using `--save`.
+The configuration file `px.ini` can be created or updated from the command line
+using `--save`.
 
 The binary distribution of Px runs in the background once started and can be
 quit by running `px --quit`. When running in the foreground, use `CTRL-C`.
 
-Px can also be setup to automatically run on startup with the `--install` flag.
-This is done by adding an entry into the Window registry which can be removed
-with `--uninstall`.
+Px can also be setup to automatically run on startup on Windows with the
+`--install` flag. This is done by adding an entry into the Window registry which
+can be removed with `--uninstall`.
 
 NOTE: Command line parameters passed with `--install` are not saved for use on
 startup. The `--save` flag or manual editing of `px.ini` is required to provide
@@ -183,10 +196,11 @@ configuration to Px on startup.
 ```
 px [FLAGS]
 python px.py [FLAGS]
+python -m px [FLAGS]
 
 Actions:
   --save
-  Save configuration to px.ini or file specified with --config
+  Save configuration to file specified with --config or px.ini in working directory
     Allows setting up Px config directly from command line
     Values specified on CLI override any values in existing config file
     Values not specified on CLI or config file are set to defaults
@@ -210,41 +224,42 @@ Actions:
   upstream proxy.
 
 Configuration:
-  --config=
+  --config= | PX_CONFIG=
   Specify config file. Valid file path, default: px.ini in working directory
+  or script directory
 
-  --proxy=  --server=  proxy:server= in INI file
+  --proxy=  --server= | PX_SERVER= | proxy:server=
   NTLM server(s) to connect through. IP:port, hostname:port
     Multiple proxies can be specified comma separated. Px will iterate through
     and use the one that works
 
-  --pac=  proxy:pac=
+  --pac= | PX_PAC= | proxy:pac=
   PAC file to use to connect
     Use in place of --server if PAC file should be loaded from a URL or local
     file. Relative paths will be relative to the Px script or binary
 
-  --pac_encoding= proxy:pac_encoding=
+  --pac_encoding= | PX_PAC_ENCODING= | proxy:pac_encoding=
   PAC file encoding
     Specify in case default 'utf-8' encoding does not work
 
-  --listen=  proxy:listen=
-  IP interface to listen on. Valid IP address, default: 127.0.0.1
+  --listen= | PX_LISTEN= | proxy:listen=
+  IP interface to listen on - default: 127.0.0.1
 
-  --port=  proxy:port=
-  Port to run this proxy. Valid port number, default: 3128
+  --port= | PX_PORT= | proxy:port=
+  Port to run this proxy on - default: 3128
 
-  --gateway  proxy:gateway=
+  --gateway | PX_GATEWAY= | proxy:gateway=
   Allow remote machines to use proxy. 0 or 1, default: 0
     Overrides 'listen' and binds to all interfaces
 
-  --hostonly  proxy:hostonly=
+  --hostonly | PX_HOSTONLY= | proxy:hostonly=
   Allow only local interfaces to use proxy. 0 or 1, default: 0
     Px allows all IP addresses assigned to local interfaces to use the service.
     This allows local apps as well as VM or container apps to use Px when in a
     NAT config. Px does this by listening on all interfaces and overriding the
     allow list.
 
-  --allow=  proxy:allow=
+  --allow= | PX_ALLOW= | proxy:allow=
   Allow connection from specific subnets. Comma separated, default: *.*.*.*
     Whitelist which IPs can use the proxy. --hostonly overrides any definitions
     unless --gateway mode is also specified
@@ -253,7 +268,7 @@ Configuration:
     192.168.0.1-192.168.0.255 - ranges
     192.168.0.1/24 - CIDR
 
-  --noproxy=  proxy:noproxy=
+  --noproxy= | PX_NOPROXY= | proxy:noproxy=
   Direct connect to specific subnets or domains like a regular proxy. Comma separated
     Skip the NTLM proxy for connections to these hosts
     127.0.0.1 - specific ip
@@ -262,15 +277,15 @@ Configuration:
     192.168.0.1/24 - CIDR
     example.com - domains
 
-  --useragent=  proxy:useragent=
+  --useragent= | PX_USERAGENT= | proxy:useragent=
   Override or send User-Agent header on client's behalf
 
-  --username=  proxy:username=
-  Authentication to use when SSPI is unavailable. Format is domain\\username
+  --username= | PX_USERNAME= | proxy:username=
+  Authentication to use when SSPI is unavailable. Format is domain\username
   Service name "Px" and this username are used to retrieve the password using
   Python keyring if available.
 
-  --auth=  proxy:auth=
+  --auth= | PX_AUTH= | proxy:auth=
   Force instead of discovering upstream proxy type
     By default, Px will attempt to discover the upstream proxy type. This
     option can be used to force either NTLM, KERBEROS, DIGEST, BASIC or the
@@ -281,31 +296,31 @@ Configuration:
       Prefix SAFENO to avoid method - e.g. SAFENONTLM => ANYSAFE - NTLM
       Prefix ONLY to support only that method - e.g ONLYNTLM => ONLY + NTLM
 
-  --workers=  settings:workers=
+  --workers= | PX_WORKERS= | settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
 
-  --threads=  settings:threads=
+  --threads= | PX_THREADS= | settings:threads=
   Number of parallel threads per worker (process). Valid integer, default: 5
 
-  --idle=  settings:idle=
+  --idle= | PX_IDLE= | settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
 
-  --socktimeout=  settings:socktimeout=
+  --socktimeout= | PX_SOCKTIMEOUT= | settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid float, default: 20
 
-  --proxyreload=  settings:proxyreload=
+  --proxyreload= | PX_PROXYRELOAD= | settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60
     Proxy info reloaded from manual proxy info defined in Internet Options
 
-  --foreground  settings:foreground=
-  Run in foreground when frozen or with pythonw.exe. 0 or 1, default: 0
+  --foreground | PX_FOREGROUND= | settings:foreground=
+  Run in foreground when compiled or run with pythonw.exe. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 
   --verbose
-  Enable debug output. default: 0. Implies --foreground
+  Enable verbose output. default: 0. Implies --foreground
 
-  --debug  settings:log=
+  --debug | PX_LOG= | settings:log=
   Enable debug logging. default: 0
     Logs are written to working directory and over-written on startup
     A log is automatically created if Px crashes for some reason
@@ -370,6 +385,7 @@ the following Python packages:
 - [keyring](https://pypi.org/project/keyring/)
 - [netaddr](https://pypi.org/project/netaddr/)
 - [psutil](https://pypi.org/project/psutil/)
+- [dotenv](https://pypi.org/projects/python-dotenv/)
 - [quickjs](https://pypi.org/project/quickjs/)
 
 Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP

@@ -15,7 +15,7 @@ $LATEST = 11
 # Generate version list
 $PYVERSIONS = @()
 for ($i = $OLDEST; $i -le $LATEST; $i++) {
-    $PYVERSIONS += "$BASE." + $i
+    $PYVERSIONS += "$BASE" + $i
 }
 $PY = "python$BASE$LATEST"
 

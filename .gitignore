@@ -45,6 +45,8 @@ $RECYCLE.BIN/
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Px specific
 build/
 dist/
 px.build/
@@ -61,3 +63,4 @@ _*.stats
 *.dll
 *.log
 *.crt
+.env

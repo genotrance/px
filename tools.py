@@ -177,7 +177,7 @@ def get_curl():
 def wheel():
     rmtree("build wheel")
 
-    for args in ["--universal", "-p win32", "-p win-amd64"]:
+    for args in ["", "-p win32", "-p win-amd64"]:
         while True:
             rmtree("build")
             if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k %s" % args) == 0:
@@ -446,7 +446,7 @@ def depspkg():
     if sys.platform == "win32":
         whl += "-py3-none-win_amd64.whl"
     else:
-        whl += "-py2.py3-none-any.whl"
+        whl += "-py3-none-any.whl"
     shutil.copy(os.path.join("..", "wheel", whl), prefix)
 
     # Compress all wheels

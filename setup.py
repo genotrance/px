@@ -77,6 +77,7 @@ setup(
         "keyring",
         "netaddr",
         "psutil",
+        "python-dotenv",
         'quickjs==1.19.2;python_version=="3.7"',
         'quickjs'
     ],

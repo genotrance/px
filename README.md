@@ -150,6 +150,10 @@ If username is already defined in `px.ini`:
 
 Information on keyring backends can be found [here](https://pypi.org/project/keyring).
 
+As an alternative, Px can also load credentials from the environment variable
+`PX_PASSWORD` or a dotenv file. This is only recommended when keyring is not
+available.
+
 #### Windows
 
 Credential Manager is the recommended backend for Windows and the password is
@@ -171,9 +175,8 @@ If the default SecretService keyring backend does not work, a third-party
 required. Simply install and configure one and `keyring` will use it. Remember
 to specify the environment variables they require before starting Px.
 
-This will not work for the Nuitka binaries so as a fallback, Px can also load
-credentials from environment variables and dotenv files. This is only recommended
-when keyring is not available though.
+This will not work for the Nuitka binaries so as a fallback, `PX_PASSWORD` can
+be used instead to set credentials.
 
 ### Misc
 
@@ -216,7 +219,9 @@ Actions:
 
   --password
   Collect and save password to default keyring. Username needs to be provided
-  via --username or already specified in the config file
+  via --username, PX_USERNAME or in the config file.
+  As an alternative, Px can also load credentials from the environment variable
+  `PX_PASSWORD` or a dotenv file.
 
   --test=URL
   Test Px as configured with the URL specified. This can be used to confirm that

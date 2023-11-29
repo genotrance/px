@@ -17,14 +17,14 @@ import urllib.parse
 import warnings
 
 from .debug import pprint, Debug
+from .help import HELP
 from .version import __version__
 
 from . import mcurl
 from . import wproxy
 
 if sys.platform == "win32":
-    import ctypes
-    import winreg
+    from . import windows
 
 warnings.filterwarnings("ignore")
 
@@ -61,147 +61,6 @@ try:
 except ImportError:
     pprint("Requires module python-dotenv")
     sys.exit()
-
-HELP = f"""Px v{__version__}
-
-An HTTP proxy server to automatically authenticate through an NTLM proxy
-
-Usage:
-  px [FLAGS]
-  python px.py [FLAGS]
-  python -m px [FLAGS]
-
-Actions:
-  --save
-  Save configuration to file specified with --config or px.ini in working directory
-    Allows setting up Px config directly from command line
-    Values specified on CLI override any values in existing config file
-    Values not specified on CLI or config file are set to defaults
-
-  --install
-  Add Px to the Windows registry to run on startup
-
-  --uninstall
-  Remove Px from the Windows registry
-
-  --quit
-  Quit a running instance of Px.exe
-
-  --password
-  Collect and save password to default keyring. Username needs to be provided
-  via --username or already specified in the config file
-
-  --test=URL
-  Test Px as configured with the URL specified. This can be used to confirm that
-  Px is configured correctly and is able to connect and authenticate with the
-  upstream proxy.
-
-Configuration:
-  --config= | PX_CONFIG=
-  Specify config file. Valid file path, default: px.ini in working directory
-  or script directory
-
-  --proxy=  --server= | PX_SERVER= | proxy:server=
-  NTLM server(s) to connect through. IP:port, hostname:port
-    Multiple proxies can be specified comma separated. Px will iterate through
-    and use the one that works
-
-  --pac= | PX_PAC= | proxy:pac=
-  PAC file to use to connect
-    Use in place of --server if PAC file should be loaded from a URL or local
-    file. Relative paths will be relative to the Px script or binary
-
-  --pac_encoding= | PX_PAC_ENCODING= | proxy:pac_encoding=
-  PAC file encoding
-    Specify in case default 'utf-8' encoding does not work
-
-  --listen= | PX_LISTEN= | proxy:listen=
-  IP interface to listen on - default: 127.0.0.1
-
-  --port= | PX_PORT= | proxy:port=
-  Port to run this proxy on - default: 3128
-
-  --gateway | PX_GATEWAY= | proxy:gateway=
-  Allow remote machines to use proxy. 0 or 1, default: 0
-    Overrides 'listen' and binds to all interfaces
-
-  --hostonly | PX_HOSTONLY= | proxy:hostonly=
-  Allow only local interfaces to use proxy. 0 or 1, default: 0
-    Px allows all IP addresses assigned to local interfaces to use the service.
-    This allows local apps as well as VM or container apps to use Px when in a
-    NAT config. Px does this by listening on all interfaces and overriding the
-    allow list.
-
-  --allow= | PX_ALLOW= | proxy:allow=
-  Allow connection from specific subnets. Comma separated, default: *.*.*.*
-    Whitelist which IPs can use the proxy. --hostonly overrides any definitions
-    unless --gateway mode is also specified
-    127.0.0.1 - specific ip
-    192.168.0.* - wildcards
-    192.168.0.1-192.168.0.255 - ranges
-    192.168.0.1/24 - CIDR
-
-  --noproxy= | PX_NOPROXY= | proxy:noproxy=
-  Direct connect to specific subnets or domains like a regular proxy. Comma separated
-    Skip the NTLM proxy for connections to these hosts
-    127.0.0.1 - specific ip
-    192.168.0.* - wildcards
-    192.168.0.1-192.168.0.255 - ranges
-    192.168.0.1/24 - CIDR
-    example.com - domains
-
-  --useragent= | PX_USERAGENT= | proxy:useragent=
-  Override or send User-Agent header on client's behalf
-
-  --username= | PX_USERNAME= | proxy:username=
-  Authentication to use when SSPI is unavailable. Format is domain\\username
-  Service name "Px" and this username are used to retrieve the password using
-  Python keyring if available.
-
-  --auth= | PX_AUTH= | proxy:auth=
-  Force instead of discovering upstream proxy type
-    By default, Px will attempt to discover the upstream proxy type. This
-    option can be used to force either NTLM, KERBEROS, DIGEST, BASIC or the
-    other libcurl supported upstream proxy types. See:
-      https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html
-    To control which methods are available during proxy detection:
-      Prefix NO to avoid method - e.g. NONTLM => ANY - NTLM
-      Prefix SAFENO to avoid method - e.g. SAFENONTLM => ANYSAFE - NTLM
-      Prefix ONLY to support only that method - e.g ONLYNTLM => ONLY + NTLM
-
-  --workers= | PX_WORKERS= | settings:workers=
-  Number of parallel workers (processes). Valid integer, default: 2
-
-  --threads= | PX_THREADS= | settings:threads=
-  Number of parallel threads per worker (process). Valid integer, default: 5
-
-  --idle= | PX_IDLE= | settings:idle=
-  Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
-
-  --socktimeout= | PX_SOCKTIMEOUT= | settings:socktimeout=
-  Timeout in seconds for connections before giving up. Valid float, default: 20
-
-  --proxyreload= | PX_PROXYRELOAD= | settings:proxyreload=
-  Time interval in seconds before refreshing proxy info. Valid int, default: 60
-    Proxy info reloaded from manual proxy info defined in Internet Options
-
-  --foreground | PX_FOREGROUND= | settings:foreground=
-  Run in foreground when compiled or run with pythonw.exe. 0 or 1, default: 0
-    Px will attach to the console and write to it even though the prompt is
-    available for further commands. CTRL-C in the console will exit Px
-
-  --verbose
-  Enable verbose output. default: 0. Implies --foreground
-
-  --debug | PX_LOG= | settings:log=
-  Enable debug logging. default: 0
-    Logs are written to working directory and over-written on startup
-    A log is automatically created if Px crashes for some reason
-
-  --uniqlog
-  Generate unique log file names in current working directory
-    Prevents logs from being overwritten on subsequent runs. Also useful if
-    running multiple instances of Px"""
 
 class State:
     """Stores runtime state per process - shared across threads"""
@@ -245,6 +104,21 @@ def get_script_path():
 def get_script_dir():
     "Get directory of running script or compiled executable"
     return os.path.dirname(get_script_path())
+
+def get_script_cmd():
+    "Get command for starting Px"
+    spath = get_script_path()
+    if spath[-3:] == ".py":
+        if "__main__.py" in spath:
+            # Case "python -m px"
+            return sys.executable + ' -m px'
+        else:
+            # Case: "python px.py"
+            return sys.executable + ' "%s"' % spath
+
+    # Case: "px.exe" from pip
+    # Case: "px.exe" from nuitka
+    return spath
 
 # Debug shortcut
 dprint = lambda x: None
@@ -334,10 +208,20 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             pwd = None
             if len(State.username) != 0:
                 key = State.username
-                pwd = keyring.get_password("Px", key)
+                if "PX_PASSWORD" in os.environ:
+                    # Use environment variable PX_PASSWORD
+                    pwd = os.environ["PX_PASSWORD"]
+                else:
+                    # Use keyring to get password
+                    pwd = keyring.get_password("Px", key)
             if len(key) == 0:
-                dprint(self.curl.easyhash + ": Using SSPI to login")
-                key = ":"
+                if sys.platform == "win32":
+                    dprint(self.curl.easyhash + ": Using SSPI to login")
+                    key = ":"
+                else:
+                    dprint("SSPI not available and no username configured")
+                    self.send_error(501, "SSPI not available and no username configured")
+                    return
             self.curl.set_auth(user = key, password = pwd, auth = State.auth)
         else:
             dprint(self.curl.easyhash + ": Skipping auth proxying")
@@ -459,7 +343,7 @@ def print_banner():
     if sys.platform == "win32":
         if is_compiled() or "pythonw.exe" in sys.executable:
             if State.config.getint("settings", "foreground") == 0:
-                detach_console()
+                windows.detach_console(State, dprint)
 
     for section in State.config.sections():
         for option in State.config.options(section):
@@ -740,7 +624,10 @@ def test(testurl):
 
         # Quit Px
         p = psutil.Process(os.getpid())
-        p.send_signal(signal.SIGINT)
+        if sys.platform == "win32":
+            p.send_signal(signal.CTRL_C_EVENT)
+        else:
+            p.send_signal(signal.SIGINT)
 
     # Run testurl query in a thread
     t = threading.Thread(target = query)
@@ -769,6 +656,11 @@ def parse_cli():
         else:
             # --name
             flags[arg] = "1"
+
+    if "proxy" in flags:
+        # --proxy is synonym for --server
+        flags["server"] = flags["proxy"]
+        del flags["proxy"]
 
     return flags
 
@@ -802,7 +694,7 @@ def parse_config():
 
     if sys.platform == "win32":
         if is_compiled() or "pythonw.exe" in sys.executable:
-            attach_console()
+            windows.attach_console(State, dprint)
 
     if "-h" in sys.argv or "--help" in sys.argv:
         pprint(HELP)
@@ -861,7 +753,6 @@ def parse_config():
 
     # Default values for all keys
     defaults = {
-        "proxy": "",
         "server": "",
         "pac": "",
         "pac_encoding": "utf-8",
@@ -900,7 +791,7 @@ def parse_config():
     def cfg_init(name, val, override=False):
         callback = callbacks.get(name)
         # [proxy]
-        if name in ["proxy", "server", "pac", "pac_encoding", "listen", "allow", "noproxy",
+        if name in ["server", "pac", "pac_encoding", "listen", "allow", "noproxy",
                     "useragent", "username", "auth"]:
             cfg_str_init("proxy", name, val, callback, override)
         elif name in ["port", "gateway", "hostonly"]:
@@ -951,9 +842,9 @@ def parse_config():
 
     if sys.platform == "win32":
         if "--install" in sys.argv:
-            install()
+            windows.install(get_script_cmd())
         elif "--uninstall" in sys.argv:
-            uninstall()
+            windows.uninstall()
 
     if "--quit" in sys.argv:
         quit()
@@ -1068,141 +959,6 @@ def handle_exceptions(extype, value, tb):
         dbg = open(dfile(), 'w')
         dbg.write(tracelog)
         dbg.close()
-
-###
-# Install Px to startup
-
-if sys.platform == "win32":
-    def get_script_cmd():
-        spath = get_script_path()
-        if spath[-3:] == ".py":
-            if "__main__.py" in spath:
-                # Case "python -m px"
-                return sys.executable + ' -m px'
-            else:
-                # Case: "python px.py"
-                return sys.executable + ' "%s"' % spath
-
-        # Case: "px.exe" from pip
-        # Case: "px.exe" from nuitka
-        return spath
-
-    def check_installed():
-        ret = True
-        runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
-        try:
-            winreg.QueryValueEx(runkey, "Px")
-        except:
-            ret = False
-        winreg.CloseKey(runkey)
-
-        return ret
-
-    def install():
-        if check_installed() is False:
-            runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
-                winreg.KEY_WRITE)
-            winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ,
-                get_script_cmd())
-            winreg.CloseKey(runkey)
-            pprint("Px installed successfully")
-        else:
-            pprint("Px already installed")
-
-        sys.exit()
-
-    def uninstall():
-        if check_installed() is True:
-            runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
-                winreg.KEY_WRITE)
-            winreg.DeleteValue(runkey, "Px")
-            winreg.CloseKey(runkey)
-            pprint("Px uninstalled successfully")
-        else:
-            pprint("Px is not installed")
-
-        sys.exit()
-
-    ###
-    # Attach/detach console
-
-    def reopen_stdout():
-        """Reopen stdout after attaching to the console"""
-
-        clrstr = "\r" + " " * 80 + "\r"
-        if State.debug is None:
-            State.stdout = sys.stdout
-            sys.stdout = open("CONOUT$", "w")
-            sys.stdout.write(clrstr)
-        else:
-            State.stdout = State.debug.stdout
-            State.debug.stdout = open("CONOUT$", "w")
-            State.debug.stdout.write(clrstr)
-
-    def restore_stdout():
-        """Restore stdout before detaching from the console"""
-
-        if State.debug is None:
-            sys.stdout.close()
-            sys.stdout = State.stdout
-        else:
-            State.debug.stdout.close()
-            State.debug.stdout = State.stdout
-
-    def attach_console():
-        if ctypes.windll.kernel32.GetConsoleWindow() != 0:
-            dprint("Already attached to a console")
-            return
-
-        # Find parent cmd.exe if exists
-        pid = os.getpid()
-        while True:
-            try:
-                p = psutil.Process(pid)
-            except psutil.NoSuchProcess:
-                # No such parent - started without console
-                pid = -1
-                break
-
-            if os.path.basename(p.name()).lower() in [
-                    "cmd", "cmd.exe", "powershell", "powershell.exe"]:
-                # Found it
-                break
-
-            # Search parent
-            pid = p.ppid()
-
-        # Not found, started without console
-        if pid == -1:
-            dprint("No parent console to attach to")
-            return
-
-        dprint("Attaching to console " + str(pid))
-        if ctypes.windll.kernel32.AttachConsole(pid) == 0:
-            dprint("Attach failed with error " +
-                str(ctypes.windll.kernel32.GetLastError()))
-            return
-
-        if ctypes.windll.kernel32.GetConsoleWindow() == 0:
-            dprint("Not a console window")
-            return
-
-        reopen_stdout()
-
-    def detach_console():
-        if ctypes.windll.kernel32.GetConsoleWindow() == 0:
-            return
-
-        restore_stdout()
-
-        if not ctypes.windll.kernel32.FreeConsole():
-            dprint("Free console failed with error " +
-                str(ctypes.windll.kernel32.GetLastError()))
-        else:
-            dprint("Freed console successfully")
 
 ###
 # Startup

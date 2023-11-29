@@ -375,13 +375,14 @@ else
             IMAGE="opensuse/tumbleweed opensuse/leap:15.1"
         fi
 
+        # Forward any commands to test.py
+        if [ ! -z "$SUBCOMMAND" ]; then
+            SUBCOMMAND="-s \"$SUBCOMMAND\""
+        fi
+
         # Test on each image
         for image in $IMAGE
         do
-            # Forward any commands to test.py
-            if [ ! -z "$SUBCOMMAND" ]; then
-                SUBCOMMAND="-s \"$SUBCOMMAND\""
-            fi
             $DOCKERCMD $image /px/build.sh -t "$SUBCOMMAND"
         done
     else

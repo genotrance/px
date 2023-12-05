@@ -525,7 +525,7 @@ def set_auth(auth):
 
 def set_debug(val = "1"):
     global dprint
-    if State.debug is None:
+    if State.debug is None and val == "1":
         State.debug = Debug(dfile(), "w")
         dprint = State.debug.get_print()
 

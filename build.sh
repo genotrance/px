@@ -328,7 +328,7 @@ else
     GLIBC="quay.io/pypa/manylinux2014_$ARCH"
 
     DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share \
-                -e PROXY=\"$PROXY\" -e PAC=\"$PAC\" -e USERNAME=\"$USERNAME\""
+                -e PROXY=$PROXY -e PAC=$PAC -e USERNAME=$USERNAME"
 
     if [ "$BUILD" = "yes" ]; then
         # Which image to load

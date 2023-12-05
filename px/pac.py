@@ -44,24 +44,27 @@ class Pac:
         try:
             self.ctxt.eval(text)
         except quickjs.JSException as exc:
-            dprint("PAC file parsing failed - syntax error or file not encoded in " + pac_encoding)
+            dprint(f"PAC file parsing failed - syntax error or file not encoded in {pac_encoding}")
             dprint("Use --pac_encoding or proxy:pac_encoding in px.ini to change")
             raise exc
 
     def load_jsfile(self, jsfile, pac_encoding):
         "Load specified JS file into this context"
-        dprint("Loading PAC file: " + jsfile)
+        dprint(f"Loading PAC file: {jsfile}")
         with open(jsfile, "rb") as js:
             self.load(js.read(), pac_encoding)
 
     def load_url(self, jsurl, pac_encoding):
-        dprint("Loading PAC url: " + jsurl)
+        dprint(f"Loading PAC url: {jsurl}")
         c = Curl(jsurl)
         c.set_debug()
         c.buffer()
         c.set_follow()
-        if c.perform():
+        ret = c.perform()
+        if ret == 0:
             self.load(c.get_data(None), pac_encoding)
+        else:
+            dprint(f"Failed to load PAC url: {jsurl}\n{ret}, {c.errstr}")
 
     def find_proxy_for_url(self, url, host):
         """

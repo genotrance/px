@@ -25,8 +25,11 @@ Build both wheels and nuita binaries for glibc and musl for Python 3.11
 Run test across all distros
 ./build.sh -t
 
-Run SHELL on specific container
+Run build.sh on specific container
 ./build.sh -i IMAGE
+
+Run command on specific container
+./build.sh -i IMAGE -s command
 "
 
 OS=`uname -s`
@@ -78,6 +81,20 @@ if [ -z "$USERNAME" ]; then
     exit
 fi
 
+# Venv related
+VPATH="import sys; print('py' + sys.version.split()[0])"
+
+setup_venv() {
+    VENV=$HOME/`$1 -c "$VPATH"`
+    $1 -m venv $VENV
+    . $VENV/bin/activate
+}
+
+activate_venv() {
+    VENV=$HOME/`$1 -c "$VPATH"`
+    . $VENV/bin/activate
+}
+
 if [ -f "/.dockerenv" ]; then
     # Running inside container
 
@@ -123,7 +140,6 @@ if [ -f "/.dockerenv" ]; then
         if [ "$PY" = "python3" ]; then
             # Not manylinux / musllinux
             apk add python3
-            $PY -m ensurepip
             if [ "$BUILD" = "yes" ]; then
                 apk add python3-dev
             fi
@@ -149,7 +165,6 @@ if [ -f "/.dockerenv" ]; then
         if [ "$PY" = "python3" ]; then
             # Not manylinux / musllinux
             yum install -y python3
-            $PY -m ensurepip
             if [ "$BUILD" = "yes" ]; then
                 yum install -y python3-devel
             fi
@@ -163,30 +178,35 @@ if [ -f "/.dockerenv" ]; then
     elif [ "$DISTRO" = "ubuntu" ] || [ "$DISTRO" = "debian" ] || [ "$DISTRO" = "linuxmint" ]; then
 
         apt update -y && apt upgrade -y
-        apt install -y curl dbus gnome-keyring psmisc python3 python3-pip
-
+        apt install -y curl dbus gnome-keyring psmisc python3 python3-venv
+        
         export AUTH="--auth=NONEGOTIATE"
 
     elif [ "$DISTRO" = "opensuse-tumbleweed" ] || [ "$DISTRO" = "opensuse-leap" ]; then
 
         zypper -n update
-        zypper -n install curl dbus-1 gnome-keyring psmisc python3 python3-pip
-
+        zypper -n install curl dbus-1 gnome-keyring psmisc python3
         export AUTH="--auth=NONEGOTIATE"
 
     elif [ "$DISTRO" = "void" ]; then
 
         xbps-install -Suy xbps
         xbps-install -Sy curl dbus gnome-keyring psmisc python3
-        $PY -m ensurepip
 
         SHELL="sh"
+
+    elif [ "$DISTRO" = "arch" ] || [ "$DISTRO" = "manjaro" ]; then
+
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm gnome-keyring python3
 
     else
         echo "Unknown distro $DISTRO"
         $SHELL
         exit
     fi
+
+    setup_venv $PY
 
     if [ -z "$BUILD" ]; then
         # For test and SHELL only - start dbus and gnome-keyring
@@ -211,11 +231,14 @@ if [ -f "/.dockerenv" ]; then
                     fi
                 fi
 
+                # Setup venv for this Python version
+                setup_venv $pyver/bin/python3
+
                 # Install tools
-                $pyver/bin/python3 -m pip install --upgrade pip setuptools build wheel
+                python3 -m pip install --upgrade pip setuptools build wheel
 
                 # Build dependency wheels
-                $pyver/bin/python3 tools.py --deps
+                python3 tools.py --deps
             done
 
             # If no wheels generated, exit
@@ -225,26 +248,32 @@ if [ -f "/.dockerenv" ]; then
                 exit
             fi
 
+            # Reactivate default Python version
+            activate_venv $PY
+
             # Install tools
-            $PY -m pip install --upgrade auditwheel
+            python3 -m pip install --upgrade auditwheel
+
+            # Create any wheel if not already
+            python3 tools.py --wheel
 
             # Package all wheels
-            $PY tools.py --depspkg
+            python3 tools.py --depspkg
         fi
 
         if [ "$NUITKA" = "yes" ]; then
             # Install tools
-            $PY -m pip install --upgrade pip setuptools build wheel
-            $PY -m pip install --upgrade nuitka
+            python3 -m pip install --upgrade pip setuptools build wheel
+            python3 -m pip install --upgrade nuitka
 
             # Install wheel dependencies
-            $PY -m pip install px-proxy --no-index -f $WHEELS --break-system-packages
+            python3 -m pip install px-proxy --no-index -f $WHEELS
 
             # Build Nuitka binary
-            $PY tools.py --nuitka
+            python3 tools.py --nuitka
         fi
     else
-        $PY -m pip install --upgrade pip
+        python3 -m pip install --upgrade pip
 
         if [ "$TEST" = "yes" ]; then
             if [ ! -d "$WHEELS" ]; then
@@ -254,14 +283,14 @@ if [ -f "/.dockerenv" ]; then
             fi
 
             # Install wheel dependencies
-            $PY -m pip install px-proxy --no-index -f $WHEELS --break-system-packages
+            python3 -m pip install px-proxy --no-index -f $WHEELS
 
             # Run tests
-            $PY test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
+            python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
         else
             if [ -d "$WHEELS" ]; then
                 # Install Px dependencies if available
-                $PY -m pip install px-proxy --no-index -f $WHEELS --break-system-packages
+                python3 -m pip install px-proxy --no-index -f $WHEELS
             fi
 
             # Start shell
@@ -399,7 +428,11 @@ else
             IMAGE="$GLIBC"
         fi
 
-        $DOCKERCMD $IMAGE /px/build.sh
+        if [ -z "$SUBCOMMAND" ]; then
+            $DOCKERCMD $IMAGE /px/build.sh
+        else
+            $DOCKERCMD $IMAGE $SUBCOMMAND
+        fi
     fi
 
 fi

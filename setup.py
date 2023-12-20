@@ -25,7 +25,7 @@ if "bdist_wheel" in sys.argv:
     dll = ""
     if "win32" in sys.argv:
         dll = "libcurl.dll"
-    elif "win-amd64" in sys.argv:
+    elif "win_amd64" in sys.argv:
         dll = "libcurl-x64.dll"
 
     if len(dll) != 0:

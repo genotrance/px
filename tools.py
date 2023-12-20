@@ -176,14 +176,19 @@ def get_curl():
 # Build
 
 def wheel():
-    rmtree("build wheel")
+    # Wheels to create - any, win32, win_amd64
+    platforms = ["any"]
+    if sys.platform == "win32":
+        platforms += ["win32", "win_amd64"]
 
-    for args in ["", "-p win32", "-p win-amd64"]:
-        while True:
-            rmtree("build")
-            if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k %s" % args) == 0:
-                break
-            time.sleep(0.5)
+    for platform in platforms:
+        rmtree("build px_proxy.egg-info")
+        whls = glob.glob(f"wheel/*{platform}.whl")
+        for whl in whls:
+            os.remove(whl)
+        if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k -p " + platform) != 0:
+            print("Failed to build wheel for " + platform)
+            sys.exit()
 
     # Check wheels
     os.system(sys.executable + " -m twine check wheel/*")

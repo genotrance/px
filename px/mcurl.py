@@ -71,9 +71,37 @@ def getauth(auth):
 
     return authval
 
+def cache_auth(curl, msg):
+    "Find and cache proxy auth mechanism from headers sent by libcurl"
+    if curl.proxy in MCURL.proxytype:
+        # Already cached
+        return True
+
+    if msg.startswith("Proxy-Authorization:"):
+        # Cache auth mechanism from proxy headers
+        proxytype = msg.split(" ")[1].upper()        
+        MCURL.proxytype[curl.proxy] = proxytype
+        dprint(f"{curl.easyhash}: Caching proxy auth mechanism for {curl.proxy} as {proxytype}")
+
+        # Cached
+        return True
+
+    # Not yet cached
+    return False
+
 # Active thread running callbacks can print debug output for any other
 # thread's easy - cannot assume it is for this thread. All dprint()s
 # include easyhash to correlate instead
+
+def yield_msgs(data, size):
+    "Generator for curl debug messages"
+    msgs = bytes(data[:size]).decode("utf-8").strip()
+    if "\r\n" in msgs:
+        for msg in msgs.split("\r\n"):
+            if len(msg) != 0:
+                yield msg
+    elif len(msgs) != 0:
+        yield msgs
 
 @libcurl.debug_callback
 def _debug_callback(easy, infotype, data, size, userp):
@@ -81,6 +109,7 @@ def _debug_callback(easy, infotype, data, size, userp):
 
     del userp
     easyhash = gethash(easy)
+    curl = MCURL.handles[easyhash]
     if infotype == libcurl.CURLINFO_TEXT:
         prefix = easyhash + ": Curl info: "
     elif infotype == libcurl.CURLINFO_HEADER_IN:
@@ -90,14 +119,26 @@ def _debug_callback(easy, infotype, data, size, userp):
     else:
         return libcurl.CURLE_OK
 
-    msgs = bytes(data[:size]).decode("utf-8").strip()
-    if "\r\n" in msgs:
-        for msg in msgs.split("\r\n"):
-            if len(msg) != 0:
-                dprint(prefix + sanitized(msg))
-    else:
-        if len(msgs) != 0:
-            dprint(prefix + sanitized(msgs))
+    for msg in yield_msgs(data, size):
+        dprint(prefix + sanitized(msg))
+        if infotype == libcurl.CURLINFO_HEADER_OUT:
+            cache_auth(curl, msg)
+
+    return libcurl.CURLE_OK
+
+@libcurl.debug_callback
+def _auth_callback(easy, infotype, data, size, userp):
+    "curl debug callback to get proxy auth mechanism from sent headers"
+
+    del userp
+    easyhash = gethash(easy)
+    curl = MCURL.handles[easyhash]
+    if infotype == libcurl.CURLINFO_HEADER_OUT:
+        # If sent header
+        for msg in yield_msgs(data, size):
+            if cache_auth(curl, msg):
+                # Ignore rest of headers since auth (already) cached
+                break
 
     return libcurl.CURLE_OK
 
@@ -208,6 +249,7 @@ class Curl:
 
     # Status
     done = False
+    cerr = libcurl.CURLE_OK
     errstr = ""
     resp = 503
     sentheaders = False
@@ -285,6 +327,9 @@ class Curl:
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_VERSION,
             getattr(libcurl, "CURL_HTTP_VERSION_" + version))
 
+        # Debug callback default disabled
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, None)
+
     def reset(self, url, method = "GET", request_version = "HTTP/1.1", connect_timeout = 60):
         "Reuse existing curl instance for another request"
         dprint(self.easyhash + ": Resetting curl")
@@ -298,6 +343,7 @@ class Curl:
         self.user = None
         self.auth = None
         self.done = False
+        self.cerr = libcurl.CURLE_OK
         self.errstr = ""
         self.resp = 503
         self.sentheaders = False
@@ -362,7 +408,7 @@ class Curl:
         return True
 
     def set_auth(self, user, password = None, auth = "ANY"):
-        "Set authentication info"
+        "Set authentication info - call after set_proxy() to enable auth caching"
         if user == ":":
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYUSERPWD, user.encode("utf-8"))
         else:
@@ -373,9 +419,19 @@ class Curl:
             else:
                 dprint(self.easyhash + ": Blank password for user")
         if auth is not None:
-            self.auth = auth
+            if self.proxy in MCURL.proxytype:
+                # Use cached value
+                self.auth = MCURL.proxytype[self.proxy]
+                dprint(f"{self.easyhash}: Using cached proxy auth mechanism {self.auth}")
+            else:
+                # Use specified value
+                self.auth = auth
+                dprint(f"{self.easyhash}: Setting proxy auth mechanism to {self.auth}")
 
-            authval = getauth(auth)
+                # Discover and cache what libcurl uses
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _auth_callback)
+
+            authval = getauth(self.auth)
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYAUTH, authval)
 
     def set_headers(self, xheaders):
@@ -414,12 +470,15 @@ class Curl:
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_VERBOSE, enable)
 
     def set_debug(self, enable = True):
-        "Enable debug output"
+        """
+        Enable debug output
+          Call after set_proxy() and set_auth() to enable discovery and caching of proxy
+          auth mechanism - libcurl does not provide an API to get this today - need to
+          find it in sent header debug output
+        """
         self.set_verbose(enable)
         if enable:
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _debug_callback)
-        else:
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, None)
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _debug_callback)       
 
     def bridge(self, client_rfile = None, client_wfile = None, client_hfile = None):
         """
@@ -509,11 +568,11 @@ class Curl:
         # Perform as a standalone easy handle, not using multi
         # However, add easyhash to MCURL.handles since it is used in curl callbacks
         MCURL.handles[self.easyhash] = self
-        ret = libcurl.easy_perform(self.easy)
-        if ret != libcurl.CURLE_OK:
-            dprint(self.easyhash + ": Connection failed: " + str(ret) + " - " + self.errstr)
+        self.cerr = libcurl.easy_perform(self.easy)
+        if self.cerr != libcurl.CURLE_OK:
+            dprint(self.easyhash + ": Connection failed: " + str(self.cerr) + "; " + self.errstr)
         MCURL.handles.pop(self.easyhash)
-        return ret
+        return self.cerr
 
 @libcurl.socket_callback
 def _socket_callback(easy, sock_fd, ev_bitmask, userp, socketp):
@@ -610,6 +669,7 @@ class MCurl:
 
         # Init
         self.handles = {}
+        self.proxytype = {}
         self.failed = []
         self.rlist = []
         self.wlist = []
@@ -651,6 +711,7 @@ class MCurl:
                 curl.done = True
 
                 if msg.data.result != libcurl.CURLE_OK:
+                    curl.cerr = msg.data.result
                     curl.errstr = str(msg.data.result) + "; "
 
     # Adding to multi
@@ -750,19 +811,27 @@ class MCurl:
         if curl.proxy is not None:
             ret, codep = curl.get_response()
             if ret == 0 and codep == 407:
-                # Proxy auth did not work for whatever reason
-                out = "Proxy authentication failed: "
-                if curl.user is not None:
-                    out += "check user/password or try different auth mechanism"
+                if curl.cerr == libcurl.CURLE_SEND_FAIL_REWIND:
+                    # Issue #199 - POST/PUT rewind not supported
+                    out = "POST/PUT rewind not supported (#199)"
+
+                    # Retry since proxy auth not cached yet
+                    curl.resp = 503
                 else:
-                    out += "single sign-on failed, user/password might be required"
+                    # Proxy auth did not work for whatever reason
+                    out = "Proxy authentication failed: "
+                    if curl.user is not None:
+                        out += "check user/password or try different auth mechanism"
+                    else:
+                        out += "single sign-on failed, user/password might be required"
+
+                    curl.resp = 401
+
+                    # Add this proxy to failed list and don't try again
+                    with self._lock:
+                        self.failed.append(curl.proxy)
 
                 curl.errstr += out + "; "
-                curl.resp = 401
-
-                # Add this proxy to failed list and don't try again
-                with self._lock:
-                    self.failed.append(curl.proxy)
 
         if curl.is_connect() and curl.sock_fd is None:
             # Need sock_fd for select()

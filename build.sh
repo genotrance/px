@@ -96,7 +96,7 @@ if [ -f "/.dockerenv" ]; then
     export AUTH=""
 
     # Pick latest-1 python if manylinux / musllinux
-    export PY="/opt/python/`ls -v /opt/python | tail -n 2 | head -n 1`/bin/python3"
+    export PY="/opt/python/`ls -v /opt/python | grep cp | tail -n 2 | head -n 1`/bin/python3"
 
     # Adjust Python version if specified with -v
     if [ ! -z "$PYVERSION" ]; then
@@ -113,7 +113,7 @@ if [ -f "/.dockerenv" ]; then
     # Python not found - default - will be installed if needed
     if [ ! -f "$PY" ]; then
         export PY="python3"
-        echo "Using `python3 -V` - not manylinux / musllinux"
+        echo "Using distro Python - not manylinux / musllinux"
     fi
 
     if [ "$DISTRO" = "alpine" ]; then
@@ -189,8 +189,9 @@ if [ -f "/.dockerenv" ]; then
     fi
 
     if [ -z "$BUILD" ]; then
-        # For test and SHELL only
-        dbus-run-session -- $SHELL -c 'echo "abc" | gnome-keyring-daemon --unlock'
+        # For test and SHELL only - start dbus and gnome-keyring
+        export DBUS_SESSION_BUS_ADDRESS=`dbus-daemon --fork --config-file=/usr/share/dbus-1/session.conf --print-address`
+        echo "abc" | gnome-keyring-daemon --unlock
     fi
 
     cd /px
@@ -224,6 +225,9 @@ if [ -f "/.dockerenv" ]; then
                 exit
             fi
 
+            # Install tools
+            $PY -m pip install --upgrade auditwheel
+
             # Package all wheels
             $PY tools.py --depspkg
         fi
@@ -234,7 +238,7 @@ if [ -f "/.dockerenv" ]; then
             $PY -m pip install --upgrade nuitka
 
             # Install wheel dependencies
-            $PY -m pip install px-proxy --no-index -f $WHEELS
+            $PY -m pip install px-proxy --no-index -f $WHEELS --break-system-packages
 
             # Build Nuitka binary
             $PY tools.py --nuitka
@@ -250,14 +254,14 @@ if [ -f "/.dockerenv" ]; then
             fi
 
             # Install wheel dependencies
-            $PY -m pip install px-proxy --no-index -f $WHEELS
+            $PY -m pip install px-proxy --no-index -f $WHEELS --break-system-packages
 
             # Run tests
             $PY test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
         else
             if [ -d "$WHEELS" ]; then
                 # Install Px dependencies if available
-                $PY -m pip install px-proxy --no-index -f $WHEELS
+                $PY -m pip install px-proxy --no-index -f $WHEELS --break-system-packages
             fi
 
             # Start shell

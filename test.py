@@ -174,7 +174,8 @@ def runTest(test, cmd, offset, port):
         # Multiple tests in parallel, each on their own port
         port += offset
 
-    cmd += "--debug --uniqlog --port=%d %s" % (port, test[0])
+    if "--nodebug" not in sys.argv:
+        cmd += "--debug --uniqlog --port=%d %s" % (port, test[0])
 
     testproc = test[1]
     data = test[2]
@@ -428,13 +429,13 @@ def socketTestSetup():
 
 def auto():
     prefix = "px.dist"
-    osname, _, dist = tools.get_dirs(prefix)
+    osname, machine, _, dist = tools.get_dirs(prefix)
     if "--norun" not in sys.argv:
         if sys.platform == "linux":
             _, distro = exec("cat /etc/os-release | grep ^ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
             _, version = exec("cat /etc/os-release | grep ^VERSION_ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
             osname += "-%s-%s" % (distro.strip(), version.strip())
-        testdir = "test-%s-%d-%s" % (osname, PORT, platform.machine().lower())
+        testdir = "test-%s-%d-%s" % (osname, PORT, machine)
 
         # Make temp directory
         while os.path.exists(testdir):
@@ -458,7 +459,7 @@ def auto():
         socketTestSetup()
     if "--noproxy" not in sys.argv:
         for proxyarg in getproxyargs():
-            TESTS.append((proxyarg + " --workers=2", httpTest, None))
+            TESTS.append((proxyarg + " --workers=1", httpTest, None))
             if "--nonoproxy" not in sys.argv and len(proxyarg) != 0:
                 TESTS.append((proxyarg + " --workers=2 --threads=30 --noproxy=*.*.*.*", httpTest, None))
 
@@ -491,7 +492,7 @@ def auto():
 
         # Install Px
         prefix = "px.dist-wheels"
-        _, _, wdist = tools.get_dirs(prefix)
+        _, _, _, wdist = tools.get_dirs(prefix)
         cmd = sys.executable + " -m pip install --upgrade px-proxy --no-index -f ../" + wdist
         ret, data = exec(cmd)
         if ret != 0:
@@ -611,6 +612,9 @@ def main():
 
     --noquit
         Skip --quit tests
+
+    --nodebug
+        Run without turning on --debug
 
     --workers=4
         Number of parallel tests to run

@@ -89,10 +89,11 @@ def get_os():
 
 def get_dirs(prefix):
     osname = get_os()
-    outdir = "%s-%s-%s" % (prefix, osname, platform.machine().lower())
+    machine = platform.machine().lower()
+    outdir = "%s-%s-%s" % (prefix, osname, machine)
     dist = os.path.join(outdir, prefix)
 
-    return osname, outdir, dist
+    return osname, machine, outdir, dist
 
 # URL
 
@@ -190,7 +191,7 @@ def wheel():
     rmtree("build px_proxy.egg-info")
 
 def pyinstaller():
-    _, dist, _ = get_dirs("pyinst")
+    _, _, dist, _ = get_dirs("pyinst")
     rmtree("build dist " + dist)
 
     os.system("pyinstaller --clean --noupx -w px.py --collect-submodules win32ctypes")
@@ -203,7 +204,7 @@ def pyinstaller():
 
 def nuitka():
     prefix = "px.dist"
-    osname, outdir, dist = get_dirs(prefix)
+    osname, machine, outdir, dist = get_dirs(prefix)
     rmtree(outdir)
 
     # Build
@@ -235,7 +236,7 @@ def nuitka():
 
     # Create archive
     os.chdir("..")
-    archfile = "px-v%s-%s" % (__version__, osname)
+    archfile = "px-v%s-%s-%s" % (__version__, osname, machine)
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"
@@ -271,14 +272,14 @@ def get_pip(executable = sys.executable):
 def embed():
     # Get wheels path
     wprefix = "px.dist-wheels"
-    _, _, wdist = get_dirs(wprefix)
+    _, _, _, wdist = get_dirs(wprefix)
     if not os.path.exists(wdist):
         print(f"Wheels not found at {wdist}, required to embed")
         sys.exit()
 
     # Destination path
     prefix = "px.dist"
-    osname, outdir, dist = get_dirs(prefix)
+    osname, machine, outdir, dist = get_dirs(prefix)
     rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
 
@@ -373,7 +374,7 @@ def embed():
 
     # Create archive
     os.chdir("..")
-    archfile = "px-v%s-%s" % (__version__, osname)
+    archfile = "px-v%s-%s-%s" % (__version__, osname, machine)
     arch = "zip"
     shutil.make_archive(archfile, arch, prefix)
 
@@ -388,7 +389,7 @@ def embed():
 
 def deps():
     prefix = "px.dist-wheels"
-    _, outdir, dist = get_dirs(prefix)
+    _, _, outdir, dist = get_dirs(prefix)
     if "--force" in sys.argv:
         rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
@@ -398,40 +399,24 @@ def deps():
 
 def depspkg():
     prefix = "px.dist-wheels"
-    osname, outdir, dist = get_dirs(prefix)
+    osname, machine, outdir, dist = get_dirs(prefix)
 
     if sys.platform == "linux":
-        # Use strings on Linux to reduce wheel size
-        #   Not effective on Windows
+        # Use auditwheel to include libraries and --strip
+        #   auditwheel not relevant and --strip not effective on Windows
         os.chdir(dist)
-
+        
+        rmtree("wheelhouse")
         for whl in glob.glob("*.whl"):
-            size = os.stat(whl).st_size
-            wdir = os.path.basename(whl[:-4])
-            os.system(sys.executable + " -m zipfile -e " + whl + " " + wdir)
+            if machine not in whl:
+                # Not platform specific wheel
+                continue
 
-            os.chdir(wdir)
-            processed = False
-            for so in glob.glob("**/*.so", recursive = True):
-                processed = True
-                strip = os.system("strip -s " + so)
-                if strip != 0:
-                    processed = False
-                    break
-
-            os.chdir("..")
-
-            if processed:
-                os.system(sys.executable + " -m zipfile -c " + whl + ".new " + wdir + "/*")
-                new_size = os.stat(whl + ".new").st_size
-                if new_size < size:
-                    print("%s: size changed from %d to %d" % (whl, size, new_size))
-                    os.remove(whl)
-                    os.rename(whl + ".new", whl)
-                else:
-                    os.remove(whl + ".new")
-
-            rmtree(wdir)
+            if os.system(f"auditwheel repair --strip {whl}") == 0:
+                os.remove(whl)
+                for fwhl in glob.glob("wheelhouse/*.whl"):
+                    os.rename(fwhl, os.path.basename(fwhl))
+            rmtree("wheelhouse")
 
         os.chdir("..")
     else:
@@ -450,7 +435,7 @@ def depspkg():
     shutil.copy(os.path.join("..", "wheel", whl), prefix)
 
     # Compress all wheels
-    archfile = "px-v%s-%s-wheels" % (__version__, osname)
+    archfile = "px-v%s-%s-%s-wheels" % (__version__, osname, machine)
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"

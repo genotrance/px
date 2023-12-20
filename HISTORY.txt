@@ -12,6 +12,10 @@ v0.9.0
 - Added support to load Px flags from environment variables and dotenv files
 - Changed loading order of px.ini - from CLI flag first, environment next,
   working directory and finally from the Px directory
+- Fixed #200 - print debug messages when --gateway or --hostonly overrides
+  listen and allow rules
+- Fixed #199 - cache auth mechanism that libcurl discovers and uses with
+  upstream proxy - speeds up transactions and avoids POST/PUT rewind issue
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

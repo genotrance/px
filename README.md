@@ -144,7 +144,7 @@ Credentials can be setup with the command line:
 
 	px --username=domain\username --password
 
-If username is already defined in `px.ini`:
+If username is already defined with `PX_USERNAME` or in `px.ini`:
 
 	px --password
 
@@ -166,9 +166,19 @@ Credential Manager can be accessed as follows:
 
 #### Linux
 
-Gnome Keyring or KWallet is used to store passwords on Linux. For systems without
-a GUI (headless, docker), refer to these [instructions](https://github.com/jaraco/keyring#using-keyring-on-headless-linux-systems-in-a-docker-container)
-to start the SecretService backend.
+Gnome Keyring or KWallet is used to store passwords on Linux.
+
+For systems without a GUI (headless, docker), D-Bus can be started interactively:
+
+	dbus-run-session -- sh
+
+If this needs to be done in a script:
+
+	export DBUS_SESSION_BUS_ADDRESS=`dbus-daemon --fork --config-file=/usr/share/dbus-1/session.conf --print-address`
+
+Gnome Keyring can then be unlocked as follows:
+
+	echo 'somecredstorepass' | gnome-keyring-daemon --unlock
 
 If the default SecretService keyring backend does not work, a third-party
 [backend](https://github.com/jaraco/keyring#third-party-backends) might be

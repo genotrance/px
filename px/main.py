@@ -186,7 +186,6 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self.curl = mcurl.Curl(self.path, self.command, self.request_version, State.socktimeout)
         else:
             self.curl.reset(self.path, self.command, self.request_version, State.socktimeout)
-        self.curl.set_debug()
 
         dprint(self.curl.easyhash + ": Path = " + self.path)
         ipport = self.get_destination()
@@ -225,6 +224,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self.curl.set_auth(user = key, password = pwd, auth = State.auth)
         else:
             dprint(self.curl.easyhash + ": Skipping auth proxying")
+
+        # Set debug mode
+        self.curl.set_debug(State.debug is not None)
 
         # Plain HTTP can be bridged directly
         if not self.curl.is_connect():
@@ -818,9 +820,14 @@ def parse_config():
     # Dependency propagation
 
     # If gateway mode
-    if State.config.getint("proxy", "gateway") == 1:
+    gateway = State.config.getint("proxy", "gateway")
+    allow = State.config.get("proxy", "allow")
+    if gateway == 1:
         # Listen on all interfaces
         cfg_str_init("proxy", "listen", "", None, True)
+        dprint("Gateway mode - overriding 'listen' and binding to all interfaces")
+        if allow in ["*.*.*.*", "0.0.0.0/0"]:
+            dprint("Configure 'allow' to restrict access to trusted subnets")
 
     # If hostonly mode
     if State.config.getint("proxy", "hostonly") == 1:
@@ -828,14 +835,14 @@ def parse_config():
 
         # Listen on all interfaces
         cfg_str_init("proxy", "listen", "", None, True)
+        dprint("Host-only mode - overriding 'listen' and binding to all interfaces")
+        dprint("Px will automatically restrict access to host interfaces")
 
         # If not gateway mode or gateway with default allow rules
-        if (State.config.getint("proxy", "gateway") == 0 or
-                (State.config.getint("proxy", "gateway") == 1 and
-                 State.config.get("proxy", "allow") in [
-                    "*.*.*.*", "0.0.0.0/0"])):
+        if (gateway == 0 or (gateway == 1 and allow in ["*.*.*.*", "0.0.0.0/0"])):
             # Purge allow rules
             cfg_str_init("proxy", "allow", "", parse_allow, True)
+            dprint("Removing default 'allow' everyone rule")
 
     ###
     # Handle actions

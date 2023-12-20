@@ -24,10 +24,29 @@ if ($null -eq (Get-Command "scoop" -ErrorAction SilentlyContinue)) {
 # Delete depspkg directory
 Remove-Item -Recurse -Force px.dist-wheels-windows-amd64 -ErrorAction SilentlyContinue
 
+# Install latest Python
+if ($null -eq (Get-Command "python" -ErrorAction SilentlyContinue)) {
+    # Install Python
+    scoop install python
+} else {
+    # Upgrade Python
+    scoop update python
+}
+
+# Get latest minor version
+$LATEST = (Invoke-Expression "python -c 'import sys; print(sys.version_info[1])'")
+
+# Check MINOR is valid
+if ($MINOR -ne -1 -and (($MINOR -gt $LATEST) -or ($MINOR -lt $OLDEST))) {
+    Write-Host "Invalid minor version specified: $MINOR"
+    Write-Host "Valid versions: $OLDEST - $LATEST"
+    exit 1
+}
+
 # Setup Python and dependencies, build wheels for Px
 $pyver = ""
 $count = $OLDEST
-while ($true) {
+while ($count -le $LATEST) {
     if ($MINOR -ne -1) {
         # Minor specified - skip other versions
         if ($count -lt $MINOR) {
@@ -40,18 +59,18 @@ while ($true) {
         }
     }
 
-    $pyver = "$MAJOR$count"
-    if ($null -eq (Get-Command "python$pyver" -ErrorAction SilentlyContinue)) {
-        # Install Python
-        scoop install python$pyver
-        if ($? -eq $false) {
-            # Scoop install failed, reached latest version
-            $pyver = ""
-            if ($null -eq (Get-Command "python$pyver" -ErrorAction SilentlyContinue)) {
-                # Install Python
-                scoop install python$pyver
-            }
+    # Install / upgrade if not latest (done earlier)
+    if ($count -ne $LATEST) {
+        $pyver = "$MAJOR$count"
+        if ($null -eq (Get-Command "python$pyver" -ErrorAction SilentlyContinue)) {
+            # Install Python
+            scoop install python$pyver
+        } else {
+            # Upgrade Python
+            scoop update python$pyver
         }
+    } else {
+        $pyver = ""
     }
 
     # Tools
@@ -66,6 +85,9 @@ while ($true) {
     }
     $count += 1
 }
+
+# Make latest Python the default
+Invoke-Expression "scoop reset python"
 
 # Install build tools
 Invoke-Expression "python$pyver -m pip install --upgrade twine"

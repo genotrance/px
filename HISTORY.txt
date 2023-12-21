@@ -18,6 +18,7 @@ v0.9.0
   upstream proxy - speeds up transactions and avoids POST/PUT rewind issue
 - Added support to log to the working directory - #189. Logging destination now
   configurable via CLI, env and px.ini.
+- Added --restart to quit Px and start a new instance - #185
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

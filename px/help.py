@@ -25,7 +25,10 @@ Actions:
   Remove Px from the Windows registry
 
   --quit
-  Quit a running instance of Px.exe
+  Quit a running instance of Px
+
+  --restart
+  Quit a running instance of Px and start a new instance
 
   --password | PX_PASSWORD
   Collect and save password to default keyring. Username needs to be provided

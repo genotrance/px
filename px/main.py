@@ -886,6 +886,10 @@ def parse_config():
 
     if "--quit" in sys.argv:
         quit()
+    elif "--restart" in sys.argv:
+        if not quit(exit = False):
+            sys.exit()
+        sys.argv.remove("--restart")
     elif "--save" in sys.argv:
         save()
     elif "--password" in sys.argv:
@@ -916,7 +920,7 @@ def parse_config():
 ###
 # Exit related
 
-def quit(checkOnly = False):
+def quit(checkOnly = False, exit = True):
     count = 0
     mypids = [os.getpid(), os.getppid()]
     mypath = os.path.realpath(sys.executable).lower()
@@ -965,6 +969,7 @@ def quit(checkOnly = False):
         except:
             traceback.print_exc(file=sys.stdout)
 
+    ret = False
     if count != 0:
         if checkOnly:
             pprint(" Failed")
@@ -972,14 +977,18 @@ def quit(checkOnly = False):
             sys.stdout.write("Quitting Px ..")
             sys.stdout.flush()
             time.sleep(4)
-            quit(checkOnly = True)
+            ret = quit(checkOnly = True, exit = exit)
     else:
         if checkOnly:
             pprint(" DONE")
+            ret = True
         else:
             pprint("Px is not running")
 
-    sys.exit()
+    if exit:
+        sys.exit()
+
+    return ret
 
 def handle_exceptions(extype, value, tb):
     # Create traceback log

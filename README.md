@@ -332,18 +332,13 @@ Configuration:
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 
-  --verbose
-  Enable verbose output. default: 0. Implies --foreground
-
-  --debug | PX_LOG= | settings:log=
+  --log= | PX_LOG= | settings:log=
   Enable debug logging. default: 0
-    Logs are written to working directory and over-written on startup
-    A log is automatically created if Px crashes for some reason
-
-  --uniqlog
-  Generate unique log file names in current working directory
-    Prevents logs from being overwritten on subsequent runs. Also useful if
-    running multiple instances of Px
+    1 = Log to script dir [--debug]
+    2 = Log to working dir
+    3 = Log to working dir with unique filename [--uniqlog]
+    4 = Log to stdout [--verbose]. Implies --foreground
+    If Px crashes without logging, traceback is written to the working dir
 ```
 
 ## Examples

@@ -62,6 +62,16 @@ except ImportError:
     pprint("Requires module python-dotenv")
     sys.exit()
 
+# Debug log locations
+LogLocation = int
+(
+    LOG_NONE,
+    LOG_SCRIPTDIR,
+    LOG_CWD,
+    LOG_UNIQLOG,
+    LOG_STDOUT
+) = range(5)
+
 class State:
     """Stores runtime state per process - shared across threads"""
 
@@ -83,6 +93,7 @@ class State:
     allow = netaddr.IPGlob("*.*.*.*")
     config = None
     debug = None
+    location = LOG_NONE
     mcurl = None
     stdout = None
     wproxy = None
@@ -123,22 +134,36 @@ def get_script_cmd():
 # Debug shortcut
 dprint = lambda x: None
 
-def dfile():
-    "Generate filename for debug output"
+def get_logfile(location):
+    "Get file path for debug output"
     name = multiprocessing.current_process().name
     if "--quit" in sys.argv:
         name = "quit"
-    path = get_script_dir()
-    if "--uniqlog" in sys.argv:
+    path = os.getcwd()
+
+    if location == LOG_SCRIPTDIR:
+        # --log=1 - log to script directory = --debug
+        path = get_script_dir()
+    elif location == LOG_CWD:
+        # --log=2 - log to working directory
+        pass
+    elif location == LOG_UNIQLOG:
+        # --log=3 - log to working directory with unique filename = --uniqlog
         for arg in sys.argv:
-            # Add port to filename
+            # Add --port to filename
             if arg.startswith("--port="):
                 name = arg[7:] + "-" + name
                 break
         name = f"{name}-{time.time()}"
-        path = os.getcwd()
-    logfile = os.path.join(path, f"debug-{name}.log")
-    return logfile
+    elif location == LOG_STDOUT:
+        # --verbose | --log=4 - log to stdout
+        return sys.stdout
+    else:
+        # --log=0 - no logging
+        return None
+
+    # Log to file
+    return os.path.join(path, f"debug-{name}.log")
 
 def is_compiled():
     "Return True if compiled with PyInstaller or Nuitka"
@@ -525,20 +550,20 @@ def set_auth(auth):
 
     State.auth = auth
 
-def set_debug(val = "1"):
-    global dprint
-    if State.debug is None and val == "1":
-        State.debug = Debug(dfile(), "w")
-        dprint = State.debug.get_print()
-
-def set_verbose():
+def set_debug(location = LOG_SCRIPTDIR):
     global dprint
     if State.debug is None:
-        State.debug = Debug()
-        dprint = State.debug.get_print()
-        if "--foreground" not in sys.argv:
-            # --verbose implies --foreground
-            sys.argv.append("--foreground")
+        logfile = get_logfile(location)
+
+        if logfile is not None:
+            State.location = location
+            if logfile is sys.stdout:
+                # Log to stdout
+                State.debug = Debug()
+            else:
+                # Log to <path>/debug-<name>.log
+                State.debug = Debug(logfile, "w")
+            dprint = State.debug.get_print()
 
 def set_idle(idle):
     State.idle = idle
@@ -690,9 +715,15 @@ def parse_env():
 def parse_config():
     "Parse configuration from CLI flags, environment and config file in order"
     if "--debug" in sys.argv:
-        set_debug()
+        set_debug(LOG_SCRIPTDIR)
+    elif "--uniqlog" in sys.argv:
+        set_debug(LOG_UNIQLOG)
     elif "--verbose" in sys.argv:
-        set_verbose()
+        set_debug(LOG_STDOUT)
+
+        if "--foreground" not in sys.argv:
+            # --verbose implies --foreground
+            sys.argv.append("--foreground")
 
     if sys.platform == "win32":
         if is_compiled() or "pythonw.exe" in sys.executable:
@@ -750,8 +781,8 @@ def parse_config():
     if "settings" not in State.config.sections():
         State.config.add_section("settings")
 
-    # Default initialize logging if --debug specified
-    cfg_int_init("settings", "log", "0" if State.debug is None else "1")
+    # Override --log if --debug | --verbose | --uniqlog specified
+    cfg_int_init("settings", "log", str(State.location), override = True)
 
     # Default values for all keys
     defaults = {
@@ -962,8 +993,8 @@ def handle_exceptions(extype, value, tb):
     else:
         sys.stderr.write(tracelog)
 
-        # Save to debug.log
-        dbg = open(dfile(), 'w')
+        # Save to debug.log in working directory
+        dbg = open(get_logfile(LOG_CWD), 'w')
         dbg.write(tracelog)
         dbg.close()
 

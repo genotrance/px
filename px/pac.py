@@ -84,7 +84,7 @@ class Pac:
         # relevant for NTLM/Kerberos authentication over HTTP but libcurl can
         # deal with it for now
 
-        return proxies.replace(" ", ",").replace(";", ",")
+        return proxies.replace(";", ",")
 
     # Python callables from JS
 

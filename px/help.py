@@ -61,21 +61,22 @@ Configuration:
     Specify in case default 'utf-8' encoding does not work
 
   --listen= | PX_LISTEN= | proxy:listen=
-  IP interface to listen on - default: 127.0.0.1
+  Network interface(s) to listen on. Comma separated, default: 127.0.0.1
+    --gateway and --hostonly override this to bind to all interfaces
 
   --port= | PX_PORT= | proxy:port=
   Port to run this proxy on - default: 3128
 
   --gateway | PX_GATEWAY= | proxy:gateway=
   Allow remote machines to use proxy. 0 or 1, default: 0
-    Overrides 'listen' and binds to all interfaces
+    Overrides --listen and binds to all interfaces
 
   --hostonly | PX_HOSTONLY= | proxy:hostonly=
   Allow only local interfaces to use proxy. 0 or 1, default: 0
     Px allows all IP addresses assigned to local interfaces to use the service.
     This allows local apps as well as VM or container apps to use Px when in a
-    NAT config. Px does this by listening on all interfaces and overriding the
-    allow list.
+    NAT config. Overrides --listen and binds to all interfaces, overrides the
+    default --allow rules
 
   --allow= | PX_ALLOW= | proxy:allow=
   Allow connection from specific subnets. Comma separated, default: *.*.*.*

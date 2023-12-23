@@ -79,6 +79,7 @@ class State:
     hostonly = False
     ini = ""
     idle = 30
+    listen = []
     noproxy = ""
     pac = ""
     proxyreload = 60
@@ -99,7 +100,6 @@ class State:
     wproxy = None
 
     # Tracking
-    exit = False
     proxy_last_reload = None
 
     # Lock for thread synchronization of State object
@@ -359,11 +359,9 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
             self.pool = concurrent.futures.ThreadPoolExecutor(
                 max_workers=State.config.getint("settings", "threads"))
 
-def print_banner():
+def print_banner(listen, port):
     pprint("Serving at %s:%d proc %s" % (
-        State.config.get("proxy", "listen").strip(),
-        State.config.getint("proxy", "port"),
-        multiprocessing.current_process().name)
+        listen, port, multiprocessing.current_process().name)
     )
 
     if sys.platform == "win32":
@@ -377,43 +375,64 @@ def print_banner():
                 section, option))
 
 def serve_forever(httpd):
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        dprint("Exiting")
-        State.exit = True
-
+    httpd.serve_forever()
     httpd.shutdown()
 
+def start_httpds(httpds):
+    for httpd in httpds[:-1]:
+        # Start server in a thread for each listen address
+        thrd = threading.Thread(target = serve_forever, args = (httpd,))
+        thrd.start()
+
+    # Start server in main thread for last listen address
+    serve_forever(httpds[-1])
+
 def start_worker(pipeout):
+    # CTRL-C should exit the process
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     parse_config()
-    httpd = ThreadedTCPServer((
-        State.config.get("proxy", "listen").strip(),
-        State.config.getint("proxy", "port")), Proxy, bind_and_activate=False)
-    mainsock = pipeout.recv()
-    if hasattr(socket, "fromshare"):
-        mainsock = socket.fromshare(mainsock)
-    httpd.socket = mainsock
 
-    print_banner()
+    port = State.config.getint("proxy", "port")
+    httpds = []
+    for listen in State.listen:
+        # Get socket from parent process for each listen address
+        mainsock = pipeout.recv()
+        if hasattr(socket, "fromshare"):
+            mainsock = socket.fromshare(mainsock)
 
-    serve_forever(httpd)
+        # Start server but use socket from parent process
+        httpd = ThreadedTCPServer((listen, port), Proxy, bind_and_activate=False)
+        httpd.socket = mainsock
+
+        httpds.append(httpd)
+
+        print_banner(listen, port)
+
+    start_httpds(httpds)
 
 def run_pool():
-    try:
-        httpd = ThreadedTCPServer((State.config.get("proxy", "listen").strip(),
-                                   State.config.getint("proxy", "port")), Proxy)
-    except OSError as exc:
-        if "attempt was made" in str(exc):
-            pprint("Px failed to start - port in use")
-        else:
-            pprint(exc)
-        return
+    # CTRL-C should exit the process
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    mainsock = httpd.socket
+    port = State.config.getint("proxy", "port")
+    httpds = []
+    mainsocks = []
+    for listen in State.listen:
+        # Setup server for each listen address
+        try:
+            httpd = ThreadedTCPServer((listen, port), Proxy)
+        except OSError as exc:
+            if "attempt was made" in str(exc):
+                pprint("Px failed to start - port in use")
+            else:
+                pprint(exc)
+            return
 
-    print_banner()
+        httpds.append(httpd)
+        mainsocks.append(httpd.socket)
+
+        print_banner(listen, port)
 
     if sys.platform != "darwin":
         # Multiprocessing enabled on Windows and Linux, no idea how shared sockets
@@ -431,14 +450,16 @@ def run_pool():
                 p.start()
                 while p.pid is None:
                     time.sleep(1)
-                if hasattr(socket, "fromshare"):
-                    # Send duplicate socket explicitly shared with child for Windows
-                    pipein.send(mainsock.share(p.pid))
-                else:
-                    # Send socket as is for Linux
-                    pipein.send(mainsock)
+                for mainsock in mainsocks:
+                    # Share socket for each listen address to child process
+                    if hasattr(socket, "fromshare"):
+                        # Send duplicate socket explicitly shared with child for Windows
+                        pipein.send(mainsock.share(p.pid))
+                    else:
+                        # Send socket as is for Linux
+                        pipein.send(mainsock)
 
-    serve_forever(httpd)
+    start_httpds(httpds)
 
 ###
 # Proxy management
@@ -479,38 +500,6 @@ def reload_proxy():
 ###
 # Parse settings and command line
 
-def parse_allow(allow):
-    State.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
-
-def parse_noproxy(noproxy):
-    State.noproxy = noproxy
-
-def set_useragent(useragent):
-    State.useragent = useragent
-
-def set_username(username):
-    State.username = username
-
-def set_password():
-    try:
-        if len(State.username) == 0:
-            pprint("domain\\username missing - specify via --username or configure in px.ini")
-            sys.exit()
-        pprint("Setting password for '" + State.username + "'")
-
-        pwd = ""
-        while len(pwd) == 0:
-            pwd = getpass.getpass("Enter password: ")
-
-        keyring.set_password("Px", State.username, pwd)
-
-        if keyring.get_password("Px", State.username) == pwd:
-            pprint("Saved successfully")
-    except KeyboardInterrupt:
-        pprint("")
-
-    sys.exit()
-
 def set_pac(pac):
     if pac == "":
         return
@@ -539,6 +528,44 @@ def set_pac(pac):
     else:
         pprint("Unsupported PAC location or file not found: %s" % pac)
         sys.exit()
+
+def set_listen(listen):
+    for intf in listen.split(","):
+        clean = intf.strip()
+        if len(clean) != 0 and clean not in State.listen:
+            State.listen.append(clean)
+
+def set_allow(allow):
+    State.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
+
+def set_noproxy(noproxy):
+    State.noproxy = noproxy
+
+def set_useragent(useragent):
+    State.useragent = useragent
+
+def set_username(username):
+    State.username = username
+
+def set_password():
+    try:
+        if len(State.username) == 0:
+            pprint("domain\\username missing - specify via --username or configure in px.ini")
+            sys.exit()
+        pprint("Setting password for '" + State.username + "'")
+
+        pwd = ""
+        while len(pwd) == 0:
+            pwd = getpass.getpass("Enter password: ")
+
+        keyring.set_password("Px", State.username, pwd)
+
+        if keyring.get_password("Px", State.username) == pwd:
+            pprint("Saved successfully")
+    except KeyboardInterrupt:
+        pprint("")
+
+    sys.exit()
 
 def set_auth(auth):
     if len(auth) == 0:
@@ -634,7 +661,7 @@ def save():
 
 def test(testurl):
     # Get Px configuration
-    listen = State.config.get("proxy", "listen")
+    listen = State.listen[0]
     port = State.config.getint("proxy", "port")
 
     def query():
@@ -809,8 +836,9 @@ def parse_config():
     # Callback functions for initialization
     callbacks = {
         "pac": set_pac,
-        "allow": parse_allow,
-        "noproxy": parse_noproxy,
+        "listen": set_listen,
+        "allow": set_allow,
+        "noproxy": set_noproxy,
         "useragent": set_useragent,
         "username": set_username,
         "auth": set_auth,
@@ -854,7 +882,7 @@ def parse_config():
     allow = State.config.get("proxy", "allow")
     if gateway == 1:
         # Listen on all interfaces
-        cfg_str_init("proxy", "listen", "", None, True)
+        State.listen = [""]
         dprint("Gateway mode - overriding 'listen' and binding to all interfaces")
         if allow in ["*.*.*.*", "0.0.0.0/0"]:
             dprint("Configure 'allow' to restrict access to trusted subnets")
@@ -864,14 +892,14 @@ def parse_config():
         State.hostonly = True
 
         # Listen on all interfaces
-        cfg_str_init("proxy", "listen", "", None, True)
+        State.listen = [""]
         dprint("Host-only mode - overriding 'listen' and binding to all interfaces")
         dprint("Px will automatically restrict access to host interfaces")
 
         # If not gateway mode or gateway with default allow rules
         if (gateway == 0 or (gateway == 1 and allow in ["*.*.*.*", "0.0.0.0/0"])):
             # Purge allow rules
-            cfg_str_init("proxy", "allow", "", parse_allow, True)
+            cfg_str_init("proxy", "allow", "", set_allow, True)
             dprint("Removing default 'allow' everyone rule")
 
     ###

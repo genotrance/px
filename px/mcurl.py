@@ -79,7 +79,7 @@ def cache_auth(curl, msg):
 
     if msg.startswith("Proxy-Authorization:"):
         # Cache auth mechanism from proxy headers
-        proxytype = msg.split(" ")[1].upper()        
+        proxytype = msg.split(" ")[1].upper()
         MCURL.proxytype[curl.proxy] = proxytype
         dprint(f"{curl.easyhash}: Caching proxy auth mechanism for {curl.proxy} as {proxytype}")
 
@@ -187,7 +187,7 @@ def _write_callback(buffer, size, nitems, userdata):
             dprint(curl.easyhash + ": Skipped %d bytes" % tsize)
             return tsize
 
-    dprint(curl.easyhash + ": Wrote %d bytes" % tsize)
+    #dprint(curl.easyhash + ": Wrote %d bytes" % tsize)
     return tsize
 
 @libcurl.write_callback
@@ -478,7 +478,7 @@ class Curl:
         """
         self.set_verbose(enable)
         if enable:
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _debug_callback)       
+            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _debug_callback)
 
     def bridge(self, client_rfile = None, client_wfile = None, client_hfile = None):
         """
@@ -805,12 +805,32 @@ class MCurl:
             self._perform()
             time.sleep(0.01)
 
-        if "timed out" in curl.errstr:
-            curl.resp = 408
+        # Map some libcurl error codes to HTTP errors
+        if curl.cerr == libcurl.CURLE_URL_MALFORMAT:
+            # Bad request
+            curl.resp = 400
+            curl.errstr += "URL malformed"
+        elif curl.cerr in [libcurl.CURLE_UNSUPPORTED_PROTOCOL,
+                           libcurl.CURLE_NOT_BUILT_IN,
+                           libcurl.CURLE_FUNCTION_NOT_FOUND]:
+            # Not implemented
+            curl.resp = 501
+            curl.errstr += "Unsupported protocol, not built-in, or function not found"
+        elif curl.cerr in [libcurl.CURLE_COULDNT_RESOLVE_PROXY,
+                           libcurl.CURLE_COULDNT_RESOLVE_HOST,
+                           libcurl.CURLE_COULDNT_CONNECT]:
+            # Bad gateway
+            curl.resp = 502
+            curl.errstr += "Could not resolve or connect to proxy or host"
+        elif curl.cerr == libcurl.CURLE_OPERATION_TIMEDOUT:
+            # Gateway timeout
+            curl.resp = 504
+            curl.errstr += "Operation timed out"
 
         if curl.proxy is not None:
             ret, codep = curl.get_response()
             if ret == 0 and codep == 407:
+                # Proxy authentication required
                 if curl.cerr == libcurl.CURLE_SEND_FAIL_REWIND:
                     # Issue #199 - POST/PUT rewind not supported
                     out = "POST/PUT rewind not supported (#199)"

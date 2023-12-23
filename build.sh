@@ -65,22 +65,6 @@ while getopts 'i:bdna:v:ts:' OPTION; do
 done
 shift "$(($OPTIND -1))"
 
-# Check if env vars are set
-if [ -z "$PROXY" ]; then
-    echo "PROXY not configured"
-    exit
-fi
-
-if [ -z "$PAC" ]; then
-    echo "PAC not configured"
-    exit
-fi
-
-if [ -z "$USERNAME" ]; then
-    echo "USERNAME not configured"
-    exit
-fi
-
 # Venv related
 VPATH="import sys; print('py' + sys.version.split()[0])"
 
@@ -179,7 +163,7 @@ if [ -f "/.dockerenv" ]; then
 
         apt update -y && apt upgrade -y
         apt install -y curl dbus gnome-keyring psmisc python3 python3-venv
-        
+
         export AUTH="--auth=NONEGOTIATE"
 
     elif [ "$DISTRO" = "opensuse-tumbleweed" ] || [ "$DISTRO" = "opensuse-leap" ]; then
@@ -360,8 +344,19 @@ else
     MUSL="quay.io/pypa/musllinux_1_1_$ARCH"
     GLIBC="quay.io/pypa/manylinux2014_$ARCH"
 
-    DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share \
-                -e PROXY=$PROXY -e PAC=$PAC -e USERNAME=$USERNAME"
+    # Docker flags
+    DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share"
+
+    # Forward env vars to container
+    if [ ! -z "$PROXY" ]; then
+        DOCKERCMD="$DOCKERCMD -e PROXY=$PROXY"
+    fi
+    if [ ! -z "$PAC" ]; then
+        DOCKERCMD="$DOCKERCMD -e PAC=$PAC"
+    fi
+    if [ ! -z "$USERNAME" ]; then
+        DOCKERCMD="$DOCKERCMD -e USERNAME=$USERNAME"
+    fi
 
     if [ "$BUILD" = "yes" ]; then
         # Which image to load
@@ -393,6 +388,22 @@ else
             $DOCKERCMD $image /px/build.sh -b $SUBCOMMAND
         done
     elif [ "$TEST" = "yes" ]; then
+        # Check if test env vars are set
+        if [ -z "$PROXY" ]; then
+            echo "PROXY not configured"
+            exit
+        fi
+
+        if [ -z "$PAC" ]; then
+            echo "PAC not configured"
+            exit
+        fi
+
+        if [ -z "$USERNAME" ]; then
+            echo "USERNAME not configured"
+            exit
+        fi
+
         # Which image to test
         if [ -z "$IMAGE" ]; then
             IMAGE="alpine ubuntu debian opensuse/tumbleweed"

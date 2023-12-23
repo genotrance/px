@@ -118,7 +118,7 @@ Configuration:
   Number of parallel workers (processes). Valid integer, default: 2
 
   --threads= | PX_THREADS= | settings:threads=
-  Number of parallel threads per worker (process). Valid integer, default: 5
+  Number of parallel threads per worker (process). Valid integer, default: 32
 
   --idle= | PX_IDLE= | settings:idle=
   Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30

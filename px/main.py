@@ -192,11 +192,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 easyhash = self.curl.easyhash + ": "
                 State.mcurl.stop(self.curl)
                 self.curl = None
-            if "forcibly closed" in str(error):
-                dprint(easyhash + "Connection closed by client")
-            else:
-                traceback.print_exc(file=sys.stdout)
-                dprint(easyhash + "Socket error: %s" % error)
+            dprint(easyhash + "Socket error: %s" % error)
+        except ConnectionError:
+            pass
 
     def address_string(self):
         host, port = self.client_address[:2]
@@ -275,6 +273,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self.send_header("Proxy-Agent", self.version_string())
             self.end_headers()
             State.mcurl.select(self.curl, self.connection, State.idle)
+            self.close_connection = True
 
         State.mcurl.remove(self.curl)
 
@@ -799,7 +798,7 @@ def parse_config():
         "username": "",
         "auth": "",
         "workers": "2",
-        "threads": "5",
+        "threads": "32",
         "idle": "30",
         "socktimeout": "20.0",
         "proxyreload": "60",

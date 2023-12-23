@@ -20,6 +20,10 @@ v0.9.0
   configurable via CLI, env and px.ini.
 - Added --restart to quit Px and start a new instance - #185
 - Fixed #184 - PAC proxy list was including blank entries
+- Fixed #152 - increased number of default threads from 5 to 32
+- Fixed issue leading to connection reuse by client after HTTPS connection was
+  closed by server
+- Mapped additional libcurl errors to HTTP errors to inform client
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

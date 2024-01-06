@@ -76,10 +76,11 @@ class State:
     """Stores runtime state per process - shared across threads"""
 
     # Config
+    gateway = False
     hostonly = False
     ini = ""
     idle = 30
-    listen = []
+    listen = None
     noproxy = ""
     pac = ""
     proxyreload = 60
@@ -172,6 +173,32 @@ def is_compiled():
 ###
 # Proxy handler
 
+def set_curl_auth(curl, auth):
+    "Set proxy authentication info for curl object"
+    if auth != "NONE":
+        # Connecting to proxy and authenticating
+        key = ""
+        pwd = None
+        if len(State.username) != 0:
+            key = State.username
+            if "PX_PASSWORD" in os.environ:
+                # Use environment variable PX_PASSWORD
+                pwd = os.environ["PX_PASSWORD"]
+            else:
+                # Use keyring to get password
+                pwd = keyring.get_password("Px", key)
+        if len(key) == 0:
+            if sys.platform == "win32":
+                dprint(curl.easyhash + ": Using SSPI to login")
+                key = ":"
+            else:
+                dprint("SSPI not available and no username configured - no auth")
+                return
+        curl.set_auth(user = key, password = pwd, auth = auth)
+    else:
+        # Explicitly deferring proxy authentication to the client
+        dprint(curl.easyhash + ": Skipping proxy authentication")
+
 class Proxy(http.server.BaseHTTPRequestHandler):
     "Handler for each proxy connection - unique instance for each thread in each process"
 
@@ -192,7 +219,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 easyhash = self.curl.easyhash + ": "
                 State.mcurl.stop(self.curl)
                 self.curl = None
-            dprint(easyhash + "Socket error: %s" % error)
+            dprint(easyhash + str(error))
         except ConnectionError:
             pass
 
@@ -226,33 +253,17 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 self.send_error(401, "Proxy server authentication failed: %s:%d" % (server, port))
                 return
 
-            key = ""
-            pwd = None
-            if len(State.username) != 0:
-                key = State.username
-                if "PX_PASSWORD" in os.environ:
-                    # Use environment variable PX_PASSWORD
-                    pwd = os.environ["PX_PASSWORD"]
-                else:
-                    # Use keyring to get password
-                    pwd = keyring.get_password("Px", key)
-            if len(key) == 0:
-                if sys.platform == "win32":
-                    dprint(self.curl.easyhash + ": Using SSPI to login")
-                    key = ":"
-                else:
-                    dprint("SSPI not available and no username configured")
-                    self.send_error(501, "SSPI not available and no username configured")
-                    return
-            self.curl.set_auth(user = key, password = pwd, auth = State.auth)
+            # Set proxy authentication
+            set_curl_auth(self.curl, State.auth)
         else:
+            # Directly connecting to the destination
             dprint(self.curl.easyhash + ": Skipping auth proxying")
 
         # Set debug mode
         self.curl.set_debug(State.debug is not None)
 
         # Plain HTTP can be bridged directly
-        if not self.curl.is_connect():
+        if not self.curl.is_connect:
             self.curl.bridge(self.rfile, self.wfile, self.wfile)
 
         # Set headers for request
@@ -267,11 +278,13 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if not State.mcurl.do(self.curl):
             dprint(self.curl.easyhash + ": Connection failed: " + self.curl.errstr)
             self.send_error(self.curl.resp, self.curl.errstr)
-        elif self.curl.is_connect():
-            dprint(self.curl.easyhash + ": SSL connected")
-            self.send_response(200, "Connection established")
-            self.send_header("Proxy-Agent", self.version_string())
-            self.end_headers()
+        elif self.curl.is_connect:
+            if self.curl.is_tunnel or not self.curl.is_proxied:
+                # Inform client that SSL connection has been established
+                dprint(self.curl.easyhash + ": SSL connected")
+                self.send_response(200, "Connection established")
+                self.send_header("Proxy-Agent", self.version_string())
+                self.end_headers()
             State.mcurl.select(self.curl, self.connection, State.idle)
             self.close_connection = True
 
@@ -317,9 +330,16 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 # Multi-processing and multi-threading
 
 def get_host_ips():
-    localips = [ip[4][0] for ip in socket.getaddrinfo(
-        socket.gethostname(), 80, socket.AF_INET)]
-    localips.insert(0, "127.0.0.1")
+    "Get IP addresses assigned to this host"
+    localips = netaddr.IPSet([])
+    addrs = psutil.net_if_addrs()
+    stats = psutil.net_if_stats()
+    for intf in addrs:
+        if stats[intf].isup:
+            for addr in addrs[intf]:
+                # IPv4 only for now
+                if addr.family in [socket.AF_INET]:#, socket.AF_INET6]:
+                    localips.add(addr.address.split("%")[0])
 
     return localips
 
@@ -530,10 +550,22 @@ def set_pac(pac):
         sys.exit()
 
 def set_listen(listen):
-    for intf in listen.split(","):
-        clean = intf.strip()
-        if len(clean) != 0 and clean not in State.listen:
-            State.listen.append(clean)
+    if len(listen) == 0:
+        # Listen on localhost only if blank
+        # Explicit --gateway or --hostonly required to listen on all interfaces
+        State.listen = ["127.0.0.1"]
+    else:
+        State.listen = []
+        for intf in listen.split(","):
+            clean = intf.strip()
+            if len(clean) != 0 and clean not in State.listen:
+                State.listen.append(clean)
+
+def set_gateway(gateway):
+    State.gateway = True if gateway == 1 else False
+
+def set_hostonly(hostonly):
+    State.hostonly = True if hostonly == 1 else False
 
 def set_allow(allow):
     State.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
@@ -662,34 +694,86 @@ def save():
 def test(testurl):
     # Get Px configuration
     listen = State.listen[0]
+    if len(listen) == 0:
+        # Listening on all interfaces - figure out which one is allowed
+        hostips = get_host_ips()
+        if State.gateway:
+            # Check allow list
+            for ip in hostips:
+                if ip in State.allow:
+                    listen = str(ip)
+                    break
+            if len(listen) == 0:
+                pprint("Failed: host IP not in --allow to test Px")
+                sys.exit()
+        elif State.hostonly:
+            # Use first host IP
+            listen = str(list(hostips)[0])
     port = State.config.getint("proxy", "port")
 
-    def query():
-        ec = mcurl.Curl(testurl)
+    # Tweak Px configuration for test - only 1 process required
+    State.config.set("settings", "workers", "1")
+
+    if "--test-auth" in sys.argv:
+        # Set Px to --auth=NONE
+        auth = State.auth
+        State.auth = "NONE"
+        State.config.set("proxy", "auth", "NONE")
+    else:
+        auth = "NONE"
+
+    def query(url, method="GET", data = None, quit=True):
+        if quit:
+            time.sleep(0.1)
+
+        ec = mcurl.Curl(url, method)
         ec.set_proxy(listen, port)
-        ec.buffer()
+        set_curl_auth(ec, auth)
+        ec.set_debug(State.debug is not None)
+        if data is not None:
+            ec.buffer(data.encode("utf-8"))
+            ec.set_headers({"Content-Length": len(data)})
+        else:
+            ec.buffer()
         ec.set_useragent("mcurl v" + __version__)
         ret = ec.perform()
+        pprint(f"\nTesting {method} {url}")
         if ret != 0:
             pprint(f"Failed with error {ret}\n{ec.errstr}")
+            os._exit(1)
         else:
-            pprint(f"\n{ec.get_headers()}Response length: {len(ec.get_data())}")
+            ret_data = ec.get_data()
+            pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
+            if testurl == "all":
+                if url not in ret_data:
+                    pprint(f"Failed: response does not contain {url}:\n{ret_data}")
+                    os._exit(1)
+                if data is not None and data not in ret_data:
+                    pprint(f"Failed: response does not match {data}:\n{ret_data}")
+                    os._exit(1)
 
-        # Quit Px
-        p = psutil.Process(os.getpid())
-        if sys.platform == "win32":
-            p.send_signal(signal.CTRL_C_EVENT)
-        else:
-            p.send_signal(signal.SIGINT)
+        if quit:
+            os._exit(0)
+
+    def queryall():
+        import uuid
+
+        url = "://httpbin.org/"
+        for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+            for protocol in ["http", "https"]:
+                testurl = protocol + url + method.lower()
+                data = str(uuid.uuid4()) if method in ["POST", "PUT", "PATCH"] else None
+                query(testurl, method, data, quit=False)
+
+        os._exit(0)
 
     # Run testurl query in a thread
-    t = threading.Thread(target = query)
+    if testurl in ["all", "1"]:
+        t = threading.Thread(target = queryall)
+    else:
+        t = threading.Thread(target = query, args = (testurl,))
     t.daemon = True
     t.start()
-
-    # Tweak Px configuration for test - only 1 process and thread required
-    State.config.set("settings", "workers", "1")
-    State.config.set("settings", "threads", "1")
 
     # Run Px to respond to query
     run_pool()
@@ -817,9 +901,9 @@ def parse_config():
         "pac_encoding": "utf-8",
         "port": "3128",
         "listen": "127.0.0.1",
-        "allow": "*.*.*.*",
         "gateway": "0",
         "hostonly": "0",
+        "allow": "*.*.*.*",
         "noproxy": "",
         "useragent": "",
         "username": "",
@@ -837,6 +921,8 @@ def parse_config():
     callbacks = {
         "pac": set_pac,
         "listen": set_listen,
+        "gateway": set_gateway,
+        "hostonly": set_hostonly,
         "allow": set_allow,
         "noproxy": set_noproxy,
         "useragent": set_useragent,
@@ -878,28 +964,27 @@ def parse_config():
     # Dependency propagation
 
     # If gateway mode
-    gateway = State.config.getint("proxy", "gateway")
     allow = State.config.get("proxy", "allow")
-    if gateway == 1:
+    if State.gateway == 1:
         # Listen on all interfaces
         State.listen = [""]
+        State.config.set("proxy", "listen", "")
         dprint("Gateway mode - overriding 'listen' and binding to all interfaces")
         if allow in ["*.*.*.*", "0.0.0.0/0"]:
             dprint("Configure 'allow' to restrict access to trusted subnets")
 
     # If hostonly mode
-    if State.config.getint("proxy", "hostonly") == 1:
-        State.hostonly = True
-
+    if State.hostonly:
         # Listen on all interfaces
         State.listen = [""]
+        State.config.set("proxy", "listen", "")
         dprint("Host-only mode - overriding 'listen' and binding to all interfaces")
         dprint("Px will automatically restrict access to host interfaces")
 
         # If not gateway mode or gateway with default allow rules
-        if (gateway == 0 or (gateway == 1 and allow in ["*.*.*.*", "0.0.0.0/0"])):
+        if (State.gateway == 0 or (State.gateway == 1 and allow in ["*.*.*.*", "0.0.0.0/0"])):
             # Purge allow rules
-            cfg_str_init("proxy", "allow", "", set_allow, True)
+            cfg_init("allow", "", True)
             dprint("Removing default 'allow' everyone rule")
 
     ###

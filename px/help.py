@@ -114,6 +114,11 @@ Configuration:
       Prefix NO to avoid method - e.g. NONTLM => ANY - NTLM
       Prefix SAFENO to avoid method - e.g. SAFENONTLM => ANYSAFE - NTLM
       Prefix ONLY to support only that method - e.g ONLYNTLM => ONLY + NTLM
+    Set to NONE to defer all authentication to the client. This allows multiple
+    instances of Px to be chained together to access an upstream proxy that is not
+    directly connected:
+      Client -> Auth Px -> no-Auth Px -> Upstream proxy
+        'Auth Px' cannot directly access upstream proxy but 'no-Auth Px' can
 
   --workers= | PX_WORKERS= | settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2

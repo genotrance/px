@@ -35,8 +35,11 @@ Run command on specific container
 OS=`uname -s`
 
 # Parse command line
-while getopts 'i:bdna:v:ts:' OPTION; do
+while getopts 'Di:bdna:v:ts:' OPTION; do
     case "$OPTION" in
+        D)
+            DOCKERBUILD="yes"
+            ;;
         i)
             IMAGE="$OPTARG"
             ;;
@@ -69,14 +72,42 @@ shift "$(($OPTIND -1))"
 VPATH="import sys; print('py' + sys.version.split()[0])"
 
 setup_venv() {
-    VENV=$HOME/`$1 -c "$VPATH"`
+    VENV=$HOME/pyvenv/`$1 -c "$VPATH"`
+    echo "Setup $VENV"
     $1 -m venv $VENV
     . $VENV/bin/activate
 }
 
 activate_venv() {
-    VENV=$HOME/`$1 -c "$VPATH"`
+    VENV=$HOME/pyvenv/`$1 -c "$VPATH"`
+    echo "Activate $VENV"
     . $VENV/bin/activate
+}
+
+gen_px_image() {
+    # Python wheel containers for musl and glibc
+    MUSL="quay.io/pypa/musllinux_1_1_$ARCH"
+    GLIBC="quay.io/pypa/manylinux2014_$ARCH"
+
+    # Check if image generated
+    PX_IMAGE="px_$1"
+    exists=`docker images | grep $PX_IMAGE`
+    if [ -z "$exists" ]; then
+        if [ "$1" = "musl" ]; then
+            image="$MUSL"
+        elif [ "$1" = "glibc" ]; then
+            image="$GLIBC"
+        else
+            image="$1"
+        fi
+
+        echo "Generating $PX_IMAGE from $image"
+        $DOCKERCMD $image /px/build.sh -D
+        CONTAINER_ID=`docker ps -lq`
+        docker commit $CONTAINER_ID $PX_IMAGE:latest
+        docker rm $CONTAINER_ID
+        echo "Generated $PX_IMAGE"
+    fi
 }
 
 if [ -f "/.dockerenv" ]; then
@@ -97,6 +128,7 @@ if [ -f "/.dockerenv" ]; then
     export AUTH=""
 
     # Pick latest-1 python if manylinux / musllinux
+    #   Nuitka support lags behind Python releases
     export PY="/opt/python/`ls -v /opt/python | grep cp | tail -n 2 | head -n 1`/bin/python3"
 
     # Adjust Python version if specified with -v
@@ -119,70 +151,81 @@ if [ -f "/.dockerenv" ]; then
 
     if [ "$DISTRO" = "alpine" ]; then
 
-        apk update && apk upgrade
-        apk add curl psmisc
-        if [ "$PY" = "python3" ]; then
-            # Not manylinux / musllinux
-            apk add python3
-            if [ "$BUILD" = "yes" ]; then
-                apk add python3-dev
+        if [ "$DOCKERBUILD" = "yes" ]; then
+            apk update && apk upgrade
+            apk add curl psmisc \
+                python3 python3-dev \
+                dbus gnome-keyring openssh \
+                ccache gcc musl-dev patchelf upx
+            if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
+                # Extract static libs for embedding if musllinux
+                cd /opt/_internal && tar xf static-libs-for-embedding-only.tar.xz && cd -
             fi
-        fi
-        if [ "$BUILD" = "yes" ]; then
-            apk add ccache gcc musl-dev patchelf upx
-        else
-            apk add dbus gnome-keyring
         fi
 
         SHELL="sh"
 
     elif [ "$DISTRO" = "centos" ] || [ "$DISTRO" = "rocky" ]; then
 
-        # Avoid random mirror
-        cd /etc/yum.repos.d
-        for file in `ls`; do sed -i~ 's/^mirrorlist/#mirrorlist/' $file; done
-        for file in `ls`; do sed -i~~ 's/^#baseurl/baseurl/' $file; done
-        cd
+        if [ "$DOCKERBUILD" = "yes" ]; then
+            # Avoid random mirror
+            cd /etc/yum.repos.d
+            for file in `ls`; do sed -i~ 's/^mirrorlist/#mirrorlist/' $file; done
+            for file in `ls`; do sed -i~~ 's/^#baseurl/baseurl/' $file; done
+            cd
 
-        yum update -y
-        yum install -y psmisc
-        if [ "$PY" = "python3" ]; then
-            # Not manylinux / musllinux
-            yum install -y python3
-            if [ "$BUILD" = "yes" ]; then
-                yum install -y python3-devel
+            yum update -y
+            yum install -y psmisc \
+                python3 python3-devel \
+                gnome-keyring openssh \
+                ccache libffi-devel patchelf upx
+            yum clean all
+            if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
+                # Extract static libs for embedding if manylinux
+                cd /opt/_internal && tar xf static-libs-for-embedding-only.tar.xz && cd -
             fi
-        fi
-        if [ "$BUILD" = "yes" ]; then
-            yum install -y ccache libffi-devel patchelf upx
-        else
-            yum install -y gnome-keyring
         fi
 
     elif [ "$DISTRO" = "ubuntu" ] || [ "$DISTRO" = "debian" ] || [ "$DISTRO" = "linuxmint" ]; then
 
-        apt update -y && apt upgrade -y
-        apt install -y curl dbus gnome-keyring psmisc python3 python3-venv
+        if [ "$DOCKERBUILD" = "yes" ]; then
+            apt update -y && apt upgrade -y
+            apt install -y curl psmisc python3 python3-venv \
+                dbus gnome-keyring openssh-client \
+                --no-install-recommends
+            apt clean
+        fi
 
         export AUTH="--auth=NONEGOTIATE"
 
     elif [ "$DISTRO" = "opensuse-tumbleweed" ] || [ "$DISTRO" = "opensuse-leap" ]; then
 
-        zypper -n update
-        zypper -n install curl dbus-1 gnome-keyring psmisc python3
+        if [ "$DOCKERBUILD" = "yes" ]; then
+            zypper -n update
+            zypper -n install curl psmisc python3 \
+                dbus-1-python3 gnome-keyring openssh
+            zypper cc -a
+        fi
+
         export AUTH="--auth=NONEGOTIATE"
 
     elif [ "$DISTRO" = "void" ]; then
 
-        xbps-install -Suy xbps
-        xbps-install -Sy curl dbus gnome-keyring psmisc python3
+        if [ "$DOCKERBUILD" = "yes" ]; then
+            xbps-install -Suy xbps
+            xbps-install -Sy curl psmisc python3 \
+                dbus gnome-keyring openssh
+        fi
 
         SHELL="sh"
 
     elif [ "$DISTRO" = "arch" ] || [ "$DISTRO" = "manjaro" ]; then
 
-        pacman -Syu --noconfirm
-        pacman -S --noconfirm gnome-keyring python3
+        if [ "$DOCKERBUILD" = "yes" ]; then
+            pacman -Syu --noconfirm
+            pacman -S --noconfirm python3 \
+                dbus gnome-keyring openssh
+        fi
 
     else
         echo "Unknown distro $DISTRO"
@@ -190,33 +233,179 @@ if [ -f "/.dockerenv" ]; then
         exit
     fi
 
-    setup_venv $PY
+    if [ "$DOCKERBUILD" = "yes" ]; then
+        # Run for all Python versions if manylinux/musllinux
+        for pyver in `ls /opt/python/cp* -d -v`
+        do
+            if [ ! -z "$PYVERSION" ]; then
+                # Run only for Python version specified with -v
+                CVER=`$pyver/bin/python3 -V | cut -d ' ' -f 2 | cut -d '.' -f 1-2`
+                if [ "$CVER" != "$PYVERSION" ]; then
+                    continue
+                fi
+            fi
 
-    if [ -z "$BUILD" ]; then
-        # For test and SHELL only - start dbus and gnome-keyring
+            # Setup venv for this Python version
+            setup_venv $pyver/bin/python3
+
+            # Install tools
+            python3 -m pip install --upgrade pip setuptools build wheel
+        done
+
+        setup_venv $PY
+
+        python3 -m pip install --upgrade pip setuptools build wheel auditwheel nuitka
+        python3 -m pip cache purge
+    else
+        activate_venv $PY
+
+        # Start dbus and gnome-keyring
         export DBUS_SESSION_BUS_ADDRESS=`dbus-daemon --fork --config-file=/usr/share/dbus-1/session.conf --print-address`
         echo "abc" | gnome-keyring-daemon --unlock
+
+        cd /px
+        if [ "$BUILD" = "yes" ]; then
+            if [ "$DEPS" = "yes" ] || [ ! -d "$WHEELS" ]; then
+                # Also run if $WHEELS does not exist since NUITKA depends on wheels
+                rm -rf $WHEELS
+
+                # Run for all Python versions if manylinux/musllinux
+                for pyver in `ls /opt/python/cp* -d -v`
+                do
+                    if [ ! -z "$PYVERSION" ]; then
+                        # Run only for Python version specified with -v
+                        CVER=`$pyver/bin/python3 -V | cut -d ' ' -f 2 | cut -d '.' -f 1-2`
+                        if [ "$CVER" != "$PYVERSION" ]; then
+                            continue
+                        fi
+                    fi
+
+                    # Setup venv for this Python version
+                    activate_venv $pyver/bin/python3
+
+                    # Build dependency wheels
+                    python3 tools.py --deps
+                done
+
+                # Activate latest-1 Python version
+                activate_venv $PY
+
+                # If no wheels generated, exit
+                if [ ! -d "$WHEELS" ]; then
+                    echo "No wheels generated - $PYVERSION not found?"
+                    $SHELL
+                    exit
+                fi
+
+                # Create any wheel if not already
+                python3 tools.py --wheel
+
+                # Package all wheels
+                python3 tools.py --depspkg
+            fi
+
+            if [ "$NUITKA" = "yes" ]; then
+                # Install wheel dependencies
+                python3 -m pip install px-proxy --no-index -f $WHEELS
+
+                # Build Nuitka binary
+                python3 tools.py --nuitka
+
+                # Uninstall Px
+                python3 -m pip uninstall px-proxy -y
+            fi
+        else
+            if [ "$TEST" = "yes" ]; then
+                if [ ! -d "$WHEELS" ]; then
+                    echo "Wheels missing => ./build.sh -b -d"
+                    $SHELL
+                    exit
+                fi
+
+                # Install wheel dependencies
+                python3 -m pip install px-proxy --no-index -f $WHEELS
+
+                # Run tests
+                python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
+            else
+                if [ -d "$WHEELS" ]; then
+                    # Install Px dependencies if available
+                    python3 -m pip install px-proxy --no-index -f $WHEELS
+                fi
+
+                # Start shell
+                $SHELL
+            fi
+        fi
     fi
 
-    cd /px
+elif [ "$OS" = "Darwin" ]; then
+    # OSX build
+
+    ARCH=`uname -m`
+
+    export PXBIN="`pwd`/px.dist-osx-$ARCH/px.dist/px"
+    export WHEELS="`pwd`/px.dist-wheels-osx-$ARCH/px.dist-wheels"
+
+    # Install brew
+    if ! brew -v > /dev/null; then
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+
+    # Install all versions of Python in brew
+    for pyver in `brew search "/^python@3.*$/" | sort -n -t . -k 2 | cut -d "@" -f 2,2`
+    do
+        export PY="/usr/local/opt/python@$pyver/bin/python$pyver"
+        if [ ! -f "$PY" ]; then
+            # Install Python
+            brew install python@$pyver
+        fi
+    done
+
+    if [ ! -f "/usr/local/bin/upx" ]; then
+        # Install upx
+        brew install upx
+    fi
+
+    # Pick latest-1 python if manylinux / musllinux
+    #   Nuitka support lags behind Python releases
+    pyvers=`ls -v /usr/local/opt | grep python@3. | sort -n -t . -k 2 | cut -d "@" -f 2,2`
+    pyver=`echo "$pyvers" | tail -n 2 | head -n 1`
+    export PY="/usr/local/opt/python@$pyver/bin/python$pyver"
+
+    # Adjust Python version if specified with -v
+    if [ ! -z "$PYVERSION" ]; then
+        for pyver in $pyvers
+        do
+            if [ "$pyver" = "$PYVERSION" ]; then
+                export PY="/usr/local/opt/python@$pyver/bin/python$pyver"
+                break
+            fi
+        done
+    fi
+
+    setup_venv $PY
+
     if [ "$BUILD" = "yes" ]; then
+        # Build both if neither specified
+        if [ -z "$DEPS" ] && [ -z "$NUITKA" ]; then
+            DEPS="yes"
+            NUITKA="yes"
+        fi
+
         if [ "$DEPS" = "yes" ] || [ ! -d "$WHEELS" ]; then
             # Also run if $WHEELS does not exist since NUITKA depends on wheels
             rm -rf $WHEELS
 
-            # Run for all Python versions
-            for pyver in `ls /opt/python/cp* -d`
+            for pyver in $pyvers
             do
-                if [ ! -z "$PYVERSION" ]; then
-                    # Run only for Python version specified with -v
-                    CVER=`$pyver/bin/python3 -V | cut -d ' ' -f 2 | cut -d '.' -f 1-2`
-                    if [ "$CVER" != "$PYVERSION" ]; then
-                        continue
-                    fi
+                # Run only for Python version if specified with -v
+                if [ ! -z "$PYVERSION" ] && [ "$pyver" != "$PYVERSION" ]; then
+                    continue
                 fi
 
                 # Setup venv for this Python version
-                setup_venv $pyver/bin/python3
+                setup_venv "/usr/local/opt/python@$pyver/bin/python$pyver"
 
                 # Install tools
                 python3 -m pip install --upgrade pip setuptools build wheel
@@ -227,16 +416,12 @@ if [ -f "/.dockerenv" ]; then
 
             # If no wheels generated, exit
             if [ ! -d "$WHEELS" ]; then
-                echo "No wheels generated - $PYVERSION not found"
-                $SHELL
+                echo "No wheels generated - $PYVERSION not found?"
                 exit
             fi
 
-            # Reactivate default Python version
+            # Activate latest-1 Python version
             activate_venv $PY
-
-            # Install tools
-            python3 -m pip install --upgrade auditwheel
 
             # Create any wheel if not already
             python3 tools.py --wheel
@@ -247,14 +432,16 @@ if [ -f "/.dockerenv" ]; then
 
         if [ "$NUITKA" = "yes" ]; then
             # Install tools
-            python3 -m pip install --upgrade pip setuptools build wheel
-            python3 -m pip install --upgrade nuitka
+            python3 -m pip install --upgrade pip setuptools build wheel nuitka
 
             # Install wheel dependencies
             python3 -m pip install px-proxy --no-index -f $WHEELS
 
             # Build Nuitka binary
             python3 tools.py --nuitka
+
+            # Uninstall Px
+            python3 -m pip uninstall px-proxy -y
         fi
     else
         python3 -m pip install --upgrade pip
@@ -262,7 +449,18 @@ if [ -f "/.dockerenv" ]; then
         if [ "$TEST" = "yes" ]; then
             if [ ! -d "$WHEELS" ]; then
                 echo "Wheels missing => ./build.sh -b -d"
-                $SHELL
+                exit
+            fi
+
+            # Check if test env vars are set
+            if [ -z "$PROXY" ]; then
+                echo "PROXY not configured"
+                exit
+            fi
+
+            if [ -z "$PX_USERNAME" ]; then
+                # Cannot set $USERNAME on OSX
+                echo "PX_USERNAME not configured"
                 exit
             fi
 
@@ -270,67 +468,17 @@ if [ -f "/.dockerenv" ]; then
             python3 -m pip install px-proxy --no-index -f $WHEELS
 
             # Run tests
-            python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
+            python3 test.py --binary --pip --proxy=$PROXY $SUBCOMMAND
         else
             if [ -d "$WHEELS" ]; then
                 # Install Px dependencies if available
                 python3 -m pip install px-proxy --no-index -f $WHEELS
             fi
-
-            # Start shell
-            $SHELL
         fi
     fi
-
-elif [ "$OS" = "Darwin" ]; then
-    # OSX build
-
-    # Install brew
-    if ! brew -v > /dev/null; then
-        bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    fi
-    brew update
-
-    # Delete depspkg directory
-    rm -rf px.dist-wheels-osx-x86_64
-
-    for pyver in 3.7 3.8 3.9 3.10 3.11 3.12
-    do
-        # Run only for Python version if specified with -v
-        if [ ! -z "$PYVERSION" ] && [ "$pyver" != "$PYVERSION" ]; then
-            continue
-        fi
-
-        # Install Python
-        brew install python@$pyver
-
-        export PY="/usr/local/opt/python@$pyver/bin/python$pyver"
-
-        # Tools
-        $PY -m pip install --upgrade pip setuptools build wheel
-
-        # Create wheel dependencies for this Python version
-        $PY tools.py --deps
-    done
-
-    # Install build tools
-    $PY -m pip install --upgrade nuitka twine
-    brew install upx
-
-    # Install wheel dependencies
-    $PY -m pip install --upgrade px-proxy --no-index -f px.dist-wheels-osx-x86_64/px.dist-wheels
-
-    # Create package of all dependencies
-    $PY tools.py --depspkg
-
-    # Build Nuitka
-    $PY tools.py --nuitka
-
-    # Uninstall Px
-    $PY -m pip uninstall px-proxy -y
 
 else
-    # Start containers
+    # Build / start containers
 
     # Detect architecture
     if [ -z "$ARCH" ]; then
@@ -340,32 +488,27 @@ else
         docker run --privileged --rm tonistiigi/binfmt --install all
     fi
 
-    # Python wheel containers for musl and glibc
-    MUSL="quay.io/pypa/musllinux_1_1_$ARCH"
-    GLIBC="quay.io/pypa/manylinux2014_$ARCH"
-
     # Docker flags
-    DOCKERCMD="docker run -it --rm --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share"
+    DOCKERCMD="docker run -it --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share -v /root/.ssh:/root/.ssh"
 
     # Forward env vars to container
     if [ ! -z "$PROXY" ]; then
-        DOCKERCMD="$DOCKERCMD -e PROXY=$PROXY"
+        DOCKERCMD="$DOCKERCMD -e PROXY"
     fi
     if [ ! -z "$PAC" ]; then
-        DOCKERCMD="$DOCKERCMD -e PAC=$PAC"
+        DOCKERCMD="$DOCKERCMD -e PAC"
     fi
     if [ ! -z "$USERNAME" ]; then
-        DOCKERCMD="$DOCKERCMD -e USERNAME=$USERNAME"
+        DOCKERCMD="$DOCKERCMD -e USERNAME"
+    fi
+    if [ ! -z "$REMOTE_SSH" ]; then
+        DOCKERCMD="$DOCKERCMD -e REMOTE_SSH"
     fi
 
     if [ "$BUILD" = "yes" ]; then
         # Which image to load
         if [ -z "$IMAGE" ] || [ "$IMAGE" = "all" ]; then
-            IMAGE="$MUSL $GLIBC"
-        elif [ "$IMAGE" = "musl" ]; then
-            IMAGE="$MUSL"
-        elif [ "$IMAGE" = "glibc" ]; then
-            IMAGE="$GLIBC"
+            IMAGE="musl glibc"
         fi
 
         # What to build
@@ -385,7 +528,8 @@ else
         # Build on each image
         for image in $IMAGE
         do
-            $DOCKERCMD $image /px/build.sh -b $SUBCOMMAND
+            gen_px_image $image
+            $DOCKERCMD --rm $PX_IMAGE /px/build.sh -b $SUBCOMMAND
         done
     elif [ "$TEST" = "yes" ]; then
         # Check if test env vars are set
@@ -402,6 +546,10 @@ else
         if [ -z "$USERNAME" ]; then
             echo "USERNAME not configured"
             exit
+        fi
+
+        if [ -z "$REMOTE_SSH" ]; then
+            echo "REMOTE_SSH not configured"
         fi
 
         # Which image to test
@@ -427,22 +575,21 @@ else
         # Test on each image
         for image in $IMAGE
         do
-            $DOCKERCMD $image /px/build.sh -t "$SUBCOMMAND"
+            gen_px_image $image
+            $DOCKERCMD --rm $PX_IMAGE /px/build.sh -t "$SUBCOMMAND"
         done
     else
         if [ -z "$IMAGE" ]; then
             echo "$USAGE"
             exit 1
-        elif [ "$IMAGE" = "musl" ]; then
-            IMAGE="$MUSL"
-        elif [ "$IMAGE" = "glibc" ]; then
-            IMAGE="$GLIBC"
         fi
 
+        gen_px_image $IMAGE
+
         if [ -z "$SUBCOMMAND" ]; then
-            $DOCKERCMD $IMAGE /px/build.sh
+            $DOCKERCMD --rm $PX_IMAGE /px/build.sh
         else
-            $DOCKERCMD $IMAGE $SUBCOMMAND
+            $DOCKERCMD --rm $PX_IMAGE $SUBCOMMAND
         fi
     fi
 

@@ -25,6 +25,11 @@ v0.9.0
   closed by server
 - Mapped additional libcurl errors to HTTP errors to inform client
 - Added support to listen on multiple interfaces - #195
+- Added support for --auth=NONE which defers all authentication to the client,
+  allowing multiple instances of Px to be chained together to access an upstream
+  proxy that is not directly connected
+- Fixed issue with getting all interfaces correctly for --hostonly
+- Fixed issue with HTTP PUT not working in some scenarios
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

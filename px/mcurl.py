@@ -57,6 +57,9 @@ def getauth(auth):
       Prefix ONLY to support only that method - e.g ONLYNTLM => ONLY + NTLM
     """
     authval = libcurl.CURLAUTH_NONE
+    if auth == "NONE":
+        return authval
+
     if auth.startswith("NO"):
         auth = auth[len("NO"):]
         authval = libcurl.CURLAUTH_ANY & ~(getattr(libcurl, "CURLAUTH_" + auth))
@@ -71,10 +74,14 @@ def getauth(auth):
 
     return authval
 
-def cache_auth(curl, msg):
+def save_auth(curl, msg):
     "Find and cache proxy auth mechanism from headers sent by libcurl"
     if curl.proxy in MCURL.proxytype:
         # Already cached
+        return True
+
+    if curl.auth is None:
+        # No need to cache auth - client will authenticate directly
         return True
 
     if msg.startswith("Proxy-Authorization:"):
@@ -87,6 +94,29 @@ def cache_auth(curl, msg):
         return True
 
     # Not yet cached
+    return False
+
+def save_upstream(curl, msg):
+    "Find which server libcurl connected to - upstream proxy or target server"
+    if curl.upstream is None:
+        if msg.startswith("Connected to"):
+            curl.upstream = msg.split(" ")[2]
+        elif msg.startswith("Re-using existing connection"):
+            curl.upstream = msg.split(" ")[-1]
+
+        if curl.upstream is not None:
+            if curl.upstream == "(nil)":
+                # Older libcurl workaround
+                ret, curl.upstream = curl.get_primary_ip()
+            if curl.upstream == "127.0.0.1" and curl.proxy == "localhost":
+                # Older libcurl workaround
+                curl.upstream = curl.proxy
+            dprint(curl.easyhash + ": Upstream server = " + curl.upstream)
+            if curl.proxy is not None and curl.upstream == curl.proxy:
+                dprint(curl.easyhash + ": Upstream server is proxy")
+                curl.is_proxied = True
+            return True
+
     return False
 
 # Active thread running callbacks can print debug output for any other
@@ -122,13 +152,19 @@ def _debug_callback(easy, infotype, data, size, userp):
     for msg in yield_msgs(data, size):
         dprint(prefix + sanitized(msg))
         if infotype == libcurl.CURLINFO_HEADER_OUT:
-            cache_auth(curl, msg)
+            save_auth(curl, msg)
+        elif infotype == libcurl.CURLINFO_TEXT:
+            save_upstream(curl, msg)
 
     return libcurl.CURLE_OK
 
 @libcurl.debug_callback
-def _auth_callback(easy, infotype, data, size, userp):
-    "curl debug callback to get proxy auth mechanism from sent headers"
+def _wa_callback(easy, infotype, data, size, userp):
+    """
+    curl debug callback to get info not provided by libcurl today
+    - proxy auth mechanism from sent headers
+    - upstream server connected to from curl info
+    """
 
     del userp
     easyhash = gethash(easy)
@@ -136,8 +172,14 @@ def _auth_callback(easy, infotype, data, size, userp):
     if infotype == libcurl.CURLINFO_HEADER_OUT:
         # If sent header
         for msg in yield_msgs(data, size):
-            if cache_auth(curl, msg):
+            if save_auth(curl, msg):
                 # Ignore rest of headers since auth (already) cached
+                break
+    elif infotype == libcurl.CURLINFO_TEXT:
+        # If curl info
+        for msg in yield_msgs(data, size):
+            if save_upstream(curl, msg):
+                # Ignore rest of headers since upstream server found
                 break
 
     return libcurl.CURLE_OK
@@ -207,9 +249,10 @@ def _header_callback(buffer, size, nitems, userdata):
                 # Done sending headers
                 dprint(curl.easyhash + ": Done sending headers")
                 curl.sentheaders = True
-            elif data[0] == 72 and b"407" in data:
-                # Starts with H and has 407 - HTTP/x.x 407 (issue #148)
-                # Don't send back proxy headers
+            elif curl.auth is not None and data[0] == 72 and b"407" in data:
+                # Header starts with H and has 407 - HTTP/x.x 407 (issue #148)
+                # Px is configured to authenticate so don't send auth related
+                # headers from upstream proxy to client
                 dprint(curl.easyhash + ": Suppressing headers")
                 curl.suppress = True
                 return tsize
@@ -239,21 +282,32 @@ class Curl:
     client_hfile = None
 
     # Request info
+    auth = None
+    headers = None
     method = None
     proxy = None
+    request_version = None
     size = None
     url = None
-    headers = None
     user = None
-    auth = None
+    xheaders = None
 
     # Status
-    done = False
     cerr = libcurl.CURLE_OK
+    done = False
     errstr = ""
     resp = 503
     sentheaders = False
     suppress = False
+    upstream = None
+
+    # Flags
+    is_connect = False
+    is_patch = False
+    is_post = False
+    is_proxied = False
+    is_tunnel = False
+    is_upload = False
 
     def __init__(self, url, method = "GET", request_version = "HTTP/1.1", connect_timeout = 60):
         """
@@ -269,11 +323,14 @@ class Curl:
         self._setup(url, method, request_version, connect_timeout)
 
     def __del__(self):
+        "Destructor - clean up resources"
         if self.headers is not None:
+            # Free curl headers if any
             libcurl.slist_free_all(self.headers)
         libcurl.easy_cleanup(self.easy)
 
     def _setup(self, url, method, request_version, connect_timeout):
+        "Setup curl instance based on request info"
         dprint(self.easyhash + ": %s %s using %s" % (method, url, request_version))
 
         # Ignore proxy environment variables
@@ -293,7 +350,11 @@ class Curl:
         # Set HTTP method
         self.method = method
         if method == "CONNECT":
+            self.is_connect = True
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CONNECT_ONLY, True)
+
+            # No proxy yet so setup tunnel for direct CONNECT
+            self.set_tunnel()
 
             if curl_version() < 0x072D00:
                 # libcurl < v7.45 does not support CURLINFO_ACTIVESOCKET so it is not possible
@@ -310,10 +371,14 @@ class Curl:
         elif method == "HEAD":
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_NOBODY, True)
         elif method == "POST":
+            self.is_post = True
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_POST, True)
         elif method == "PUT":
+            self.is_upload = True
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_UPLOAD, True)
         elif method in ["PATCH", "DELETE"]:
+            if method == "PATCH":
+                self.is_patch = True
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_CUSTOMREQUEST, method.encode("utf-8"))
         else:
             dprint(self.easyhash + ": Unknown method: " + method)
@@ -323,67 +388,58 @@ class Curl:
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_URL, url.encode("utf-8"))
 
         # Set HTTP version to use
+        self.request_version = request_version
         version = request_version.split("/")[1].replace(".", "_")
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_VERSION,
             getattr(libcurl, "CURL_HTTP_VERSION_" + version))
 
         # Debug callback default disabled
-        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, None)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _wa_callback)
 
     def reset(self, url, method = "GET", request_version = "HTTP/1.1", connect_timeout = 60):
         "Reuse existing curl instance for another request"
         dprint(self.easyhash + ": Resetting curl")
         libcurl.easy_reset(self.easy)
         self.sock_fd = None
+
         self.client_rfile = None
         self.client_wfile = None
         self.client_hfile = None
+
+        self.auth = None
         self.proxy = None
         self.size = None
         self.user = None
-        self.auth = None
-        self.done = False
+        self.xheaders = None
+
         self.cerr = libcurl.CURLE_OK
+        self.done = False
         self.errstr = ""
         self.resp = 503
         self.sentheaders = False
         self.suppress = False
+        self.upstream = None
+
+        self.is_connect = False
+        self.is_patch = False
+        self.is_post = False
+        self.is_proxied = False
+        self.is_tunnel = False
+        self.is_upload = False
 
         if self.headers is not None:
+            # Free curl headers if any
             libcurl.slist_free_all(self.headers)
             self.headers = None
 
         self._setup(url, method, request_version, connect_timeout)
 
-    def is_connect(self):
-        "True if this is an HTTP CONNECT request"
-        return self.method == "CONNECT"
-
-    def is_upload(self):
-        "True if this is an HTTP PUT or POST request"
-        return self.method in ["PUT", "POST"]
-
-    def is_patch(self):
-        "True if this is an HTTP PATCH request"
-        return self.method in ["PATCH"]
-
-    def get_response(self):
-        "Return response code of completed request"
-        codep = ctypes.c_int()
-        if self.method == "CONNECT":
-            ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_HTTP_CONNECTCODE, ctypes.byref(codep))
-        else:
-            ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_RESPONSE_CODE, ctypes.byref(codep))
-        return ret, codep.value
-
-    def get_activesocket(self):
-        "Return active socket for this easy instance"
-        if sys.platform == "win32":
-            sock_fd = ctypes.c_uint()
-        else:
-            sock_fd = ctypes.c_int()
-        ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_ACTIVESOCKET, ctypes.byref(sock_fd))
-        return ret, sock_fd.value
+    def set_tunnel(self, tunnel=True):
+        "Set to tunnel through proxy if no proxy or proxy + auth"
+        dprint(self.easyhash + ": HTTP proxy tunneling = " + str(tunnel))
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPPROXYTUNNEL, tunnel)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SUPPRESS_CONNECT_HEADERS, tunnel)
+        self.is_tunnel = tunnel
 
     def set_proxy(self, proxy, port = 0, noproxy = None):
         """
@@ -395,20 +451,19 @@ class Curl:
 
         self.proxy = proxy
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXY, proxy.encode("utf-8"))
-        if port != 0:
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPORT, port)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYPORT, port)
         if noproxy is not None:
             dprint(self.easyhash + ": Set noproxy to " + noproxy)
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_NOPROXY, noproxy.encode("utf-8"))
 
-        if self.is_connect():
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPPROXYTUNNEL, True)
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SUPPRESS_CONNECT_HEADERS, True)
+        if self.is_connect:
+            # Proxy but no auth (yet) so just connect and let client tunnel and authenticate
+            self.set_tunnel(tunnel=False)
 
         return True
 
     def set_auth(self, user, password = None, auth = "ANY"):
-        "Set authentication info - call after set_proxy() to enable auth caching"
+        "Set proxy authentication info - call after set_proxy() to enable auth caching"
         if user == ":":
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYUSERPWD, user.encode("utf-8"))
         else:
@@ -428,42 +483,61 @@ class Curl:
                 self.auth = auth
                 dprint(f"{self.easyhash}: Setting proxy auth mechanism to {self.auth}")
 
-                # Discover and cache what libcurl uses
-                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _auth_callback)
-
             authval = getauth(self.auth)
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_PROXYAUTH, authval)
+
+            if self.is_connect:
+                # Proxy + auth so tunnel and authenticate
+                self.set_tunnel()
 
     def set_headers(self, xheaders):
         "Set headers to send"
         self.headers = ctypes.POINTER(libcurl.slist)()
+        skip_proxy_headers = True if self.proxy is not None and self.auth is not None else False
         for header in xheaders:
-            if self.proxy is not None and header.lower().startswith("proxy-"):
-                # Skip all proxy headers if no proxy configured
+            lcheader = header.lower()
+            if skip_proxy_headers and lcheader.startswith("proxy-"):
+                # Don't forward proxy headers from client if no upstream proxy
+                # or no auth specified (client will authenticate directly)
                 dprint(self.easyhash + ": Skipping header =!> %s: %s" % (header, xheaders[header]))
                 continue
-            elif header.lower() == "content-length":
+            elif lcheader == "content-length":
                 size = int(xheaders[header])
-                if self.is_upload():
+                if self.is_upload or self.is_post:
                     # Save content-length for PUT/POST later
                     # Turn off Transfer-Encoding since size is known
                     self.size = size
                     self.headers = libcurl.slist_append(self.headers, b"Transfer-Encoding:")
                     self.headers = libcurl.slist_append(self.headers, b"Expect:")
-                    libcurl.easy_setopt(self.easy, libcurl.CURLOPT_POSTFIELDSIZE, size)
-                elif self.is_patch():
+                    if self.is_post:
+                        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_POSTFIELDSIZE, size)
+                    else:
+                        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_INFILESIZE, size)
+                elif self.is_patch:
                     # Get data from client - libcurl doesn't seem to use READFUNCTION
-                    data = self.client_rfile.read(size)
+                    try:
+                        data = self.client_rfile.read(size)
+                    except AttributeError as exc:
+                        dprint("set_headers() called before buffer()/bridge()?")
+                        raise exc
                     libcurl.easy_setopt(self.easy, libcurl.CURLOPT_COPYPOSTFIELDS, data)
-            elif header.lower() == "user-agent":
+            elif lcheader == "user-agent":
                 # Forward user agent via setopt
                 self.set_useragent(xheaders[header])
                 continue
+            dprint(self.easyhash + sanitized(": Adding header => %s: %s" % (header, xheaders[header])))
             self.headers = libcurl.slist_append(self.headers,
                 ("%s: %s" % (header, xheaders[header])).encode("utf-8"))
 
         if len(xheaders) != 0:
-            libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPHEADER, self.headers)
+            if self.is_connect and not self.is_tunnel:
+                # Send client headers later in select() - just connect to proxy
+                # and let client tunnel and authenticate directly
+                dprint(self.easyhash + ": Delaying headers")
+                self.xheaders = xheaders
+            else:
+                dprint(self.easyhash + ": Setting headers")
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPHEADER, self.headers)
 
     def set_verbose(self, enable = True):
         "Set verbose mode"
@@ -522,32 +596,6 @@ class Curl:
 
         self.bridge(rfile, wfile, hfile)
 
-    def get_data(self, encoding = "utf-8"):
-        """
-        Return data written by curl perform to buffer()
-
-        encoding = "utf-8" by default, change or set to None if bytes preferred
-        """
-        val = b""
-        if isinstance(self.client_wfile, io.BytesIO):
-            val = self.client_wfile.getvalue()
-        if encoding is not None:
-            val = val.decode(encoding)
-        return val
-
-    def get_headers(self, encoding = "utf-8"):
-        """
-        Return headers written by curl perform to buffer()
-
-        encoding = "utf-8" by default, change or set to None if bytes preferred
-        """
-        val = b""
-        if isinstance(self.client_hfile, io.BytesIO):
-            val = self.client_hfile.getvalue()
-        if encoding is not None:
-            val = val.decode(encoding)
-        return val
-
     def set_transfer_decoding(self, enable = False):
         "Set curl to turn off transfer decoding - let client do it"
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTP_TRANSFER_DECODING, enable)
@@ -573,6 +621,58 @@ class Curl:
             dprint(self.easyhash + ": Connection failed: " + str(self.cerr) + "; " + self.errstr)
         MCURL.handles.pop(self.easyhash)
         return self.cerr
+
+    # Get status and info after running curl handle
+
+    def get_response(self):
+        "Return response code of completed request"
+        codep = ctypes.c_int()
+        if self.method == "CONNECT":
+            ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_HTTP_CONNECTCODE, ctypes.byref(codep))
+        else:
+            ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_RESPONSE_CODE, ctypes.byref(codep))
+        return ret, codep.value
+
+    def get_activesocket(self):
+        "Return active socket for this easy instance"
+        if sys.platform == "win32":
+            sock_fd = ctypes.c_uint()
+        else:
+            sock_fd = ctypes.c_int()
+        ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_ACTIVESOCKET, ctypes.byref(sock_fd))
+        return ret, sock_fd.value
+
+    def get_primary_ip(self):
+        "Return primary IP address of this easy instance"
+        ip = ctypes.c_char_p()
+        ret = libcurl.easy_getinfo(self.easy, libcurl.CURLINFO_PRIMARY_IP, ctypes.byref(ip))
+        return ret, ip.value.decode("utf-8")
+
+    def get_data(self, encoding = "utf-8"):
+        """
+        Return data written by curl perform to buffer()
+
+        encoding = "utf-8" by default, change or set to None if bytes preferred
+        """
+        val = b""
+        if isinstance(self.client_wfile, io.BytesIO):
+            val = self.client_wfile.getvalue()
+        if encoding is not None:
+            val = val.decode(encoding)
+        return val
+
+    def get_headers(self, encoding = "utf-8"):
+        """
+        Return headers written by curl perform to buffer()
+
+        encoding = "utf-8" by default, change or set to None if bytes preferred
+        """
+        val = b""
+        if isinstance(self.client_hfile, io.BytesIO):
+            val = self.client_hfile.getvalue()
+        if encoding is not None:
+            val = val.decode(encoding)
+        return val
 
 @libcurl.socket_callback
 def _socket_callback(easy, sock_fd, ev_bitmask, userp, socketp):
@@ -721,7 +821,7 @@ class MCurl:
         dprint(curl.easyhash + ": Add handle")
         if curl.easyhash not in self.handles:
             self.handles[curl.easyhash] = curl
-            if curl.is_connect() and curl_version() < 0x072D00:
+            if curl.is_connect and curl_version() < 0x072D00:
                 # Need to know socket assigned for CONNECT since used later in select()
                 # CURLINFO_ACTIVESOCKET not available on libcurl < v7.45  so need this
                 # hack for older versions
@@ -837,7 +937,8 @@ class MCurl:
 
                     # Retry since proxy auth not cached yet
                     curl.resp = 503
-                else:
+                    curl.errstr += out + "; "
+                elif curl.auth is not None:
                     # Proxy auth did not work for whatever reason
                     out = "Proxy authentication failed: "
                     if curl.user is not None:
@@ -846,14 +947,19 @@ class MCurl:
                         out += "single sign-on failed, user/password might be required"
 
                     curl.resp = 401
+                    curl.errstr += out + "; "
 
                     # Add this proxy to failed list and don't try again
                     with self._lock:
                         self.failed.append(curl.proxy)
+                else:
+                    # Setup client to authenticate directly with upstream proxy
+                    dprint(curl.easyhash + ": Client to authenticate with upstream proxy")
+                    if not curl.is_connect:
+                        curl.resp = codep
+                        out = "Proxy authentication required"
 
-                curl.errstr += out + "; "
-
-        if curl.is_connect() and curl.sock_fd is None:
+        if curl.is_connect and curl.sock_fd is None:
             # Need sock_fd for select()
             if curl_version() < 0x072D00:
                 # This should never happen since we have set CURLOPT_FRESH_CONNECT = True
@@ -885,6 +991,15 @@ class MCurl:
 
         dprint(curl.easyhash + ": Starting select loop")
         curl_sock = socket.fromfd(curl.sock_fd, socket.AF_INET, socket.SOCK_STREAM)
+
+        if curl.is_connect and (not curl.is_tunnel and curl.is_proxied):
+            # Send original headers from client to tunnel and authenticate with
+            # upstream proxy
+            dprint(curl.easyhash + ": Sending original client headers")
+            curl_sock.sendall(f"{curl.method} {curl.url} {curl.request_version}\r\n".encode("utf-8"))
+            for header in curl.xheaders:
+                curl_sock.sendall(f"{header}: {curl.xheaders[header]}\r\n".encode("utf-8"))
+            curl_sock.sendall(b"\r\n")
 
         # sockets will be removed from these lists, when they are
         # detected as closed by remote host; wlist contains sockets

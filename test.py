@@ -13,6 +13,7 @@ import uuid
 
 import psutil
 
+from px.main import get_host_ips
 from px.version import __version__
 
 import tools
@@ -25,7 +26,7 @@ USERNAME = ""
 AUTH = ""
 BINARY = ""
 TESTS = []
-STDOUT = None
+STDOUT = {}
 
 try:
     ConnectionRefusedError
@@ -63,7 +64,7 @@ def curlcli(url, port, method = "GET", data = "", proxy = ""):
     if len(data) != 0:
         cmd.extend(["-d", data])
 
-    writeflush(" ".join(cmd) + "\n")
+    writeflush(port, " ".join(cmd) + "\n")
 
     try:
         return exec(cmd, port, shell = False)
@@ -106,7 +107,7 @@ def filterHeaders(a):
 
 def checkMethod(method, port, secure = False):
     testname = "%s %s" % (method, "secured" if secure else "")
-    writeflush("Started: %s\n" % testname)
+    writeflush(port, f"Started: {testname}\n")
 
     url = "http"
     if secure:
@@ -126,46 +127,38 @@ def checkMethod(method, port, secure = False):
     else:
         aret, adata = tools.curl(url, method, data = data)
     if aret != 0:
-        writeflush("%s: Curl failed direct: %d\n%s\n" % (testname, aret, adata))
+        writeflush(port, f"{testname}: Curl failed direct: {aret}\n{adata}\n")
         return False
     a = filterHeaders(adata)
 
     if "--curlcli" in sys.argv:
-        bret, bdata = curlcli(url, port, method, data, proxy = "localhost:" + str(port))
+        bret, bdata = curlcli(url, port, method, data, proxy = "127.0.0.1:" + str(port))
     else:
-        bret, bdata = tools.curl(url, method, proxy = "localhost:" + str(port), data = data)
+        bret, bdata = tools.curl(url, method, proxy = "127.0.0.1:" + str(port), data = data)
     if bret != 0:
-        writeflush("%s: Curl failed thru proxy: %d\n%s\n" % (testname, bret, bdata))
+        writeflush(port, f"{testname}: Curl failed thru proxy: {bret}\n{bdata}\n")
         return False
     b = filterHeaders(bdata)
 
     if a != b:
         for diff in difflib.unified_diff(a, b):
-            writeflush(diff + "\n")
-        writeflush("%s: Failed for %s\n" % (testname, url))
+            writeflush(port, diff + "\n")
+        writeflush(port, f"{testname}: Failed for {url}\n")
         return False
 
-    writeflush("%s: Passed\n" % testname)
+    writeflush(port, f"{testname}: Passed\n")
     if not secure:
         return checkMethod(method, port, True)
 
     return True
 
-def run(port):
-    if not checkPxStart("localhost", port):
-        return False
-
-    for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
-        if not checkMethod(method, port):
-            return False
-
-    return True
-
-def writeflush(data):
-    STDOUT.write(data)
+def writeflush(port, data):
+    if port not in STDOUT:
+        return
+    STDOUT[port].write(data)
     if data[-1] != "\n":
-        STDOUT.write("\n")
-    STDOUT.flush()
+        STDOUT[port].write("\n")
+    STDOUT[port].flush()
 
 def runTest(test, cmd, offset, port):
     global STDOUT
@@ -175,14 +168,14 @@ def runTest(test, cmd, offset, port):
         port += offset
 
     if "--nodebug" not in sys.argv:
-        cmd += "--debug --uniqlog --port=%d %s" % (port, test[0])
+        cmd += f"{test[0]} --port={port} --uniqlog"
 
     testproc = test[1]
     data = test[2]
 
     # Output to file
-    STDOUT = open("test-%d.log" % port, "w")
-    writeflush("Test %s on port %d\ncmd: %s\n" % (testproc.__name__, port, cmd))
+    STDOUT[port] = open("test-%d.log" % port, "w")
+    writeflush(port, f"Test {testproc.__name__} on port {port}\ncmd: {cmd}\n")
 
     print("Starting test %s on port %d" % (testproc.__name__, port))
 
@@ -191,11 +184,17 @@ def runTest(test, cmd, offset, port):
     if "--norun" not in sys.argv:
         subp = subprocess.Popen(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
 
-        if testproc in [installTest, uninstallTest]:
+        ret = True
+        if testproc in [installTest, uninstallTest, testTest]:
             # Wait for Px to exit for these tests
-            subp.wait()
+            retcode = subp.wait()
+            if retcode != 0:
+                writeflush(port, f"Subprocess failed with {retcode}\n")
+                ret = False
 
-        ret = testproc(data, port)
+        if ret:
+            # Subprocess (if applicable) was successful
+            ret = testproc(data, port)
 
         try:
             # Kill Px since runtime test is done
@@ -213,21 +212,15 @@ def runTest(test, cmd, offset, port):
     else:
         ret = testproc(data, port)
 
-    STDOUT.close()
+    if not ret:
+        writeflush(port, "Test failed")
+
+    STDOUT[port].close()
 
     return ret
 
 def getips():
-    ip_list = ["127.0.0.1"]
-    ifs = psutil.net_if_addrs()
-    for ifname in ifs:
-        for addr in ifs[ifname]:
-            if addr.family == socket.AddressFamily.AF_INET:
-                ip = addr.address
-                if ip not in ip_list and not ip.startswith("169"):
-                    ip_list.append(ip)
-
-    return ip_list
+    return [str(ip) for ip in get_host_ips()]
 
 def checkPxStart(ip, port):
     # Make sure Px starts
@@ -243,7 +236,7 @@ def checkPxStart(ip, port):
             time.sleep(1)
             retry -= 1
             if retry == 0:
-                writeflush("Px didn't start @ %s:%d\n" % (ip, port))
+                writeflush(port, f"Px didn't start @ {ip}:{port}\n")
                 return False
 
     return True
@@ -263,14 +256,14 @@ def checkCommon(name, ips, port, checkProc):
     localips = getips()
     for lip in localips:
         for pport in set([3000, port]):
-            writeflush("Checking %s: %s:%d\n" % (name, lip, pport))
+            writeflush(port, f"Checking {name}: {lip}:{pport}\n")
             ret = checkProc(lip, pport)
 
-            writeflush(str(ret) + ": ")
+            writeflush(port, str(ret) + ": ")
             if ((lip not in ips or port != pport) and ret is False) or (lip in ips and port == pport and ret is True):
-                writeflush("Passed\n")
+                writeflush(port, "Passed\n")
             else:
-                writeflush("Failed\n")
+                writeflush(port, "Failed\n")
                 return False
 
     return True
@@ -292,31 +285,32 @@ def checkFilter(ips, port):
             rcode, _ = curlcli(url = "http://google.com", port = port, proxy = "%s:%d" % (lip, port))
         else:
             rcode, _ = tools.curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
-        writeflush("Returned %d\n" % rcode)
+        writeflush(port, f"Returned {rcode}\n")
         if rcode == 0:
             return True
         elif rcode in [7, 52, 56]:
             return False
         else:
-            writeflush("Failed: curl return code is not 0, 7, 52, 56\n")
+            writeflush(port, "Failed: curl return code is not 0, 7, 52, 56\n")
             sys.exit()
 
     return checkCommon("checkFilter", ips, port, checkProc)
 
 def remoteTest(port, fail=False):
-    lip = 'echo $SSH_CLIENT ^| cut -d \\\" \\\" -f 1,1'
+    lip = "\\$(echo \\$SSH_CLIENT | cut -d ' ' -f 1,1)"
     cmd = os.getenv("REMOTE_SSH")
     if cmd is None:
-        writeflush("Skipping: Remote test - REMOTE_SSH not set\n")
-        writeflush("  E.g. export REMOTE_SSH=plink user:pass@\n")
-        return
-    cmd = cmd + " curl --proxy `%s`:%s --connect-timeout 2 -s http://google.com" % (lip, port)
-    writeflush("Checking: Remote: %d\n" % port)
-    ret = subprocess.call(cmd, stdout=DEVNULL, stderr=DEVNULL)
+        writeflush(port, "Skipping: Remote test - REMOTE_SSH not set\n")
+        writeflush(port, "  E.g. export REMOTE_SSH=plink user:pass@\n")
+        writeflush(port, "  E.g. export REMOTE_SSH=ssh -i ~/.ssh/id_rsa_px user@IP\n")
+        return True
+    cmd = cmd + ' "curl --proxy %s:%s --connect-timeout 2 -s http://google.com"' % (lip, port)
+    writeflush(port, f"Checking: Remote: :{port}\n")
+    ret = subprocess.call(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
     if (ret == 0 and fail == False) or (ret != 0 and fail == True) :
-        writeflush("Returned %d: Passed\n" % ret)
+        writeflush(port, f"Returned {ret}: Passed\n")
     else:
-        writeflush("Returned %d: Failed\n" % ret)
+        writeflush(port, f"Returned {ret}: Failed\n")
         return False
 
     return True
@@ -330,7 +324,7 @@ def gatewayTest(ips, port):
 def allowTest(ips, port):
     return checkFilter(ips, port) and remoteTest(port)
 
-def allowTestFail(ips, port):
+def allowTestNot(ips, port):
     return checkFilter(ips, port) and remoteTest(port, fail=True)
 
 def listenTestLocal(ip, port):
@@ -339,18 +333,60 @@ def listenTestLocal(ip, port):
 def listenTestRemote(ip, port):
     return checkSocket([ip], port) and remoteTest(port)
 
-def httpTest(skip, port):
-    del skip
-    return run(port)
+def chainTest(proxyarg, port):
+    if not checkPxStart("127.0.0.1", port):
+        return False
+
+    offset = 0
+    cmd = sys.executable + " %s " % os.path.abspath("../px.py")
+    if "--proxy" not in proxyarg and "--pac" not in proxyarg:
+        # Upstream Px is direct
+        ret = runTest((f"--test=all --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+        if not ret:
+            return False
+        offset += 1
+
+        ret = runTest((f"--test=all --test-auth --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+        if not ret:
+            return False
+        offset += 1
+    else:
+        # Upstream Px may go through NTLM proxy
+        if "--auth" not in proxyarg:
+            # Upstream Px will authenticate
+            ret = runTest((f"--test=all --auth=NONE --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+            if not ret:
+                return False
+            offset += 1
+        else:
+            # Add auth info to cmd
+            proxyarg = (" --username=" + USERNAME) if len(USERNAME) != 0 else ""
+            proxyarg += (" --auth=" + AUTH) if len(AUTH) != 0 else ""
+
+            # Upstream Px will not authenticate
+            ret = runTest((f"--test=all --proxy=127.0.0.1:{port} {proxyarg}", testTest, None), cmd, offset, port*10)
+            if not ret:
+                return False
+            offset += 1
+
+            ret = runTest((f"--test=all --test-auth --proxy=127.0.0.1:{port} {proxyarg}", testTest, None), cmd, offset, port*10)
+            if not ret:
+                return False
+            offset += 1
+
+    return True
+
+def testTest(skip, port):
+    return True
 
 def installTest(cmd, port):
     time.sleep(1)
     ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px", port)
     if ret != 0:
-        writeflush("Failed: registry query failed: %d\n%s\n" % (ret, data))
+        writeflush(port, f"Failed: registry query failed: {ret}\n{data}\n")
         return False
     if cmd.strip().replace("powershell -Command ", "") not in data.replace('"', ""):
-        writeflush("Failed: %s --install\n%s\n" % (cmd, data))
+        writeflush(port, f"Failed: {cmd} --install\n{data}\n")
         return False
     return True
 
@@ -359,19 +395,19 @@ def uninstallTest(skip, port):
     time.sleep(1)
     ret, data = exec("reg query HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v Px", port)
     if ret == 0:
-        writeflush("reg query passed after uninstall\n%s\n" % data)
+        writeflush(port, f"reg query passed after uninstall\n{data}\n")
         return False
     return True
 
 def quitTest(cmd, port):
-    if not checkPxStart("localhost", port):
-        writeflush("Px did not start\n")
+    if not checkPxStart("127.0.0.1", port):
+        writeflush(port, "Px did not start\n")
         return False
 
-    writeflush("cmd: " + cmd + "--quit\n")
+    writeflush(port, f"cmd: {cmd} --quit\n")
     ret, data = exec(cmd + "--quit", port)
     if ret != 0 or "Quitting Px .. DONE" not in data:
-        writeflush("Failed: Unable to --quit Px: %d\n%s\n" % (ret, data + "\n"))
+        writeflush(port, f"Failed: Unable to --quit Px: {ret}\n{data}\n\n")
         return False
 
     return True
@@ -405,8 +441,8 @@ def socketTestSetup():
             spl = ip.split(".")
             oct = ".".join(spl[0:2])
 
-            atest = allowTestFail
-            if oct in ["172"]:
+            atest = allowTestNot
+            if oct == "10.0":
                 atest = allowTest
 
             TESTS.append(("--gateway --allow=%s.*.*" % oct,
@@ -422,7 +458,7 @@ def socketTestSetup():
                 cmd = "--listen=" + ip
 
             testproc = listenTestLocal
-            if "172" in ip:
+            if "10.0" in ip:
                 testproc = listenTestRemote
 
             TESTS.append((cmd, testproc, ip))
@@ -458,10 +494,28 @@ def auto():
     if "--nosocket" not in sys.argv:
         socketTestSetup()
     if "--noproxy" not in sys.argv:
+        # px --test in direct, --proxy and --pac modes + --noproxy and --test-auth
         for proxyarg in getproxyargs():
-            TESTS.append((proxyarg + " --workers=1", httpTest, None))
+            TESTS.append((proxyarg + " --test=all", testTest, None))
+            TESTS.append((proxyarg + " --test=all --test-auth", testTest, None))
             if "--nonoproxy" not in sys.argv and len(proxyarg) != 0:
-                TESTS.append((proxyarg + " --workers=2 --threads=30 --noproxy=*.*.*.*", httpTest, None))
+                TESTS.append((proxyarg + " --test=all --noproxy=*.*.*.*", testTest, None))
+                TESTS.append((proxyarg + " --test=all --test-auth --noproxy=*.*.*.*", testTest, None))
+
+        if "--nochain" not in sys.argv:
+            # All above tests through Px in direct, --proxy and --pac modes + --noproxy and --auth=NONE
+            for proxyarg in getproxyargs():
+                # Through proxy with auth or direct
+                TESTS.append((proxyarg, chainTest, proxyarg))
+
+                if len(proxyarg) != 0:
+                    # Through proxy with --auth=NONE
+                    parg = proxyarg + " --auth=NONE"
+                    TESTS.append((parg, chainTest, parg))
+
+                    if "--nonoproxy" not in sys.argv:
+                        # Bypass with noproxy
+                        TESTS.append((proxyarg + " --noproxy=*.*.*.*", chainTest, proxyarg))
 
     workers = tools.get_argval("workers") or "4"
     pool = multiprocessing.Pool(processes = int(workers))
@@ -638,6 +692,9 @@ def main():
         PORT = 3128
     USERNAME = tools.get_argval("username")
     if sys.platform != "win32":
+        if len(USERNAME) == 0:
+            print("USERNAME required on non-Windows platforms")
+            sys.exit()
         USERNAME = USERNAME.replace("\\", "\\\\")
     AUTH = tools.get_argval("auth")
     BINARY = tools.get_argval("binary")

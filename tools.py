@@ -410,7 +410,7 @@ def depspkg():
         # Use auditwheel to include libraries and --strip
         #   auditwheel not relevant and --strip not effective on Windows
         os.chdir(dist)
-        
+
         rmtree("wheelhouse")
         for whl in glob.glob("*.whl"):
             if machine not in whl:

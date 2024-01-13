@@ -372,6 +372,9 @@ def embed():
     with open(pxexe, "wb") as f:
         f.write(dataout)
 
+    # Delete Scripts directory
+    rmtree(os.path.join(dist, "Scripts"))
+
     # Compress some binaries
     os.chdir(dist)
     if shutil.which("upx") is not None:

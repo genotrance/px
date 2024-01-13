@@ -127,6 +127,12 @@ if [ -f "/.dockerenv" ]; then
     export WHEELS="/px/px.dist-wheels-linux-$ABI-$ARCH/px.dist-wheels"
     export AUTH=""
 
+    export PROXY="127.0.0.1:3127"
+    export USERNAME="test"
+    export PX_PASSWORD="12345"
+    export PX_CLIENT_USERNAME=$USERNAME
+    export PX_CLIENT_PASSWORD=$PX_PASSWORD
+
     # Pick latest-1 python if manylinux / musllinux
     #   Nuitka support lags behind Python releases
     export PY="/opt/python/`ls -v /opt/python | grep cp | tail -n 2 | head -n 1`/bin/python3"
@@ -196,7 +202,7 @@ if [ -f "/.dockerenv" ]; then
             apt clean
         fi
 
-        export AUTH="--auth=NONEGOTIATE"
+        export AUTH="NONEGOTIATE"
 
     elif [ "$DISTRO" = "opensuse-tumbleweed" ] || [ "$DISTRO" = "opensuse-leap" ]; then
 
@@ -207,7 +213,7 @@ if [ -f "/.dockerenv" ]; then
             zypper cc -a
         fi
 
-        export AUTH="--auth=NONEGOTIATE"
+        export AUTH="NONEGOTIATE"
 
     elif [ "$DISTRO" = "void" ]; then
 
@@ -326,7 +332,7 @@ if [ -f "/.dockerenv" ]; then
                 python3 -m pip install px-proxy --no-index -f $WHEELS
 
                 # Run tests
-                python3 test.py --binary --pip --proxy=$PROXY --pac=$PAC --username=$USERNAME $AUTH $SUBCOMMAND
+                python3 test.py $SUBCOMMAND
             else
                 if [ -d "$WHEELS" ]; then
                     # Install Px dependencies if available
@@ -346,6 +352,12 @@ elif [ "$OS" = "Darwin" ]; then
 
     export PXBIN="`pwd`/px.dist-osx-$ARCH/px.dist/px"
     export WHEELS="`pwd`/px.dist-wheels-osx-$ARCH/px.dist-wheels"
+
+    export PROXY="127.0.0.1:3127"
+    export OSX_USERNAME="test"
+    export PX_PASSWORD="12345"
+    export PX_CLIENT_USERNAME=$OSX_USERNAME
+    export PX_CLIENT_PASSWORD=$PX_PASSWORD
 
     # Install brew
     if ! brew -v > /dev/null; then
@@ -452,23 +464,11 @@ elif [ "$OS" = "Darwin" ]; then
                 exit
             fi
 
-            # Check if test env vars are set
-            if [ -z "$PROXY" ]; then
-                echo "PROXY not configured"
-                exit
-            fi
-
-            if [ -z "$PX_USERNAME" ]; then
-                # Cannot set $USERNAME on OSX
-                echo "PX_USERNAME not configured"
-                exit
-            fi
-
             # Install wheel dependencies
             python3 -m pip install px-proxy --no-index -f $WHEELS
 
             # Run tests
-            python3 test.py --binary --pip --proxy=$PROXY $SUBCOMMAND
+            python3 test.py $SUBCOMMAND
         else
             if [ -d "$WHEELS" ]; then
                 # Install Px dependencies if available
@@ -478,7 +478,7 @@ elif [ "$OS" = "Darwin" ]; then
     fi
 
 else
-    # Build / start containers
+    # Build / start containers on Linux
 
     # Detect architecture
     if [ -z "$ARCH" ]; then
@@ -489,18 +489,9 @@ else
     fi
 
     # Docker flags
-    DOCKERCMD="docker run -it --network host --privileged -v `pwd`:/px -v /root/.local/share:/root/.local/share -v /root/.ssh:/root/.ssh"
+    DOCKERCMD="docker run -it --network host --privileged -v `pwd`:/px -v /root/.ssh:/root/.ssh"
 
     # Forward env vars to container
-    if [ ! -z "$PROXY" ]; then
-        DOCKERCMD="$DOCKERCMD -e PROXY"
-    fi
-    if [ ! -z "$PAC" ]; then
-        DOCKERCMD="$DOCKERCMD -e PAC"
-    fi
-    if [ ! -z "$USERNAME" ]; then
-        DOCKERCMD="$DOCKERCMD -e USERNAME"
-    fi
     if [ ! -z "$REMOTE_SSH" ]; then
         DOCKERCMD="$DOCKERCMD -e REMOTE_SSH"
     fi
@@ -533,21 +524,6 @@ else
         done
     elif [ "$TEST" = "yes" ]; then
         # Check if test env vars are set
-        if [ -z "$PROXY" ]; then
-            echo "PROXY not configured"
-            exit
-        fi
-
-        if [ -z "$PAC" ]; then
-            echo "PAC not configured"
-            exit
-        fi
-
-        if [ -z "$USERNAME" ]; then
-            echo "USERNAME not configured"
-            exit
-        fi
-
         if [ -z "$REMOTE_SSH" ]; then
             echo "REMOTE_SSH not configured"
         fi

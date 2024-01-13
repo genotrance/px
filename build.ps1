@@ -25,12 +25,15 @@ if ($null -eq (Get-Command "scoop" -ErrorAction SilentlyContinue)) {
 Remove-Item -Recurse -Force px.dist-wheels-windows-amd64 -ErrorAction SilentlyContinue
 
 # Install latest Python
-if ($null -eq (Get-Command "python" -ErrorAction SilentlyContinue)) {
+if ($null -eq (Invoke-Expression "scoop list ^python$")) {
     # Install Python
     scoop install python
 } else {
     # Upgrade Python
     scoop update python
+    
+    # Make latest Python the default
+    scoop reset python
 }
 
 # Get latest minor version

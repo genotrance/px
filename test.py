@@ -14,7 +14,7 @@ import uuid
 
 import psutil
 
-from px.main import get_host_ips
+from px.config import get_host_ips
 from px.version import __version__
 
 import tools

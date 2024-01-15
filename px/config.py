@@ -6,6 +6,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 import urllib.parse
 
 from .debug import pprint, Debug
@@ -61,44 +62,6 @@ LogLocation = int
     LOG_UNIQLOG,
     LOG_STDOUT
 ) = range(5)
-
-class State:
-    """Stores runtime state per process - shared across threads"""
-
-    # Config
-    gateway = False
-    hostonly = False
-    ini = ""
-    idle = 30
-    listen = None
-    noproxy = ""
-    pac = ""
-    proxyreload = 60
-    socktimeout = 20.0
-    useragent = ""
-
-    # Auth
-    auth = "ANY"
-    username = ""
-
-    # Objects
-    allow = netaddr.IPGlob("*.*.*.*")
-    config = None
-    debug = None
-    location = LOG_NONE
-    mcurl = None
-    stdout = None
-    wproxy = None
-
-    # Tracking
-    proxy_last_reload = None
-
-    # Lock for thread synchronization of State object
-    # multiprocess sync isn't neccessary because State object is only shared by
-    # threads - every process has it's own State object
-    state_lock = threading.Lock()
-
-    test = None
 
 ###
 # Get info
@@ -175,9 +138,6 @@ def get_host_ips():
 
     return localips
 
-###
-# Proxy management
-
 def file_url_to_local_path(file_url):
     parts = urllib.parse.urlparse(file_url)
     path = urllib.parse.unquote(parts.path)
@@ -188,40 +148,8 @@ def file_url_to_local_path(file_url):
     if len(path) > 2 and path[1] == ':':
         return path
 
-def reload_proxy():
-    # Return if proxies specified in Px config
-    if State.wproxy.mode in [wproxy.MODE_CONFIG, wproxy.MODE_CONFIG_PAC]:
-        return
-
-    # Do locking to avoid updating globally shared State object by multiple
-    # threads simultaneously
-    State.state_lock.acquire()
-    try:
-        # Check if need to refresh
-        if (State.proxy_last_reload is not None and
-                time.time() - State.proxy_last_reload < State.proxyreload):
-            dprint("Skip proxy refresh")
-            return
-
-        # Reload proxy information
-        State.wproxy = wproxy.Wproxy(noproxy = State.noproxy, debug_print = dprint)
-
-        State.proxy_last_reload = time.time()
-
-    finally:
-        State.state_lock.release()
-
 ###
 # Actions
-
-def save():
-    with open(State.ini, "w") as cfgfile:
-        State.config.write(cfgfile)
-    pprint("Saved config to " + State.ini + "\n")
-    with open(State.ini, "r") as cfgfile:
-        sys.stdout.write(cfgfile.read())
-
-    sys.exit()
 
 def quit(checkOnly = False, exit = True):
     count = 0
@@ -259,7 +187,7 @@ def quit(checkOnly = False, exit = True):
                             if param.endswith("px.py") or param.endswith("px" + ext):
                                 qt = True
                                 break
-                elif config.is_compiled():
+                elif is_compiled():
                     # Binary
                     qt = True
                 if qt:
@@ -296,122 +224,6 @@ def quit(checkOnly = False, exit = True):
 ###
 # Parse settings and command line
 
-def set_pac(pac):
-    if pac == "":
-        return
-
-    pacproxy = False
-    if pac.startswith("http"):
-        # URL
-        pacproxy = True
-
-    elif pac.startswith("file"):
-        # file://
-        pac = file_url_to_local_path(pac)
-        if os.path.exists(pac):
-            pacproxy = True
-
-    else:
-        # Local file
-        if not os.path.isabs(pac):
-            # Relative to Px script / binary
-            pac = os.path.normpath(os.path.join(get_script_dir(), pac))
-        if os.path.exists(pac):
-            pacproxy = True
-
-    if pacproxy:
-        State.pac = pac
-    else:
-        pprint("Unsupported PAC location or file not found: %s" % pac)
-        sys.exit()
-
-def set_listen(listen):
-    if len(listen) == 0:
-        # Listen on localhost only if blank
-        # Explicit --gateway or --hostonly required to listen on all interfaces
-        State.listen = ["127.0.0.1"]
-    else:
-        State.listen = []
-        for intf in listen.split(","):
-            clean = intf.strip()
-            if len(clean) != 0 and clean not in State.listen:
-                State.listen.append(clean)
-
-def set_gateway(gateway):
-    State.gateway = True if gateway == 1 else False
-
-def set_hostonly(hostonly):
-    State.hostonly = True if hostonly == 1 else False
-
-def set_allow(allow):
-    State.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
-
-def set_noproxy(noproxy):
-    State.noproxy = noproxy
-
-def set_useragent(useragent):
-    State.useragent = useragent
-
-def set_username(username):
-    State.username = username
-
-def set_password():
-    try:
-        if len(State.username) == 0:
-            pprint("domain\\username missing - specify via --username or configure in px.ini")
-            sys.exit()
-        pprint("Setting password for '" + State.username + "'")
-
-        pwd = ""
-        while len(pwd) == 0:
-            pwd = getpass.getpass("Enter password: ")
-
-        keyring.set_password("Px", State.username, pwd)
-
-        if keyring.get_password("Px", State.username) == pwd:
-            pprint("Saved successfully")
-    except KeyboardInterrupt:
-        pprint("")
-
-    sys.exit()
-
-def set_auth(auth):
-    if len(auth) == 0:
-        auth = "ANY"
-
-    # Test that it works
-    _ = mcurl.getauth(auth)
-
-    State.auth = auth
-
-def set_debug(location = LOG_SCRIPTDIR):
-    global dprint
-    if State.debug is None:
-        logfile = get_logfile(location)
-
-        if logfile is not None:
-            State.location = location
-            if logfile is sys.stdout:
-                # Log to stdout
-                State.debug = Debug()
-            else:
-                # Log to <path>/debug-<name>.log
-                State.debug = Debug(logfile, "w")
-            dprint = State.debug.get_print()
-
-def set_idle(idle):
-    State.idle = idle
-
-def set_socktimeout(socktimeout):
-    State.socktimeout = socktimeout
-    socket.setdefaulttimeout(socktimeout)
-
-def set_proxyreload(proxyreload):
-    State.proxyreload = proxyreload
-
-def set_test(test):
-    State.test = test
-
 # Default values for all keys
 DEFAULTS = {
     "server": "",
@@ -437,280 +249,476 @@ DEFAULTS = {
     "test": None
 }
 
-# Callback functions for initialization
-CALLBACKS = {
-    "pac": set_pac,
-    "listen": set_listen,
-    "gateway": set_gateway,
-    "hostonly": set_hostonly,
-    "allow": set_allow,
-    "noproxy": set_noproxy,
-    "useragent": set_useragent,
-    "username": set_username,
-    "auth": set_auth,
-    "log": set_debug,
-    "idle": set_idle,
-    "socktimeout": set_socktimeout,
-    "proxyreload": set_proxyreload,
+class State:
+    """Stores runtime state per process - shared across threads"""
 
-    "test": set_test
-}
+    # Config
+    gateway = False
+    hostonly = False
+    ini = ""
+    idle = 30
+    listen = None
+    noproxy = ""
+    pac = ""
+    proxyreload = 60
+    socktimeout = 20.0
+    useragent = ""
 
-def cfg_int_init(section, name, default, proc=None, override=False):
-    val = default
-    if not override:
-        try:
-            val = State.config.get(section, name).strip()
-        except configparser.NoOptionError:
-            pass
+    # Auth
+    auth = "ANY"
+    username = ""
 
-    try:
-        val = int(val)
-    except ValueError:
-        pprint("Invalid integer value for " + section + ":" + name)
+    # Objects
+    allow = netaddr.IPGlob("*.*.*.*")
+    config = None
+    debug = None
+    location = LOG_NONE
+    mcurl = None
+    stdout = None
+    wproxy = None
 
-    State.config.set(section, name, str(val))
+    # Tracking
+    proxy_last_reload = None
 
-    if proc is not None:
-        proc(val)
+    # Lock for thread synchronization of State object
+    # multiprocess sync isn't neccessary because State object is only shared by
+    # threads - every process has it's own State object
+    state_lock = threading.Lock()
 
-def cfg_float_init(section, name, default, proc=None, override=False):
-    val = default
-    if not override:
-        try:
-            val = State.config.get(section, name).strip()
-        except configparser.NoOptionError:
-            pass
+    test = None
 
-    try:
-        val = float(val)
-    except ValueError:
-        pprint("Invalid float value for " + section + ":" + name)
+    callbacks = None
 
-    State.config.set(section, name, str(val))
+    def __init__(self):
+        # Callback functions for initialization
+        self.callbacks = {
+            "pac": self.set_pac,
+            "listen": self.set_listen,
+            "gateway": self.set_gateway,
+            "hostonly": self.set_hostonly,
+            "allow": self.set_allow,
+            "noproxy": self.set_noproxy,
+            "useragent": self.set_useragent,
+            "username": self.set_username,
+            "auth": self.set_auth,
+            "log": self.set_debug,
+            "idle": self.set_idle,
+            "socktimeout": self.set_socktimeout,
+            "proxyreload": self.set_proxyreload,
 
-    if proc is not None:
-        proc(val)
+            "test": self.set_test
+        }
 
-def cfg_str_init(section, name, default, proc=None, override=False):
-    val = default
-    if not override:
-        try:
-            val = State.config.get(section, name).strip()
-        except configparser.NoOptionError:
-            pass
+    def set_pac(self, pac):
+        if pac == "":
+            return
 
-    State.config.set(section, name, val)
+        pacproxy = False
+        if pac.startswith("http"):
+            # URL
+            pacproxy = True
 
-    if proc is not None:
-        proc(val)
+        elif pac.startswith("file"):
+            # file://
+            pac = file_url_to_local_path(pac)
+            if os.path.exists(pac):
+                pacproxy = True
 
-def cfg_init(name, val, override=False):
-    callback = CALLBACKS.get(name)
-    # [proxy]
-    if name in ["server", "pac", "pac_encoding", "listen", "allow", "noproxy",
-                "useragent", "username", "auth"]:
-        cfg_str_init("proxy", name, val, callback, override)
-    elif name in ["port", "gateway", "hostonly"]:
-        cfg_int_init("proxy", name, val, callback, override)
-
-    # [settings]
-    elif name in ["workers", "threads", "idle", "proxyreload", "foreground", "log"]:
-        cfg_int_init("settings", name, val, callback, override)
-    elif name in ["socktimeout"]:
-        cfg_float_init("settings", name, val, callback, override)
-
-    # Non-config
-    elif name in ["test"] and callback is not None:
-        callback(val)
-
-def parse_cli():
-    "Parse all command line arguments into a dictionary"
-    flags = {}
-    for arg in sys.argv:
-        if not arg.startswith("--") or len(arg) < 3:
-            continue
-        arg = arg[2:]
-
-        if "=" in arg:
-            # --name=val
-            name, val = arg.split("=", 1)
-            flags[name] = val
         else:
-            # --name
-            flags[arg] = "1"
+            # Local file
+            if not os.path.isabs(pac):
+                # Relative to Px script / binary
+                pac = os.path.normpath(os.path.join(get_script_dir(), pac))
+            if os.path.exists(pac):
+                pacproxy = True
 
-    if "proxy" in flags:
-        # --proxy is synonym for --server
-        flags["server"] = flags["proxy"]
-        del flags["proxy"]
+        if pacproxy:
+            self.pac = pac
+        else:
+            pprint("Unsupported PAC location or file not found: %s" % pac)
+            sys.exit()
 
-    return flags
+    def set_listen(self, listen):
+        if len(listen) == 0:
+            # Listen on localhost only if blank
+            # Explicit --gateway or --hostonly required to listen on all interfaces
+            self.listen = ["127.0.0.1"]
+        else:
+            self.listen = []
+            for intf in listen.split(","):
+                clean = intf.strip()
+                if len(clean) != 0 and clean not in self.listen:
+                    self.listen.append(clean)
 
-def parse_env():
-    "Load dotenv files and parse PX_* environment variables into a dictionary"
+    def set_gateway(self, gateway):
+        self.gateway = True if gateway == 1 else False
 
-    # Load .env from CWD
-    envfile = dotenv.find_dotenv(usecwd=True)
-    if not dotenv.load_dotenv(envfile):
-        # Else load .env file from script dir if different from CWD
-        cwd = os.getcwd()
-        script_dir = get_script_dir()
-        if script_dir != cwd:
-            envfile = os.path.join(script_dir, ".env")
-            if not dotenv.load_dotenv(envfile):
-                pass
+    def set_hostonly(self, hostonly):
+        self.hostonly = True if hostonly == 1 else False
 
-    env = {}
-    for var in os.environ:
-        if var.startswith("PX_") and len(var) > 3:
-            env[var[3:].lower()] = os.environ[var]
+    def set_allow(self, allow):
+        self.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
 
-    return env
+    def set_noproxy(self, noproxy):
+        self.noproxy = noproxy
 
-def parse_config():
-    "Parse configuration from CLI flags, environment and config file in order"
-    if "--debug" in sys.argv:
-        set_debug(LOG_SCRIPTDIR)
-    elif "--uniqlog" in sys.argv:
-        set_debug(LOG_UNIQLOG)
-    elif "--verbose" in sys.argv:
-        set_debug(LOG_STDOUT)
+    def set_useragent(self, useragent):
+        self.useragent = useragent
 
-        if "--foreground" not in sys.argv:
-            # --verbose implies --foreground
-            sys.argv.append("--foreground")
+    def set_username(self, username):
+        self.username = username
 
-    if sys.platform == "win32":
-        if is_compiled() or "pythonw.exe" in sys.executable:
-            windows.attach_console(State, dprint)
+    def set_password(self):
+        try:
+            if len(self.username) == 0:
+                pprint("domain\\username missing - specify via --username or configure in px.ini")
+                sys.exit()
+            pprint("Setting password for '" + self.username + "'")
 
-    if "-h" in sys.argv or "--help" in sys.argv:
-        pprint(HELP)
+            pwd = ""
+            while len(pwd) == 0:
+                pwd = getpass.getpass("Enter password: ")
+
+            keyring.set_password("Px", self.username, pwd)
+
+            if keyring.get_password("Px", self.username) == pwd:
+                pprint("Saved successfully")
+        except KeyboardInterrupt:
+            pprint("")
+
         sys.exit()
 
-    # Load CLI flags and environment variables
-    flags = parse_cli()
-    env = parse_env()
+    def set_auth(self, auth):
+        if len(auth) == 0:
+            auth = "ANY"
 
-    # Check if config file specified in CLI flags or environment
-    is_save = "save" in flags or "save" in env
-    if "config" in flags:
-        # From CLI
-        State.ini = flags["config"]
-    elif "config" in env:
-        # From environment
-        State.ini = env["config"]
+        # Test that it works
+        _ = mcurl.getauth(auth)
 
-    if len(State.ini) != 0:
-        if not (os.path.exists(State.ini) or is_save):
-            # Specified file doesn't exist and not --save
-            pprint(f"Could not find config file: {State.ini}")
-            sys.exit()
-    else:
-        # Default "CWD/px.ini"
-        cwd = os.getcwd()
-        path = os.path.join(cwd, "px.ini")
-        if os.path.exists(path) or is_save:
-            State.ini = path
-        else:
-            # Alternate "script_dir/px.ini"
+        self.auth = auth
+
+    def set_debug(self, location = LOG_SCRIPTDIR):
+        global dprint
+        if self.debug is None:
+            logfile = get_logfile(location)
+
+            if logfile is not None:
+                self.location = location
+                if logfile is sys.stdout:
+                    # Log to stdout
+                    self.debug = Debug()
+                else:
+                    # Log to <path>/debug-<name>.log
+                    self.debug = Debug(logfile, "w")
+                dprint = self.debug.get_print()
+
+    def set_idle(self, idle):
+        self.idle = idle
+
+    def set_socktimeout(self, socktimeout):
+        self.socktimeout = socktimeout
+        socket.setdefaulttimeout(socktimeout)
+
+    def set_proxyreload(self, proxyreload):
+        self.proxyreload = proxyreload
+
+    def set_test(self, test):
+        self.test = test
+
+    # Configuration setup
+
+    def cfg_int_init(self, section, name, default, proc=None, override=False):
+        val = default
+        if not override:
+            try:
+                val = self.config.get(section, name).strip()
+            except configparser.NoOptionError:
+                pass
+
+        try:
+            val = int(val)
+        except ValueError:
+            pprint("Invalid integer value for " + section + ":" + name)
+
+        self.config.set(section, name, str(val))
+
+        if proc is not None:
+            proc(val)
+
+    def cfg_float_init(self, section, name, default, proc=None, override=False):
+        val = default
+        if not override:
+            try:
+                val = self.config.get(section, name).strip()
+            except configparser.NoOptionError:
+                pass
+
+        try:
+            val = float(val)
+        except ValueError:
+            pprint("Invalid float value for " + section + ":" + name)
+
+        self.config.set(section, name, str(val))
+
+        if proc is not None:
+            proc(val)
+
+    def cfg_str_init(self, section, name, default, proc=None, override=False):
+        val = default
+        if not override:
+            try:
+                val = self.config.get(section, name).strip()
+            except configparser.NoOptionError:
+                pass
+
+        self.config.set(section, name, val)
+
+        if proc is not None:
+            proc(val)
+
+    def cfg_init(self, name, val, override=False):
+        callback = self.callbacks.get(name)
+        # [proxy]
+        if name in ["server", "pac", "pac_encoding", "listen", "allow", "noproxy",
+                    "useragent", "username", "auth"]:
+            self.cfg_str_init("proxy", name, val, callback, override)
+        elif name in ["port", "gateway", "hostonly"]:
+            self.cfg_int_init("proxy", name, val, callback, override)
+
+        # [settings]
+        elif name in ["workers", "threads", "idle", "proxyreload", "foreground", "log"]:
+            self.cfg_int_init("settings", name, val, callback, override)
+        elif name in ["socktimeout"]:
+            self.cfg_float_init("settings", name, val, callback, override)
+
+        # Non-config
+        elif name in ["test"] and callback is not None:
+            callback(val)
+
+    def save(self):
+        with open(self.ini, "w") as cfgfile:
+            self.config.write(cfgfile)
+        pprint("Saved config to " + self.ini + "\n")
+        with open(self.ini, "r") as cfgfile:
+            sys.stdout.write(cfgfile.read())
+
+        sys.exit()
+
+    # Config sources
+
+    def parse_cli(self):
+        "Parse all command line arguments into a dictionary"
+        flags = {}
+        for arg in sys.argv:
+            if not arg.startswith("--") or len(arg) < 3:
+                continue
+            arg = arg[2:]
+
+            if "=" in arg:
+                # --name=val
+                name, val = arg.split("=", 1)
+                flags[name] = val
+            else:
+                # --name
+                flags[arg] = "1"
+
+        if "proxy" in flags:
+            # --proxy is synonym for --server
+            flags["server"] = flags["proxy"]
+            del flags["proxy"]
+
+        return flags
+
+    def parse_env(self):
+        "Load dotenv files and parse PX_* environment variables into a dictionary"
+
+        # Load .env from CWD
+        envfile = dotenv.find_dotenv(usecwd=True)
+        if not dotenv.load_dotenv(envfile):
+            # Else load .env file from script dir if different from CWD
+            cwd = os.getcwd()
             script_dir = get_script_dir()
             if script_dir != cwd:
-                path = os.path.join(script_dir, "px.ini")
-                if os.path.exists(path):
-                    State.ini = path
+                envfile = os.path.join(script_dir, ".env")
+                if not dotenv.load_dotenv(envfile):
+                    pass
 
-    # Load configuration file
-    State.config = configparser.ConfigParser()
-    if os.path.exists(State.ini):
-        State.config.read(State.ini)
+        env = {}
+        for var in os.environ:
+            if var.startswith("PX_") and len(var) > 3:
+                env[var[3:].lower()] = os.environ[var]
 
-    ###
-    # Create config sections if not already from config file
+        return env
 
-    # [proxy] section
-    if "proxy" not in State.config.sections():
-        State.config.add_section("proxy")
+    def parse_config(self):
+        "Parse configuration from CLI flags, environment and config file in order"
+        if "--debug" in sys.argv:
+            self.set_debug(LOG_SCRIPTDIR)
+        elif "--uniqlog" in sys.argv:
+            self.set_debug(LOG_UNIQLOG)
+        elif "--verbose" in sys.argv:
+            self.set_debug(LOG_STDOUT)
 
-    # [settings] section
-    if "settings" not in State.config.sections():
-        State.config.add_section("settings")
+            if "--foreground" not in sys.argv:
+                # --verbose implies --foreground
+                sys.argv.append("--foreground")
 
-    # Override --log if --debug | --verbose | --uniqlog specified
-    cfg_int_init("settings", "log", str(State.location), override = True)
+        if sys.platform == "win32":
+            if is_compiled() or "pythonw.exe" in sys.executable:
+                windows.attach_console(self, dprint)
 
-    # Default initilize if not already from config file
-    for name, val in DEFAULTS.items():
-        cfg_init(name, val)
-
-    # Override from environment
-    for name, val in env.items():
-        cfg_init(name, val, override=True)
-
-    # Final override from CLI which takes highest precedence
-    for name, val in flags.items():
-        cfg_init(name, val, override=True)
-
-    ###
-    # Dependency propagation
-
-    # If gateway mode
-    allow = State.config.get("proxy", "allow")
-    if State.gateway == 1:
-        # Listen on all interfaces
-        State.listen = [""]
-        State.config.set("proxy", "listen", "")
-        dprint("Gateway mode - overriding 'listen' and binding to all interfaces")
-        if allow in ["*.*.*.*", "0.0.0.0/0"]:
-            dprint("Configure 'allow' to restrict access to trusted subnets")
-
-    # If hostonly mode
-    if State.hostonly:
-        # Listen on all interfaces
-        State.listen = [""]
-        State.config.set("proxy", "listen", "")
-        dprint("Host-only mode - overriding 'listen' and binding to all interfaces")
-        dprint("Px will automatically restrict access to host interfaces")
-
-        # If not gateway mode or gateway with default allow rules
-        if (State.gateway == 0 or (State.gateway == 1 and allow in ["*.*.*.*", "0.0.0.0/0"])):
-            # Purge allow rules
-            cfg_init("allow", "", True)
-            dprint("Removing default 'allow' everyone rule")
-
-    ###
-    # Handle actions
-
-    if sys.platform == "win32":
-        if "--install" in sys.argv:
-            windows.install(get_script_cmd())
-        elif "--uninstall" in sys.argv:
-            windows.uninstall()
-
-    if "--quit" in sys.argv:
-        quit()
-    elif "--restart" in sys.argv:
-        if not quit(exit = False):
+        if "-h" in sys.argv or "--help" in sys.argv:
+            pprint(HELP)
             sys.exit()
-        sys.argv.remove("--restart")
-    elif "--save" in sys.argv:
-        save()
-    elif "--password" in sys.argv:
-        set_password()
 
-    ###
-    # Discover proxy info from OS
+        # Load CLI flags and environment variables
+        flags = self.parse_cli()
+        env = self.parse_env()
 
-    servers = wproxy.parse_proxy(State.config.get("proxy", "server"))
-    if len(servers) != 0:
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, noproxy = State.noproxy, debug_print = dprint)
-    elif len(State.pac) != 0:
-        pac_encoding = State.config.get("proxy", "pac_encoding")
-        State.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [State.pac], noproxy = State.noproxy, pac_encoding = pac_encoding, debug_print = dprint)
-    else:
-        State.wproxy = wproxy.Wproxy(noproxy = State.noproxy, debug_print = dprint)
-        State.proxy_last_reload = time.time()
+        # Check if config file specified in CLI flags or environment
+        is_save = "save" in flags or "save" in env
+        if "config" in flags:
+            # From CLI
+            self.ini = flags["config"]
+        elif "config" in env:
+            # From environment
+            self.ini = env["config"]
 
-    # Curl multi object to manage all easy connections
-    State.mcurl = mcurl.MCurl(debug_print = dprint)
+        if len(self.ini) != 0:
+            if not (os.path.exists(self.ini) or is_save):
+                # Specified file doesn't exist and not --save
+                pprint(f"Could not find config file: {self.ini}")
+                sys.exit()
+        else:
+            # Default "CWD/px.ini"
+            cwd = os.getcwd()
+            path = os.path.join(cwd, "px.ini")
+            if os.path.exists(path) or is_save:
+                self.ini = path
+            else:
+                # Alternate "script_dir/px.ini"
+                script_dir = get_script_dir()
+                if script_dir != cwd:
+                    path = os.path.join(script_dir, "px.ini")
+                    if os.path.exists(path):
+                        self.ini = path
+
+        # Load configuration file
+        self.config = configparser.ConfigParser()
+        if os.path.exists(self.ini):
+            self.config.read(self.ini)
+
+        ###
+        # Create config sections if not already from config file
+
+        # [proxy] section
+        if "proxy" not in self.config.sections():
+            self.config.add_section("proxy")
+
+        # [settings] section
+        if "settings" not in self.config.sections():
+            self.config.add_section("settings")
+
+        # Override --log if --debug | --verbose | --uniqlog specified
+        self.cfg_int_init("settings", "log", str(self.location), override = True)
+
+        # Default initilize if not already from config file
+        for name, val in DEFAULTS.items():
+            self.cfg_init(name, val)
+
+        # Override from environment
+        for name, val in env.items():
+            self.cfg_init(name, val, override=True)
+
+        # Final override from CLI which takes highest precedence
+        for name, val in flags.items():
+            self.cfg_init(name, val, override=True)
+
+        ###
+        # Dependency propagation
+
+        # If gateway mode
+        allow = self.config.get("proxy", "allow")
+        if self.gateway == 1:
+            # Listen on all interfaces
+            self.listen = [""]
+            self.config.set("proxy", "listen", "")
+            dprint("Gateway mode - overriding 'listen' and binding to all interfaces")
+            if allow in ["*.*.*.*", "0.0.0.0/0"]:
+                dprint("Configure 'allow' to restrict access to trusted subnets")
+
+        # If hostonly mode
+        if self.hostonly:
+            # Listen on all interfaces
+            self.listen = [""]
+            self.config.set("proxy", "listen", "")
+            dprint("Host-only mode - overriding 'listen' and binding to all interfaces")
+            dprint("Px will automatically restrict access to host interfaces")
+
+            # If not gateway mode or gateway with default allow rules
+            if (self.gateway == 0 or (self.gateway == 1 and allow in ["*.*.*.*", "0.0.0.0/0"])):
+                # Purge allow rules
+                self.cfg_init("allow", "", True)
+                dprint("Removing default 'allow' everyone rule")
+
+        ###
+        # Handle actions
+
+        if sys.platform == "win32":
+            if "--install" in sys.argv:
+                windows.install(get_script_cmd())
+            elif "--uninstall" in sys.argv:
+                windows.uninstall()
+
+        if "--quit" in sys.argv:
+            quit()
+        elif "--restart" in sys.argv:
+            if not quit(exit = False):
+                sys.exit()
+            sys.argv.remove("--restart")
+        elif "--save" in sys.argv:
+            self.save()
+        elif "--password" in sys.argv:
+            self.set_password()
+
+        ###
+        # Discover proxy info from OS
+
+        servers = wproxy.parse_proxy(self.config.get("proxy", "server"))
+        if len(servers) != 0:
+            self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, noproxy = self.noproxy, debug_print = dprint)
+        elif len(self.pac) != 0:
+            pac_encoding = self.config.get("proxy", "pac_encoding")
+            self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [self.pac], noproxy = self.noproxy, pac_encoding = pac_encoding, debug_print = dprint)
+        else:
+            self.wproxy = wproxy.Wproxy(noproxy = self.noproxy, debug_print = dprint)
+            self.proxy_last_reload = time.time()
+
+        # Curl multi object to manage all easy connections
+        self.mcurl = mcurl.MCurl(debug_print = dprint)
+
+    def reload_proxy(self):
+        # Return if proxies specified in Px config
+        if self.wproxy.mode in [wproxy.MODE_CONFIG, wproxy.MODE_CONFIG_PAC]:
+            return
+
+        # Do locking to avoid updating globally shared State object by multiple
+        # threads simultaneously
+        self.state_lock.acquire()
+        try:
+            # Check if need to refresh
+            if (self.proxy_last_reload is not None and
+                    time.time() - self.proxy_last_reload < self.proxyreload):
+                dprint("Skip proxy refresh")
+                return
+
+            # Reload proxy information
+            self.wproxy = wproxy.Wproxy(noproxy = self.noproxy, debug_print = dprint)
+
+            self.proxy_last_reload = time.time()
+
+        finally:
+            self.state_lock.release()
+
+# Create instance of State object
+STATE = State()

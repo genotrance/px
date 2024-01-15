@@ -13,7 +13,10 @@ import time
 import traceback
 import warnings
 
-from .config import State
+# External dependencies
+import keyring
+
+from .config import STATE
 from .debug import pprint
 from .version import __version__
 
@@ -25,9 +28,6 @@ if sys.platform == "win32":
     from . import windows
 
 warnings.filterwarnings("ignore")
-
-# External dependencies
-import keyring
 
 # Debug shortcut
 dprint = lambda x: None
@@ -41,8 +41,8 @@ def set_curl_auth(curl, auth):
         # Connecting to proxy and authenticating
         key = ""
         pwd = None
-        if len(State.username) != 0:
-            key = State.username
+        if len(STATE.username) != 0:
+            key = STATE.username
             if "PX_PASSWORD" in os.environ:
                 # Use environment variable PX_PASSWORD
                 pwd = os.environ["PX_PASSWORD"]
@@ -79,7 +79,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             easyhash = ""
             if self.curl is not None:
                 easyhash = self.curl.easyhash + ": "
-                State.mcurl.stop(self.curl)
+                STATE.mcurl.stop(self.curl)
                 self.curl = None
             dprint(easyhash + str(error))
         except ConnectionError:
@@ -95,9 +95,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def do_curl(self):
         if self.curl is None:
-            self.curl = mcurl.Curl(self.path, self.command, self.request_version, State.socktimeout)
+            self.curl = mcurl.Curl(self.path, self.command, self.request_version, STATE.socktimeout)
         else:
-            self.curl.reset(self.path, self.command, self.request_version, State.socktimeout)
+            self.curl.reset(self.path, self.command, self.request_version, STATE.socktimeout)
 
         dprint(self.curl.easyhash + ": Path = " + self.path)
         ipport = self.get_destination()
@@ -108,21 +108,21 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             # libcurl handles noproxy domains only. IP addresses are still handled within wproxy
             # since libcurl only supports CIDR addresses since v7.86 and does not support wildcards
             # (192.168.0.*) or ranges (192.168.0.1-192.168.0.255)
-            noproxy_hosts = ",".join(State.wproxy.noproxy_hosts) or None
+            noproxy_hosts = ",".join(STATE.wproxy.noproxy_hosts) or None
             ret = self.curl.set_proxy(proxy = server, port = port, noproxy = noproxy_hosts)
             if not ret:
                 # Proxy server has had auth issues so returning failure to client
-                self.send_error(401, "Proxy server authentication failed: %s:%d" % (server, port))
+                self.send_error(401, f"Proxy server authentication failed: {server}:{port}")
                 return
 
             # Set proxy authentication
-            set_curl_auth(self.curl, State.auth)
+            set_curl_auth(self.curl, STATE.auth)
         else:
             # Directly connecting to the destination
             dprint(self.curl.easyhash + ": Skipping auth proxying")
 
         # Set debug mode
-        self.curl.set_debug(State.debug is not None)
+        self.curl.set_debug(STATE.debug is not None)
 
         # Plain HTTP can be bridged directly
         if not self.curl.is_connect:
@@ -135,9 +135,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         self.curl.set_transfer_decoding(False)
 
         # Set user agent if configured
-        self.curl.set_useragent(State.useragent)
+        self.curl.set_useragent(STATE.useragent)
 
-        if not State.mcurl.do(self.curl):
+        if not STATE.mcurl.do(self.curl):
             dprint(self.curl.easyhash + ": Connection failed: " + self.curl.errstr)
             self.send_error(self.curl.resp, self.curl.errstr)
         elif self.curl.is_connect:
@@ -147,10 +147,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 self.send_response(200, "Connection established")
                 self.send_header("Proxy-Agent", self.version_string())
                 self.end_headers()
-            State.mcurl.select(self.curl, self.connection, State.idle)
+            STATE.mcurl.select(self.curl, self.connection, STATE.idle)
             self.close_connection = True
 
-        State.mcurl.remove(self.curl)
+        STATE.mcurl.remove(self.curl)
 
     def do_GET(self):
         self.do_curl()
@@ -175,10 +175,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def get_destination(self):
         # Reload proxy info if timeout exceeded
-        config.reload_proxy()
+        STATE.reload_proxy()
 
         # Find proxy
-        servers, netloc, path = State.wproxy.find_proxy_for_url(
+        servers, netloc, path = STATE.wproxy.find_proxy_for_url(
             ("https://" if "://" not in self.path else "") + self.path)
         if servers[0] == wproxy.DIRECT:
             dprint(self.curl.easyhash + ": Direct connection")
@@ -199,10 +199,10 @@ class PoolMixIn(socketserver.ThreadingMixIn):
 
     def verify_request(self, request, client_address):
         dprint("Client address: %s" % client_address[0])
-        if client_address[0] in State.allow:
+        if client_address[0] in STATE.allow:
             return True
 
-        if State.hostonly and client_address[0] in config.get_host_ips():
+        if STATE.hostonly and client_address[0] in config.get_host_ips():
             dprint("Host-only IP allowed")
             return True
 
@@ -221,25 +221,23 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
         try:
             # Workaround bad thread naming code in Python 3.6+, fixed in master
             self.pool = concurrent.futures.ThreadPoolExecutor(
-                max_workers=State.config.getint("settings", "threads"),
+                max_workers=STATE.config.getint("settings", "threads"),
                 thread_name_prefix="Thread")
         except:
             self.pool = concurrent.futures.ThreadPoolExecutor(
-                max_workers=State.config.getint("settings", "threads"))
+                max_workers=STATE.config.getint("settings", "threads"))
 
 def print_banner(listen, port):
-    pprint("Serving at %s:%d proc %s" % (
-        listen, port, multiprocessing.current_process().name)
-    )
+    pprint(f"Serving at {listen}:{port} proc {multiprocessing.current_process().name}")
 
     if sys.platform == "win32":
         if config.is_compiled() or "pythonw.exe" in sys.executable:
-            if State.config.getint("settings", "foreground") == 0:
-                windows.detach_console(State, dprint)
+            if STATE.config.getint("settings", "foreground") == 0:
+                windows.detach_console(STATE, dprint)
 
-    for section in State.config.sections():
-        for option in State.config.options(section):
-            dprint(section + ":" + option + " = " + State.config.get(
+    for section in STATE.config.sections():
+        for option in STATE.config.options(section):
+            dprint(section + ":" + option + " = " + STATE.config.get(
                 section, option))
 
 def serve_forever(httpd):
@@ -261,12 +259,12 @@ def start_worker(pipeout):
     # CTRL-C should exit the process
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    config.parse_config()
-    dprint = State.debug.get_print()
+    STATE.parse_config()
+    dprint = STATE.debug.get_print()
 
-    port = State.config.getint("proxy", "port")
+    port = STATE.config.getint("proxy", "port")
     httpds = []
-    for listen in State.listen:
+    for listen in STATE.listen:
         # Get socket from parent process for each listen address
         mainsock = pipeout.recv()
         if hasattr(socket, "fromshare"):
@@ -286,10 +284,10 @@ def run_pool():
     # CTRL-C should exit the process
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    port = State.config.getint("proxy", "port")
+    port = STATE.config.getint("proxy", "port")
     httpds = []
     mainsocks = []
-    for listen in State.listen:
+    for listen in STATE.listen:
         # Setup server for each listen address
         try:
             httpd = ThreadedTCPServer((listen, port), Proxy)
@@ -313,8 +311,8 @@ def run_pool():
             # explicitly share socket with child processes
             #
             # Linux shares all open FD with children since it uses fork()
-            workers = State.config.getint("settings", "workers")
-            for i in range(workers-1):
+            workers = STATE.config.getint("settings", "workers")
+            for _ in range(workers-1):
                 (pipeout, pipein) = multiprocessing.Pipe()
                 p = multiprocessing.Process(target=start_worker, args=(pipeout,))
                 p.daemon = True
@@ -337,32 +335,32 @@ def run_pool():
 
 def test(testurl):
     # Get Px configuration
-    listen = State.listen[0]
+    listen = STATE.listen[0]
     if len(listen) == 0:
         # Listening on all interfaces - figure out which one is allowed
         hostips = config.get_host_ips()
-        if State.gateway:
+        if STATE.gateway:
             # Check allow list
             for ip in hostips:
-                if ip in State.allow:
+                if ip in STATE.allow:
                     listen = str(ip)
                     break
             if len(listen) == 0:
                 pprint("Failed: host IP not in --allow to test Px")
                 sys.exit()
-        elif State.hostonly:
+        elif STATE.hostonly:
             # Use first host IP
             listen = str(list(hostips)[0])
-    port = State.config.getint("proxy", "port")
+    port = STATE.config.getint("proxy", "port")
 
     # Tweak Px configuration for test - only 1 process required
-    State.config.set("settings", "workers", "1")
+    STATE.config.set("settings", "workers", "1")
 
     if "--test-auth" in sys.argv:
         # Set Px to --auth=NONE
-        auth = State.auth
-        State.auth = "NONE"
-        State.config.set("proxy", "auth", "NONE")
+        auth = STATE.auth
+        STATE.auth = "NONE"
+        STATE.config.set("proxy", "auth", "NONE")
     else:
         auth = "NONE"
 
@@ -373,7 +371,7 @@ def test(testurl):
         ec = mcurl.Curl(url, method)
         ec.set_proxy(listen, port)
         set_curl_auth(ec, auth)
-        ec.set_debug(State.debug is not None)
+        ec.set_debug(STATE.debug is not None)
         if data is not None:
             ec.buffer(data.encode("utf-8"))
             ec.set_headers({"Content-Length": len(data)})
@@ -432,15 +430,14 @@ def handle_exceptions(extype, value, tb):
     tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % (
         "".join(lst[:-1]), lst[-1])
 
-    if State.debug is not None:
+    if STATE.debug is not None:
         pprint(tracelog)
     else:
         sys.stderr.write(tracelog)
 
         # Save to debug.log in working directory
-        dbg = open(config.get_logfile(config.LOG_CWD), 'w')
-        dbg.write(tracelog)
-        dbg.close()
+        with open(config.get_logfile(config.LOG_CWD), 'w') as dbg:
+            dbg.write(tracelog)
 
 ###
 # Startup
@@ -450,11 +447,11 @@ def main():
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
 
-    config.parse_config()
-    dprint = State.debug.get_print()
+    STATE.parse_config()
+    dprint = STATE.debug.get_print()
 
-    if State.test is not None:
-        test(State.test)
+    if STATE.test is not None:
+        test(STATE.test)
 
     run_pool()
 

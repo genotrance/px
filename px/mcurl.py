@@ -1112,7 +1112,7 @@ def tester(multi, url):
     multi.remove(curl)
 
 def main():
-    import debug
+    from . import debug
     dbg = debug.Debug("test.log", "w")
     global dprint
     dprint = dbg.get_print()

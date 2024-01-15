@@ -551,7 +551,7 @@ def auto():
                         # Bypass with noproxy
                         TESTS.append((proxyarg + " --noproxy=*.*.*.*", chainTest, proxyarg))
 
-    workers = tools.get_argval("workers") or "4"
+    workers = tools.get_argval("workers") or "8"
     pool = multiprocessing.Pool(processes = int(workers))
 
     offset = 0

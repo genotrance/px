@@ -5,7 +5,7 @@ import os
 import sys
 import winreg
 
-from .debug import pprint
+from .debug import pprint, dprint
 
 try:
     import psutil
@@ -84,7 +84,7 @@ def restore_stdout(state):
         state.debug.stdout.close()
         state.debug.stdout = state.stdout
 
-def attach_console(state, dprint):
+def attach_console(state):
     if ctypes.windll.kernel32.GetConsoleWindow() != 0:
         dprint("Already attached to a console")
         return
@@ -124,7 +124,7 @@ def attach_console(state, dprint):
 
     reopen_stdout(state)
 
-def detach_console(state, dprint):
+def detach_console(state):
     if ctypes.windll.kernel32.GetConsoleWindow() == 0:
         return
 

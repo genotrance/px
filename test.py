@@ -348,14 +348,19 @@ def chainTest(proxyarg, port):
 
     offset = 0
     cmd = sys.executable + " %s " % os.path.abspath("../px.py")
+    testflag = "--test=all"
+    HTTPBIN = tools.get_argval("httpbin") or os.getenv("HTTPBIN", "")
+    if len(HTTPBIN) != 0:
+        # IP of local httpbin server
+        testflag += f":{HTTPBIN}"
     if "--proxy" not in proxyarg and "--pac" not in proxyarg:
         # Upstream Px is direct
-        ret = runTest((f"--test=all --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+        ret = runTest((f"{testflag} --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
         if not ret:
             return False
         offset += 1
 
-        ret = runTest((f"--test=all --test-auth --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+        ret = runTest((f"{testflag} --test-auth --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
         if not ret:
             return False
         offset += 1
@@ -363,7 +368,7 @@ def chainTest(proxyarg, port):
         # Upstream Px may go through NTLM proxy
         if "--auth" not in proxyarg:
             # Upstream Px will authenticate
-            ret = runTest((f"--test=all --auth=NONE --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+            ret = runTest((f"{testflag} --auth=NONE --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
             if not ret:
                 return False
             offset += 1
@@ -374,17 +379,16 @@ def chainTest(proxyarg, port):
                 if arg.startswith("--username="):
                     parg = arg
                     break
-
-            # Only works on Linux since global var propagated to child process
+            AUTH = tools.get_argval("auth") or os.getenv("AUTH", "")
             parg += (" --auth=" + AUTH) if len(AUTH) != 0 else ""
 
             # Upstream Px will not authenticate
-            ret = runTest((f"--test=all --proxy=127.0.0.1:{port} {parg}", testTest, None), cmd, offset, port*10)
+            ret = runTest((f"{testflag} --proxy=127.0.0.1:{port} {parg}", testTest, None), cmd, offset, port*10)
             if not ret:
                 return False
             offset += 1
 
-            ret = runTest((f"--test=all --test-auth --proxy=127.0.0.1:{port} {parg}", testTest, None), cmd, offset, port*10)
+            ret = runTest((f"{testflag} --test-auth --proxy=127.0.0.1:{port} {parg}", testTest, None), cmd, offset, port*10)
             if not ret:
                 return False
             offset += 1
@@ -529,12 +533,16 @@ def auto():
         socketTestSetup()
     if "--noproxy" not in sys.argv:
         # px --test in direct, --proxy and --pac modes + --noproxy and --test-auth
+        testflag = "--test=all"
+        if len(HTTPBIN) != 0:
+            # IP of local httpbin server
+            testflag += f":{HTTPBIN}"
         for proxyarg in getproxyargs():
-            TESTS.append((proxyarg + " --test=all", testTest, None))
-            TESTS.append((proxyarg + " --test=all --test-auth", testTest, None))
+            TESTS.append((f"{proxyarg} {testflag}", testTest, None))
+            TESTS.append((f"{proxyarg} {testflag} --test-auth", testTest, None))
             if "--nonoproxy" not in sys.argv and len(proxyarg) != 0:
-                TESTS.append((proxyarg + " --test=all --noproxy=*.*.*.*", testTest, None))
-                TESTS.append((proxyarg + " --test=all --test-auth --noproxy=*.*.*.*", testTest, None))
+                TESTS.append((f"{proxyarg} {testflag} --noproxy=*.*.*.*", testTest, None))
+                TESTS.append((f"{proxyarg} {testflag} --test-auth --noproxy=*.*.*.*", testTest, None))
 
         if "--nochain" not in sys.argv:
             # All above tests through Px in direct, --proxy and --pac modes + --noproxy and --auth=NONE
@@ -709,8 +717,11 @@ def main():
     --nodebug
         Run without turning on --debug
 
-    --workers=4
+    --workers=8
         Number of parallel tests to run
+
+    --httpbin=IPaddress
+        IP of local httpbin server running in Docker
 
     --curlcli
         Use curl command line instead of px.mcurl
@@ -721,6 +732,7 @@ def main():
     global PORT
     global USERNAME
     global AUTH
+    global HTTPBIN
     PROXY = tools.get_argval("proxy") or os.getenv("PROXY", "")
     PAC = tools.get_argval("pac") or os.getenv("PAC", "")
     PORT = tools.get_argval("port") or os.getenv("PORT", "")
@@ -737,6 +749,7 @@ def main():
             sys.exit()
         USERNAME = USERNAME.replace("\\", "\\\\")
     AUTH = tools.get_argval("auth") or os.getenv("AUTH", "")
+    HTTPBIN = tools.get_argval("httpbin") or os.getenv("HTTPBIN", "")
 
     if "--help" in sys.argv:
         print(main.__doc__)

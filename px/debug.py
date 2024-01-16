@@ -14,14 +14,22 @@ def pprint(*objs):
     except:
         pass
 
-class Debug(object):
+class Debug:
     "Redirect stdout to a file for debugging"
+
+    instance = None
 
     stdout = None
     stderr = None
     file = None
     name = ""
     mode = ""
+
+    def __new__(cls, name = "", mode = ""):
+        "Create a singleton instance of Debug"
+        if cls.instance is None:
+            cls.instance = super(Debug, cls).__new__(cls)
+        return cls.instance
 
     def __init__(self, name = "", mode = ""):
         if isinstance(sys.stdout, Debug):
@@ -91,3 +99,8 @@ class Debug(object):
     def get_print(self):
         "Get self.print() method to call directly as print(msg)"
         return self.print
+
+def dprint(msg):
+    "Print debug message if debug is enabled"
+    if Debug.instance is not None:
+        Debug.instance.print(msg)

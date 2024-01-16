@@ -1,3 +1,5 @@
+"Configuration and state management"
+
 import configparser
 import getpass
 import multiprocessing
@@ -9,7 +11,7 @@ import time
 import traceback
 import urllib.parse
 
-from .debug import pprint, Debug
+from .debug import pprint, dprint, Debug
 from .help import HELP
 
 from . import mcurl
@@ -49,9 +51,6 @@ try:
 except ImportError:
     pprint("Requires module python-dotenv")
     sys.exit()
-
-# Debug shortcut
-dprint = lambda x: None
 
 # Debug log locations
 LogLocation = int
@@ -252,6 +251,8 @@ DEFAULTS = {
 class State:
     """Stores runtime state per process - shared across threads"""
 
+    instance = None
+
     # Config
     gateway = False
     hostonly = False
@@ -288,6 +289,12 @@ class State:
     test = None
 
     callbacks = None
+
+    def __new__(cls):
+        "Create a singleton instance of State"
+        if cls.instance is None:
+            cls.instance = super(State, cls).__new__(cls)
+        return cls.instance
 
     def __init__(self):
         # Callback functions for initialization
@@ -398,7 +405,6 @@ class State:
         self.auth = auth
 
     def set_debug(self, location = LOG_SCRIPTDIR):
-        global dprint
         if self.debug is None:
             logfile = get_logfile(location)
 
@@ -410,7 +416,6 @@ class State:
                 else:
                     # Log to <path>/debug-<name>.log
                     self.debug = Debug(logfile, "w")
-                dprint = self.debug.get_print()
 
     def set_idle(self, idle):
         self.idle = idle
@@ -565,7 +570,7 @@ class State:
 
         if sys.platform == "win32":
             if is_compiled() or "pythonw.exe" in sys.executable:
-                windows.attach_console(self, dprint)
+                windows.attach_console(self)
 
         if "-h" in sys.argv or "--help" in sys.argv:
             pprint(HELP)

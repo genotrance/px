@@ -539,6 +539,11 @@ class Curl:
                 dprint(self.easyhash + ": Setting headers")
                 libcurl.easy_setopt(self.easy, libcurl.CURLOPT_HTTPHEADER, self.headers)
 
+    def set_insecure(self, enable = True):
+        "Set curl to ignore SSL errors"
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SSL_VERIFYPEER, not enable)
+        libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SSL_VERIFYHOST, not enable)
+
     def set_verbose(self, enable = True):
         "Set verbose mode"
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_VERBOSE, enable)

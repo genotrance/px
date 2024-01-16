@@ -1,7 +1,6 @@
 "Px is an HTTP proxy server to automatically authenticate through an NTLM proxy"
 
 import concurrent.futures
-import http.server
 import multiprocessing
 import os
 import signal
@@ -13,180 +12,18 @@ import time
 import traceback
 import warnings
 
-# External dependencies
-import keyring
-
 from .config import STATE
-from .debug import pprint
+from .debug import pprint, dprint
 from .version import __version__
 
 from . import config
+from . import handler
 from . import mcurl
-from . import wproxy
 
 if sys.platform == "win32":
     from . import windows
 
 warnings.filterwarnings("ignore")
-
-# Debug shortcut
-dprint = lambda x: None
-
-###
-# Proxy handler
-
-def set_curl_auth(curl, auth):
-    "Set proxy authentication info for curl object"
-    if auth != "NONE":
-        # Connecting to proxy and authenticating
-        key = ""
-        pwd = None
-        if len(STATE.username) != 0:
-            key = STATE.username
-            if "PX_PASSWORD" in os.environ:
-                # Use environment variable PX_PASSWORD
-                pwd = os.environ["PX_PASSWORD"]
-            else:
-                # Use keyring to get password
-                pwd = keyring.get_password("Px", key)
-        if len(key) == 0:
-            if sys.platform == "win32":
-                dprint(curl.easyhash + ": Using SSPI to login")
-                key = ":"
-            else:
-                dprint("SSPI not available and no username configured - no auth")
-                return
-        curl.set_auth(user = key, password = pwd, auth = auth)
-    else:
-        # Explicitly deferring proxy authentication to the client
-        dprint(curl.easyhash + ": Skipping proxy authentication")
-
-class Proxy(http.server.BaseHTTPRequestHandler):
-    "Handler for each proxy connection - unique instance for each thread in each process"
-
-    protocol_version = "HTTP/1.1"
-
-    # Contains the proxy servers responsible for the url this Proxy instance
-    # (aka thread) serves
-    proxy_servers = []
-    curl = None
-
-    def handle_one_request(self):
-        try:
-            http.server.BaseHTTPRequestHandler.handle_one_request(self)
-        except socket.error as error:
-            self.close_connection = True
-            easyhash = ""
-            if self.curl is not None:
-                easyhash = self.curl.easyhash + ": "
-                STATE.mcurl.stop(self.curl)
-                self.curl = None
-            dprint(easyhash + str(error))
-        except ConnectionError:
-            pass
-
-    def address_string(self):
-        host, port = self.client_address[:2]
-        #return socket.getfqdn(host)
-        return host
-
-    def log_message(self, format, *args):
-        dprint(format % args)
-
-    def do_curl(self):
-        if self.curl is None:
-            self.curl = mcurl.Curl(self.path, self.command, self.request_version, STATE.socktimeout)
-        else:
-            self.curl.reset(self.path, self.command, self.request_version, STATE.socktimeout)
-
-        dprint(self.curl.easyhash + ": Path = " + self.path)
-        ipport = self.get_destination()
-        if ipport is None:
-            dprint(self.curl.easyhash + ": Configuring proxy settings")
-            server = self.proxy_servers[0][0]
-            port = self.proxy_servers[0][1]
-            # libcurl handles noproxy domains only. IP addresses are still handled within wproxy
-            # since libcurl only supports CIDR addresses since v7.86 and does not support wildcards
-            # (192.168.0.*) or ranges (192.168.0.1-192.168.0.255)
-            noproxy_hosts = ",".join(STATE.wproxy.noproxy_hosts) or None
-            ret = self.curl.set_proxy(proxy = server, port = port, noproxy = noproxy_hosts)
-            if not ret:
-                # Proxy server has had auth issues so returning failure to client
-                self.send_error(401, f"Proxy server authentication failed: {server}:{port}")
-                return
-
-            # Set proxy authentication
-            set_curl_auth(self.curl, STATE.auth)
-        else:
-            # Directly connecting to the destination
-            dprint(self.curl.easyhash + ": Skipping auth proxying")
-
-        # Set debug mode
-        self.curl.set_debug(STATE.debug is not None)
-
-        # Plain HTTP can be bridged directly
-        if not self.curl.is_connect:
-            self.curl.bridge(self.rfile, self.wfile, self.wfile)
-
-        # Set headers for request
-        self.curl.set_headers(self.headers)
-
-        # Turn off transfer decoding
-        self.curl.set_transfer_decoding(False)
-
-        # Set user agent if configured
-        self.curl.set_useragent(STATE.useragent)
-
-        if not STATE.mcurl.do(self.curl):
-            dprint(self.curl.easyhash + ": Connection failed: " + self.curl.errstr)
-            self.send_error(self.curl.resp, self.curl.errstr)
-        elif self.curl.is_connect:
-            if self.curl.is_tunnel or not self.curl.is_proxied:
-                # Inform client that SSL connection has been established
-                dprint(self.curl.easyhash + ": SSL connected")
-                self.send_response(200, "Connection established")
-                self.send_header("Proxy-Agent", self.version_string())
-                self.end_headers()
-            STATE.mcurl.select(self.curl, self.connection, STATE.idle)
-            self.close_connection = True
-
-        STATE.mcurl.remove(self.curl)
-
-    def do_GET(self):
-        self.do_curl()
-
-    def do_HEAD(self):
-        self.do_curl()
-
-    def do_POST(self):
-        self.do_curl()
-
-    def do_PUT(self):
-        self.do_curl()
-
-    def do_DELETE(self):
-        self.do_curl()
-
-    def do_PATCH(self):
-        self.do_curl()
-
-    def do_CONNECT(self):
-        self.do_curl()
-
-    def get_destination(self):
-        # Reload proxy info if timeout exceeded
-        STATE.reload_proxy()
-
-        # Find proxy
-        servers, netloc, path = STATE.wproxy.find_proxy_for_url(
-            ("https://" if "://" not in self.path else "") + self.path)
-        if servers[0] == wproxy.DIRECT:
-            dprint(self.curl.easyhash + ": Direct connection")
-            return netloc
-        else:
-            dprint(self.curl.easyhash + ": Proxy = " + str(servers))
-            self.proxy_servers = servers
-            return None
 
 ###
 # Multi-processing and multi-threading
@@ -233,7 +70,7 @@ def print_banner(listen, port):
     if sys.platform == "win32":
         if config.is_compiled() or "pythonw.exe" in sys.executable:
             if STATE.config.getint("settings", "foreground") == 0:
-                windows.detach_console(STATE, dprint)
+                windows.detach_console(STATE)
 
     for section in STATE.config.sections():
         for option in STATE.config.options(section):
@@ -254,13 +91,10 @@ def start_httpds(httpds):
     serve_forever(httpds[-1])
 
 def start_worker(pipeout):
-    global dprint
-
     # CTRL-C should exit the process
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     STATE.parse_config()
-    dprint = STATE.debug.get_print()
 
     port = STATE.config.getint("proxy", "port")
     httpds = []
@@ -271,7 +105,7 @@ def start_worker(pipeout):
             mainsock = socket.fromshare(mainsock)
 
         # Start server but use socket from parent process
-        httpd = ThreadedTCPServer((listen, port), Proxy, bind_and_activate=False)
+        httpd = ThreadedTCPServer((listen, port), handler.PxHandler, bind_and_activate=False)
         httpd.socket = mainsock
 
         httpds.append(httpd)
@@ -290,7 +124,7 @@ def run_pool():
     for listen in STATE.listen:
         # Setup server for each listen address
         try:
-            httpd = ThreadedTCPServer((listen, port), Proxy)
+            httpd = ThreadedTCPServer((listen, port), handler.PxHandler)
         except OSError as exc:
             if "attempt was made" in str(exc):
                 pprint("Px failed to start - port in use")
@@ -364,13 +198,15 @@ def test(testurl):
     else:
         auth = "NONE"
 
-    def query(url, method="GET", data = None, quit=True):
+    def query(url, method="GET", data = None, quit=True, check=False, insecure=False):
         if quit:
             time.sleep(0.1)
 
         ec = mcurl.Curl(url, method)
         ec.set_proxy(listen, port)
-        set_curl_auth(ec, auth)
+        handler.set_curl_auth(ec, auth)
+        if url.startswith("https"):
+            ec.set_insecure(insecure)
         ec.set_debug(STATE.debug is not None)
         if data is not None:
             ec.buffer(data.encode("utf-8"))
@@ -386,7 +222,8 @@ def test(testurl):
         else:
             ret_data = ec.get_data()
             pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
-            if testurl == "all":
+            if check:
+                # Tests against httpbin
                 if url not in ret_data:
                     pprint(f"Failed: response does not contain {url}:\n{ret_data}")
                     os._exit(1)
@@ -397,21 +234,27 @@ def test(testurl):
         if quit:
             os._exit(0)
 
-    def queryall():
+    def queryall(testurl):
         import uuid
 
-        url = "://httpbin.org/"
+        insecure = False
+        if testurl in ["all", "1"]:
+            url = "://httpbin.org/"
+        elif testurl.startswith("all:"):
+            url = f"://{testurl[4:]}/"
+            insecure = True
+
         for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
             for protocol in ["http", "https"]:
                 testurl = protocol + url + method.lower()
                 data = str(uuid.uuid4()) if method in ["POST", "PUT", "PATCH"] else None
-                query(testurl, method, data, quit=False)
+                query(testurl, method, data, quit=False, check=True, insecure=insecure)
 
         os._exit(0)
 
     # Run testurl query in a thread
-    if testurl in ["all", "1"]:
-        t = threading.Thread(target = queryall)
+    if testurl in ["all", "1"] or testurl.startswith("all:"):
+        t = threading.Thread(target = queryall, args = (testurl,))
     else:
         t = threading.Thread(target = query, args = (testurl,))
     t.daemon = True
@@ -443,12 +286,10 @@ def handle_exceptions(extype, value, tb):
 # Startup
 
 def main():
-    global dprint
     multiprocessing.freeze_support()
     sys.excepthook = handle_exceptions
 
     STATE.parse_config()
-    dprint = STATE.debug.get_print()
 
     if STATE.test is not None:
         test(STATE.test)

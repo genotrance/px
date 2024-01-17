@@ -36,10 +36,16 @@ Actions:
   As an alternative, Px can also load credentials from the environment variable
   `PX_PASSWORD` or a dotenv file.
 
-  --test=URL
+  --client-password | PX_CLIENT_PASSWORD
+  Collect and save password to default keyring. Username needs to be provided
+  via --client-username, PX_CLIENT_USERNAME or in the config file.
+  As an alternative, Px can also load credentials from the environment variable
+  `PX_CLIENT_PASSWORD` or a dotenv file.
+
+  --test=URL | --test
   Test Px as configured with the URL specified. This can be used to confirm that
   Px is configured correctly and is able to connect and authenticate with the
-  upstream proxy.
+  upstream proxy. If URL is skipped, Px runs multiple tests against httpbin.org.
 
 Configuration:
   --config= | PX_CONFIG=
@@ -107,7 +113,7 @@ Configuration:
   --auth= | PX_AUTH= | proxy:auth=
   Force instead of discovering upstream proxy type
     By default, Px will attempt to discover the upstream proxy type. This
-    option can be used to force either NTLM, KERBEROS, DIGEST, BASIC or the
+    option can be used to force either NEGOTIATE, NTLM, DIGEST, BASIC or the
     other libcurl supported upstream proxy types. See:
       https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html
     To control which methods are available during proxy detection:
@@ -119,6 +125,23 @@ Configuration:
     directly connected:
       Client -> Auth Px -> no-Auth Px -> Upstream proxy
         'Auth Px' cannot directly access upstream proxy but 'no-Auth Px' can
+
+  --client-username= | PX_CLIENT_USERNAME= | client:client_username=
+  Client authentication to use when SSPI is unavailable. Format is domain\\username
+  Service name "PxClient" and this username are used to retrieve the password using
+  Python keyring if available.
+
+  --client-auth= | PX_CLIENT_AUTH= | client:client_auth=
+  Enable authentication for client connections. Comma separated, default: NONE
+  Mechanisms supported: NEGOTIATE, NTLM, DIGEST, BASIC
+    ANY     = enable all supported mechanisms
+    ANYSAFE = enable all supported mechanisms except BASIC
+    NTLM    = enable only NTLM, etc.
+    NONE    = disable client authentication altogether (default)
+
+  --client-nosspi= | PX_CLIENT_NOSSPI= | client:client_nosspi=
+  Disable SSPI for client authentication on Windows. default: 0
+    Set to 1 to disable SSPI and use the configured username and password
 
   --workers= | PX_WORKERS= | settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2

@@ -52,6 +52,10 @@ except ImportError:
     pprint("Requires module python-dotenv")
     sys.exit()
 
+# Realms for keyring and authentication
+REALM = "Px"
+CLIENT_REALM = "PxClient"
+
 # Debug log locations
 LogLocation = int
 (
@@ -248,6 +252,9 @@ DEFAULTS = {
     "test": None
 }
 
+# Client authentication related
+AUTH_SUPPORTED = ["NEGOTIATE", "NTLM", "DIGEST", "BASIC"]
+
 class State:
     """Stores runtime state per process - shared across threads"""
 
@@ -268,6 +275,10 @@ class State:
     # Auth
     auth = "ANY"
     username = ""
+
+    client_auth = []
+    client_username = ""
+    client_nosspi = False
 
     # Objects
     allow = netaddr.IPGlob("*.*.*.*")
@@ -308,6 +319,9 @@ class State:
             "useragent": self.set_useragent,
             "username": self.set_username,
             "auth": self.set_auth,
+            "client_username": self.set_client_username,
+            "client_auth": self.set_client_auth,
+            "client_nosspi": self.set_client_nosspi,
             "log": self.set_debug,
             "idle": self.set_idle,
             "socktimeout": self.set_socktimeout,
@@ -386,9 +400,9 @@ class State:
             while len(pwd) == 0:
                 pwd = getpass.getpass("Enter password: ")
 
-            keyring.set_password("Px", self.username, pwd)
+            keyring.set_password(REALM, self.username, pwd)
 
-            if keyring.get_password("Px", self.username) == pwd:
+            if keyring.get_password(REALM, self.username) == pwd:
                 pprint("Saved successfully")
         except KeyboardInterrupt:
             pprint("")
@@ -403,6 +417,55 @@ class State:
         _ = mcurl.getauth(auth)
 
         self.auth = auth
+
+    def set_client_username(self, username):
+        "Set client username"
+        self.client_username = username
+
+    def set_client_password(self):
+        try:
+            if len(self.client_username) == 0:
+                pprint("domain\\username missing - specify via --client-username")
+                sys.exit()
+            pprint("Setting client password for '" + self.client_username + "'")
+
+            pwd = ""
+            while len(pwd) == 0:
+                pwd = getpass.getpass("Enter password: ")
+
+            keyring.set_password(CLIENT_REALM, self.client_username, pwd)
+
+            if keyring.get_password(CLIENT_REALM, self.client_username) == pwd:
+                pprint("Saved successfully")
+        except KeyboardInterrupt:
+            pprint("")
+
+        sys.exit()
+
+    def set_client_auth(self, auth):
+        "Set client authentication"
+        self.client_auth = []
+        for val in auth.split(","):
+            val = val.strip().upper()
+            if val == "ANY":
+                self.client_auth = AUTH_SUPPORTED
+                return
+            elif val == "ANYSAFE":
+                self.client_auth = AUTH_SUPPORTED
+                self.client_auth.remove("BASIC")
+                return
+            elif val == "NONE":
+                return
+            elif val not in AUTH_SUPPORTED:
+                dprint("Unsupported client auth type: " + auth)
+                raise ValueError("Unsupported client auth type: " + auth)
+            else:
+                self.client_auth.append(val)
+
+    def set_client_nosspi(self, nosspi):
+        "Set client nosspi"
+        if nosspi == 1:
+            self.client_nosspi = True
 
     def set_debug(self, location = LOG_SCRIPTDIR):
         if self.debug is None:
@@ -490,6 +553,12 @@ class State:
         elif name in ["port", "gateway", "hostonly"]:
             self.cfg_int_init("proxy", name, val, callback, override)
 
+        # [client]
+        elif name in ["client_username", "client_auth"]:
+            self.cfg_str_init("client", name, val, callback, override)
+        elif name in ["client_nosspi"]:
+            self.cfg_int_init("client", name, val, callback, override)
+
         # [settings]
         elif name in ["workers", "threads", "idle", "proxyreload", "foreground", "log"]:
             self.cfg_int_init("settings", name, val, callback, override)
@@ -522,10 +591,10 @@ class State:
             if "=" in arg:
                 # --name=val
                 name, val = arg.split("=", 1)
-                flags[name] = val
+                flags[name.replace("-", "_")] = val
             else:
                 # --name
-                flags[arg] = "1"
+                flags[arg.replace("-", "_")] = "1"
 
         if "proxy" in flags:
             # --proxy is synonym for --server
@@ -685,6 +754,8 @@ class State:
             self.save()
         elif "--password" in sys.argv:
             self.set_password()
+        elif "--client-password" in sys.argv:
+            self.set_client_password()
 
         ###
         # Discover proxy info from OS

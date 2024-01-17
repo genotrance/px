@@ -89,7 +89,7 @@ Px can be run as a local Python script without installation. Download the source
 as described above, install all dependencies and then run Px:
 
 ```
-pip install keyring netaddr psutil python-dotenv quickjs
+pip install keyring netaddr psutil python-dotenv pyspnego quickjs
 
 # Download/install libcurl
 
@@ -135,7 +135,7 @@ section or `--help` for details and syntax.
 
 ### Credentials
 
-If SSPI is not available or not preferred, providing a `username` in `domain\username`
+If SSPI is not available or not preferred, providing `--username` in `domain\username`
 format allows Px to authenticate as that user. The corresponding password is
 retrieved using Python keyring and needs to be setup in the appropriate OS
 specific backend.
@@ -188,6 +188,41 @@ to specify the environment variables they require before starting Px.
 This will not work for the Nuitka binaries so as a fallback, `PX_PASSWORD` can
 be used instead to set credentials.
 
+### Client authentication
+
+Px is useful to authenticate with the upstream proxy server on behalf of clients
+but it can also authenticate the client that connects to it if needed. This can
+be useful in `gateway` mode where remote clients should log in before accessing
+the upstream proxy via Px. `BASIC` and `DIGEST` auth are supported, along with
+`NTLM` and `NEGOTIATE`.
+
+The client credentials can be different from the upstream proxy credentials or
+the same if preferred. SSPI is also supported on Windows and can be leveraged
+for only the client or upstream or both.
+
+Client authentication is turned off by default and can be enabled using
+`--client-auth`, `PX_CLIENT_AUTH` or `px.ini`. Setting the value to `ANYSAFE` is
+recommended.
+
+Similar to the upstream proxy, the client username can be configured with
+`--client-username`, `PX_CLIENT_USERNAME` or `px.ini` The password can be setup
+in keyring using `PxClient` as the network address name. `PX_CLIENT_PASSWORD` is
+available for cases where keyring is not available.
+
+SSPI is enabled by default on Windows and can be disabled with `--client-nosspi`,
+`PX_CLIENT_NOSSPI` or in `px.ini`.
+
+Client credentials can be setup in keyring with the command line:
+
+	px --client-username=domain\username --client-password
+
+Px only supports one credential for the upstream proxy but can be configured to
+support multiple client users when keyring is used. Each user should be added to
+keyring with the `PxClient` network address.
+
+Using an upstream proxy is not required so Px can also be used simply as an
+authenticating proxy for smaller setups.
+
 ### Misc
 
 The configuration file `px.ini` can be created or updated from the command line
@@ -236,10 +271,16 @@ Actions:
   As an alternative, Px can also load credentials from the environment variable
   `PX_PASSWORD` or a dotenv file.
 
-  --test=URL
+  --client-password | PX_CLIENT_PASSWORD
+  Collect and save password to default keyring. Username needs to be provided
+  via --client-username, PX_CLIENT_USERNAME or in the config file.
+  As an alternative, Px can also load credentials from the environment variable
+  `PX_CLIENT_PASSWORD` or a dotenv file.
+
+  --test=URL | --test
   Test Px as configured with the URL specified. This can be used to confirm that
   Px is configured correctly and is able to connect and authenticate with the
-  upstream proxy.
+  upstream proxy. If URL is skipped, Px runs multiple tests against httpbin.org.
 
 Configuration:
   --config= | PX_CONFIG=
@@ -307,7 +348,7 @@ Configuration:
   --auth= | PX_AUTH= | proxy:auth=
   Force instead of discovering upstream proxy type
     By default, Px will attempt to discover the upstream proxy type. This
-    option can be used to force either NTLM, KERBEROS, DIGEST, BASIC or the
+    option can be used to force either NEGOTIATE, NTLM, DIGEST, BASIC or the
     other libcurl supported upstream proxy types. See:
       https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html
     To control which methods are available during proxy detection:
@@ -319,6 +360,23 @@ Configuration:
     directly connected:
       Client -> Auth Px -> no-Auth Px -> Upstream proxy
         'Auth Px' cannot directly access upstream proxy but 'no-Auth Px' can
+
+  --client-username= | PX_CLIENT_USERNAME= | client:client_username=
+  Client authentication to use when SSPI is unavailable. Format is domain\username
+  Service name "PxClient" and this username are used to retrieve the password using
+  Python keyring if available.
+
+  --client-auth= | PX_CLIENT_AUTH= | client:client_auth=
+  Enable authentication for client connections. Comma separated, default: NONE
+  Mechanisms supported: NEGOTIATE, NTLM, DIGEST, BASIC
+    ANY     = enable all supported mechanisms
+    ANYSAFE = enable all supported mechanisms except BASIC
+    NTLM    = enable only NTLM, etc.
+    NONE    = disable client authentication altogether (default)
+
+  --client-nosspi= | PX_CLIENT_NOSSPI= | client:client_nosspi=
+  Disable SSPI for client authentication on Windows. default: 0
+    Set to 1 to disable SSPI and use the configured username and password
 
   --workers= | PX_WORKERS= | settings:workers=
   Number of parallel workers (processes). Valid integer, default: 2
@@ -404,7 +462,8 @@ the following Python packages:
 - [keyring](https://pypi.org/project/keyring/)
 - [netaddr](https://pypi.org/project/netaddr/)
 - [psutil](https://pypi.org/project/psutil/)
-- [dotenv](https://pypi.org/projects/python-dotenv/)
+- [pyspnego](https://pypi.org/project/pyspnego/)
+- [python-dotenv](https://pypi.org/projects/python-dotenv/)
 - [quickjs](https://pypi.org/project/quickjs/)
 
 Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP

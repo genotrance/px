@@ -77,9 +77,10 @@ setup(
         "keyring",
         "netaddr",
         "psutil",
+        "pyspnego"
         "python-dotenv",
         'quickjs==1.19.2;python_version=="3.7"',
-        'quickjs'
+        "quickjs",
     ],
     data_files = data_files,
     entry_points = {

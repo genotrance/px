@@ -103,6 +103,7 @@ gen_px_image() {
 
         echo "Generating $PX_IMAGE from $image"
         $DOCKERCMD $image /px/build.sh -D
+        sleep 1
         CONTAINER_ID=`docker ps -lq`
         docker commit $CONTAINER_ID $PX_IMAGE:latest
         docker rm $CONTAINER_ID
@@ -125,9 +126,7 @@ if [ -f "/.dockerenv" ]; then
 
     export PXBIN="/px/px.dist-linux-$ABI-$ARCH/px.dist/px"
     export WHEELS="/px/px.dist-wheels-linux-$ABI-$ARCH/px.dist-wheels"
-    export AUTH=""
 
-    export PROXY="127.0.0.1:3127"
     export USERNAME="test"
     export PX_PASSWORD="12345"
     export PX_CLIENT_USERNAME=$USERNAME
@@ -202,8 +201,6 @@ if [ -f "/.dockerenv" ]; then
             apt clean
         fi
 
-        export AUTH="NONEGOTIATE"
-
     elif [ "$DISTRO" = "opensuse-tumbleweed" ] || [ "$DISTRO" = "opensuse-leap" ]; then
 
         if [ "$DOCKERBUILD" = "yes" ]; then
@@ -212,8 +209,6 @@ if [ -f "/.dockerenv" ]; then
                 dbus-1-python3 gnome-keyring openssh
             zypper cc -a
         fi
-
-        export AUTH="NONEGOTIATE"
 
     elif [ "$DISTRO" = "void" ]; then
 
@@ -353,7 +348,6 @@ elif [ "$OS" = "Darwin" ]; then
     export PXBIN="`pwd`/px.dist-osx-$ARCH/px.dist/px"
     export WHEELS="`pwd`/px.dist-wheels-osx-$ARCH/px.dist-wheels"
 
-    export PROXY="127.0.0.1:3127"
     export OSX_USERNAME="test"
     export PX_PASSWORD="12345"
     export PX_CLIENT_USERNAME=$OSX_USERNAME

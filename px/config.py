@@ -689,6 +689,10 @@ class State:
         if "proxy" not in self.config.sections():
             self.config.add_section("proxy")
 
+        # [client] section
+        if "client" not in self.config.sections():
+            self.config.add_section("client")
+
         # [settings] section
         if "settings" not in self.config.sections():
             self.config.add_section("settings")

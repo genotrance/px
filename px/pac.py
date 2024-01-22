@@ -7,7 +7,7 @@ try:
     import quickjs
 except ImportError:
     print("Requires module quickjs")
-    sys.exit()
+    sys.exit(1)
 
 from .mcurl import Curl
 from .pacutils import PACUTILS

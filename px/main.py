@@ -169,23 +169,12 @@ def run_pool():
 
 def test(testurl):
     # Get Px configuration
-    listen = STATE.listen[0]
-    if len(listen) == 0:
-        # Listening on all interfaces - figure out which one is allowed
-        hostips = config.get_host_ips()
-        if STATE.gateway:
-            # Check allow list
-            for ip in hostips:
-                if ip in STATE.allow:
-                    listen = str(ip)
-                    break
-            if len(listen) == 0:
-                pprint("Failed: host IP not in --allow to test Px")
-                sys.exit()
-        elif STATE.hostonly:
-            # Use first host IP
-            listen = str(list(hostips)[0])
+    listen = config.get_listen()
     port = STATE.config.getint("proxy", "port")
+
+    if len(listen) == 0:
+        pprint("Failed: Px not listening on localhost - cannot run test")
+        sys.exit(ERROR_TEST)
 
     # Tweak Px configuration for test - only 1 process required
     STATE.config.set("settings", "workers", "1")
@@ -218,7 +207,7 @@ def test(testurl):
         pprint(f"\nTesting {method} {url}")
         if ret != 0:
             pprint(f"Failed with error {ret}\n{ec.errstr}")
-            os._exit(1)
+            os._exit(config.ERROR_TEST)
         else:
             ret_data = ec.get_data()
             pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
@@ -226,13 +215,13 @@ def test(testurl):
                 # Tests against httpbin
                 if url not in ret_data:
                     pprint(f"Failed: response does not contain {url}:\n{ret_data}")
-                    os._exit(1)
+                    os._exit(config.ERROR_TEST)
                 if data is not None and data not in ret_data:
                     pprint(f"Failed: response does not match {data}:\n{ret_data}")
-                    os._exit(1)
+                    os._exit(config.ERROR_TEST)
 
         if quit:
-            os._exit(0)
+            os._exit(config.ERROR_SUCCESS)
 
     def queryall(testurl):
         import uuid
@@ -250,7 +239,7 @@ def test(testurl):
                 data = str(uuid.uuid4()) if method in ["POST", "PUT", "PATCH"] else None
                 query(testurl, method, data, quit=False, check=True, insecure=insecure)
 
-        os._exit(0)
+        os._exit(config.ERROR_SUCCESS)
 
     # Run testurl query in a thread
     if testurl in ["all", "1"] or testurl.startswith("all:"):

@@ -82,20 +82,18 @@ def waitasync(pool, results):
         time.sleep(0.5)
 
         if os.system("grep fail -i *.log") == 0:
-            # Kill all child processes if any - could prevent some logging
-            killProcTree(os.getpid(), False)
+            if "--stoponfail" in sys.argv:
+                # Kill all child processes if any - could prevent some logging
+                killProcTree(os.getpid(), False)
 
-            # Proxy auth errors - stop all tests
-            pool.terminate()
-            ret = False
-            break
+                sys.exit()
 
     return ret
 
 def writeflush(port, data):
     if port not in STDOUT:
         return
-    STDOUT[port].write(data)
+    STDOUT[port].write(f"{int(time.time())}: {data}")
     if data[-1] != "\n":
         STDOUT[port].write("\n")
     STDOUT[port].flush()
@@ -113,29 +111,37 @@ def killProcTree(pid, top=True):
     except psutil.NoSuchProcess:
         pass
 
+def runPx(name, cmd, args, port):
+    cmd += f"{args} --port={port}"
+    if "--nodebug" not in sys.argv:
+        cmd += " --uniqlog"
+
+    # Output to file
+    STDOUT[port] = open("test-%d.log" % port, "w")
+    out = f"{port}: {name}"
+    print(out)
+    writeflush(port, f"{out}\ncmd: {cmd}\n")
+
+    if sys.platform == "win32":
+        cmd = "cmd /c start /wait /min " + cmd
+
+    subp = subprocess.Popen(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+
+    return cmd, subp
+
 def runTest(test, cmd, offset, port):
-    global STDOUT
+    start = time.time()
 
     if  "--norun" not in sys.argv:
         # Multiple tests in parallel, each on their own port
         port += offset
 
-    if "--nodebug" not in sys.argv:
-        cmd += f"{test[0]} --port={port} --uniqlog"
-
     testproc = test[1]
+    name = testproc.__name__
     data = test[2]
 
-    # Output to file
-    STDOUT[port] = open("test-%d.log" % port, "w")
-    writeflush(port, f"Test {testproc.__name__} on port {port}\ncmd: {cmd}\n")
-
-    print("Starting test %s on port %d" % (testproc.__name__, port))
-
-    if sys.platform == "win32":
-        cmd = "cmd /c start /wait /min " + cmd
     if "--norun" not in sys.argv:
-        subp = subprocess.Popen(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+        cmd, subp = runPx(name, cmd, test[0], port)
 
         ret = True
         if testproc in [installTest, uninstallTest, testTest]:
@@ -144,13 +150,22 @@ def runTest(test, cmd, offset, port):
             if retcode != 0:
                 writeflush(port, f"Subprocess failed with {retcode}\n")
                 ret = False
+            else:
+                writeflush(port, "Px exited\n")
 
         if ret:
             # Subprocess (if applicable) was successful
             ret = testproc(data, port)
+            writeflush(port, f"Test completed with {ret}\n")
 
-        # Kill Px since runtime test is done
-        killProcTree(subp.pid)
+        # Quit Px since runtime test is done
+        if testproc not in [installTest, uninstallTest, testTest, quitTest]:
+            ret = quitPx(cmd, port)
+            retcode = subp.wait(0.5)
+
+            if ret == True and retcode is None:
+                writeflush(port, f"Subprocess failed to exit\n")
+                ret = False
 
         time.sleep(0.5)
     else:
@@ -158,6 +173,8 @@ def runTest(test, cmd, offset, port):
 
     if not ret:
         writeflush(port, "Test failed")
+
+    writeflush(port, f"{port}: {name} took {(time.time() - start):.2f} sec\n")
 
     STDOUT[port].close()
 
@@ -192,6 +209,23 @@ def getUnusedPort(port, step):
             port += step
         except (socket.timeout, ConnectionRefusedError):
             return port
+
+def quitPx(cmd, port):
+    cmd = cmd + " --quit"
+    if "--port" not in cmd:
+        cmd += f" --port={port}"
+    if "--nodebug" not in sys.argv:
+        cmd += " --uniqlog"
+
+    writeflush(port, f"quit cmd: {cmd}\n")
+    ret, data = exec(cmd)
+    if ret != 0:
+        writeflush(port, f"Failed: Unable to --quit Px: {ret}\n{data}\n\n")
+        return False
+    else:
+        writeflush(port, "Px quit\n")
+
+    return True
 
 # Test --listen and --port, --hostonly, --gateway and --allow
 def checkCommon(name, ips, port, checkProc):
@@ -361,7 +395,7 @@ def testTest(skip, port):
     return True
 
 def installTest(cmd, port):
-    time.sleep(1)
+    time.sleep(0.5)
     ret, data = exec("reg query HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v Px", port)
     if ret != 0:
         writeflush(port, f"Failed: registry query failed: {ret}\n{data}\n")
@@ -373,7 +407,7 @@ def installTest(cmd, port):
 
 def uninstallTest(skip, port):
     del skip
-    time.sleep(1)
+    time.sleep(0.5)
     ret, data = exec("reg query HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v Px", port)
     if ret == 0:
         writeflush(port, f"reg query passed after uninstall\n{data}\n")
@@ -385,13 +419,7 @@ def quitTest(cmd, port):
         writeflush(port, "Px did not start\n")
         return False
 
-    writeflush(port, f"cmd: {cmd} --quit\n")
-    ret, data = exec(cmd + "--quit", port)
-    if ret != 0 or "Quitting Px .. DONE" not in data:
-        writeflush(port, f"Failed: Unable to --quit Px: {ret}\n{data}\n\n")
-        return False
-
-    return True
+    return quitPx(cmd, port)
 
 def getproxyargs():
     proxyargs = []
@@ -423,6 +451,8 @@ def socketTestSetup():
 
     if "--noallow" not in sys.argv:
         for ip in getips():
+            if ip.startswith("172.1"):
+                continue
             spl = ip.split(".")
             oct = ".".join(spl[0:2])
 
@@ -468,14 +498,13 @@ def is_obsolete(testfile):
     return testdate < latest_date
 
 def auto():
-    prefix = "px.dist"
-    osname, machine, _, dist = tools.get_dirs(prefix)
     if "--norun" not in sys.argv:
+        osname = tools.get_os()
         if sys.platform == "linux":
             _, distro = exec("cat /etc/os-release | grep ^ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
             _, version = exec("cat /etc/os-release | grep ^VERSION_ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
             osname += "-%s-%s" % (distro.strip(), version.strip())
-        testdir = "test-%s-%d-%s" % (osname, PORT, machine)
+        testdir = f"test-{PORT}-{osname}-{platform.machine().lower()}"
 
         # Make temp directory
         while os.path.exists(testdir):
@@ -497,42 +526,38 @@ def auto():
     # Setup script, bin and pip command lines
     cmds = []
     subps = []
-    client_cmd = "--client-auth=ANY --uniqlog"
+    client_cmd = "--client-auth=ANY"
     if sys.platform == "win32":
         client_cmd += " --client-nosspi"
-    if "--noscript" not in sys.argv:
-        print("Testing in script mode")
+    if "--nodebug" not in sys.argv:
+        client_cmd += " --uniqlog"
 
+    if "--noscript" not in sys.argv:
         # Run as script - python px.py
         cmd = sys.executable + " %s " % os.path.abspath("../px.py")
         cmds.append(cmd)
 
         # Start client authenticating Px
-        if len(PROXY) == 0:
-            port = PORT+len(cmds)-1
-            subps.append(subprocess.Popen(f"{cmd} {client_cmd} --port={port}",
-                                        shell=True, stdout=DEVNULL, stderr=DEVNULL))
+        if len(PROXY) == 0 and "--noproxy" not in sys.argv:
+            subps.append(runPx("scriptMode", cmd, client_cmd, PORT+len(cmds)-1))
 
     # Nuitka binary test
+    _, _, dist = tools.get_paths("px.dist")
     binfile = os.path.abspath(os.path.join("..", dist, "px"))
     if sys.platform == "win32":
         binfile += ".exe"
     if "--nobin" not in sys.argv and not is_obsolete(binfile):
-        print("Testing binary")
         cmd = binfile + " "
         cmds.append(cmd)
 
         # Start client authenticating Px
-        if len(PROXY) == 0:
-            port = PORT+len(cmds)-1
-            subps.append(subprocess.Popen(f"{cmd} {client_cmd} --port={port}",
-                                        shell=True, stdout=DEVNULL, stderr=DEVNULL))
+        if len(PROXY) == 0 and "--noproxy" not in sys.argv:
+            subps.append(runPx("binary", cmd, client_cmd, PORT+len(cmds)-1))
     else:
         binfile = ""
 
     # Wheel pip installed test
-    prefix = "px.dist-wheels"
-    _, _, _, wdist = tools.get_dirs(prefix)
+    _, _, wdist = tools.get_paths("px.dist", "wheels")
     wdist = os.path.join("..", wdist)
     lwhl = get_newest_file(wdist, ".whl")
     if "--nopip" not in sys.argv and not is_obsolete(lwhl):
@@ -546,31 +571,23 @@ def auto():
         if ret != 0:
             print("Failed: pip install: %d\n%s" % (ret, data))
         else:
-            print("Testing as pip module")
-
             # Run as module - python -m px
             cmd = sys.executable + " -m px "
             cmds.append(cmd)
 
             # Start client authenticating Px
-            if len(PROXY) == 0:
-                port = PORT+len(cmds)-1
-                subps.append(subprocess.Popen(f"{cmd} {client_cmd} --port={port}",
-                                            shell=True, stdout=DEVNULL, stderr=DEVNULL))
+            if len(PROXY) == 0 and "--noproxy" not in sys.argv:
+                subps.append(runPx("pipModule", cmd, client_cmd, PORT+len(cmds)-1))
 
             # Run as Python console script
             cmd = shutil.which("px")
             if cmd is not None:
-                print("Testing as pip binary")
-
                 cmd = cmd.replace(".EXE", "") + " "
                 cmds.append(cmd)
 
                 # Start client authenticating Px
-                if len(PROXY) == 0:
-                    port = PORT+len(cmds)-1
-                    subps.append(subprocess.Popen(f"{cmd} {client_cmd} --port={port}",
-                                                shell=True, stdout=DEVNULL, stderr=DEVNULL))
+                if len(PROXY) == 0 and "--noproxy" not in sys.argv:
+                    subps.append(runPx("pipBinary", cmd, client_cmd, PORT+len(cmds)-1))
             else:
                 print("Skipped: console script could not be found")
     else:
@@ -690,9 +707,14 @@ def auto():
         print("Some tests failed")
     pool.close()
 
-    # Kill client authenticating Px if any
-    for subp in subps:
-        killProcTree(subp.pid)
+    # Quit client authenticating Px if any
+    for i, cmd in enumerate(cmds):
+        port = PORT+i
+        quitPx(cmd, port)
+    for _, subp in subps:
+        retcode = subp.wait(0.5)
+        if retcode is None:
+            killProcTree(subp.pid)
 
     if "--norun" not in sys.argv and ret:
         # Sequential tests - cannot parallelize
@@ -709,20 +731,20 @@ def auto():
         if "--noquit" not in sys.argv:
             shell = "powershell -Command "
             for cmd in cmds:
-                    runTest(("", quitTest, cmd), cmd, offset, PORT)
+                runTest(("", quitTest, cmd), cmd, offset, PORT)
+                offset += 1
+
+                if sys.platform == "win32":
+                    runTest(("", quitTest, shell + cmd), cmd, offset, PORT)
                     offset += 1
 
-                    if sys.platform == "win32":
-                        runTest(("", quitTest, shell + cmd), cmd, offset, PORT)
-                        offset += 1
+                    runTest(("", quitTest, cmd), shell + cmd, offset, PORT)
+                    offset += 1
 
-                        runTest(("", quitTest, cmd), shell + cmd, offset, PORT)
-                        offset += 1
+                    runTest(("", quitTest, shell + cmd), shell + cmd, offset, PORT)
+                    offset += 1
 
-                        runTest(("", quitTest, shell + cmd), shell + cmd, offset, PORT)
-                        offset += 1
-
-    if "--nopip" in sys.argv and not is_obsolete(lwhl):
+    if len(lwhl) != 0:
         cmd = sys.executable + " -m pip uninstall px-proxy -y"
         exec(cmd)
 
@@ -731,6 +753,8 @@ def auto():
         os.system("grep failed -i *.log")
         os.system("grep traceback -i *.log")
         os.system("grep error -i *.log")
+
+        os.system("grep took -h *.log")
 
         os.chdir("..")
 
@@ -795,6 +819,9 @@ def main():
     --httpbin=IPaddress
         IP of local httpbin server running in Docker
 
+    --stoponfail
+        Stop on first test failure
+
     --curlcli
         Use curl command line instead of px.mcurl
     """
@@ -825,7 +852,9 @@ def main():
         print(main.__doc__)
         sys.exit()
 
+    start = time.time()
     auto()
+    print(f"Took {(time.time()-start):.2f} sec")
 
 if __name__ == "__main__":
     main()

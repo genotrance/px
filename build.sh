@@ -91,7 +91,12 @@ gen_px_image() {
 
     # Check if image generated
     PX_IMAGE="px_$1"
-    exists=`docker images | grep $PX_IMAGE`
+
+    if [[ ! "$PX_IMAGE" =~ ":" ]]; then
+        PX_IMAGE="$PX_IMAGE:latest"
+    fi
+
+    exists=`docker images -q $PX_IMAGE`
     if [ -z "$exists" ]; then
         if [ "$1" = "musl" ]; then
             image="$MUSL"
@@ -105,7 +110,7 @@ gen_px_image() {
         $DOCKERCMD $image /px/build.sh -D
         sleep 1
         CONTAINER_ID=`docker ps -lq`
-        docker commit $CONTAINER_ID $PX_IMAGE:latest
+        docker commit $CONTAINER_ID $PX_IMAGE
         docker rm $CONTAINER_ID
         echo "Generated $PX_IMAGE"
     fi
@@ -125,7 +130,7 @@ if [ -f "/.dockerenv" ]; then
     ARCH=`uname -m`
 
     export PXBIN="/px/px.dist-linux-$ABI-$ARCH/px.dist/px"
-    export WHEELS="/px/px.dist-wheels-linux-$ABI-$ARCH/px.dist-wheels"
+    export WHEELS="/px/px.dist-linux-$ABI-$ARCH-wheels/px.dist"
 
     export USERNAME="test"
     export PX_PASSWORD="12345"
@@ -161,7 +166,7 @@ if [ -f "/.dockerenv" ]; then
             apk add curl psmisc \
                 python3 python3-dev \
                 dbus gnome-keyring openssh \
-                ccache gcc musl-dev patchelf upx
+                ccache gcc musl-dev patchelf upx libffi-dev
             if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
                 # Extract static libs for embedding if musllinux
                 cd /opt/_internal && tar xf static-libs-for-embedding-only.tar.xz && cd -
@@ -346,7 +351,7 @@ elif [ "$OS" = "Darwin" ]; then
     ARCH=`uname -m`
 
     export PXBIN="`pwd`/px.dist-osx-$ARCH/px.dist/px"
-    export WHEELS="`pwd`/px.dist-wheels-osx-$ARCH/px.dist-wheels"
+    export WHEELS="`pwd`/px.dist-osx-$ARCH-wheels/px.dist"
 
     export OSX_USERNAME="test"
     export PX_PASSWORD="12345"

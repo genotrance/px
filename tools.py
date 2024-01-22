@@ -87,13 +87,25 @@ def get_os():
 
     return "unsupported"
 
-def get_dirs(prefix):
+def get_paths(prefix, suffix=""):
     osname = get_os()
     machine = platform.machine().lower()
-    outdir = "%s-%s-%s" % (prefix, osname, machine)
+
+    # os-arch[-suffix]
+    basename = f"{osname}-{machine}"
+    if len(suffix) != 0:
+        basename += "-" + suffix
+
+    # px-vX.X.X-os-arch[-suffix]
+    archfile = f"px-v{__version__}-{basename}"
+
+    # prefix-os-arch[-suffix]
+    outdir = f"{prefix}-{basename}"
+
+    # prefix-os-arch[-suffix]/prefix
     dist = os.path.join(outdir, prefix)
 
-    return osname, machine, outdir, dist
+    return archfile, outdir, dist
 
 # URL
 
@@ -196,7 +208,7 @@ def wheel():
     rmtree("build px_proxy.egg-info")
 
 def pyinstaller():
-    _, _, dist, _ = get_dirs("pyinst")
+    _, dist, _ = get_paths("pyinst")
     rmtree("build dist " + dist)
 
     os.system("pyinstaller --clean --noupx -w px.py --collect-submodules win32ctypes")
@@ -209,7 +221,7 @@ def pyinstaller():
 
 def nuitka():
     prefix = "px.dist"
-    osname, machine, outdir, dist = get_dirs(prefix)
+    archfile, outdir, dist = get_paths(prefix)
     rmtree(outdir)
 
     # Build
@@ -241,7 +253,6 @@ def nuitka():
 
     # Create archive
     os.chdir("..")
-    archfile = "px-v%s-%s-%s" % (__version__, osname, machine)
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"
@@ -276,15 +287,14 @@ def get_pip(executable = sys.executable):
 
 def embed():
     # Get wheels path
-    wprefix = "px.dist-wheels"
-    _, _, _, wdist = get_dirs(wprefix)
+    prefix = "px.dist"
+    _, _, wdist = get_paths(prefix, "wheels")
     if not os.path.exists(wdist):
         print(f"Wheels not found at {wdist}, required to embed")
         sys.exit()
 
     # Destination path
-    prefix = "px.dist"
-    osname, machine, outdir, dist = get_dirs(prefix)
+    archfile, outdir, dist = get_paths(prefix)
     rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
 
@@ -382,7 +392,6 @@ def embed():
 
     # Create archive
     os.chdir("..")
-    archfile = "px-v%s-%s-%s" % (__version__, osname, machine)
     arch = "zip"
     shutil.make_archive(archfile, arch, prefix)
 
@@ -396,8 +405,7 @@ def embed():
     os.chdir("..")
 
 def deps():
-    prefix = "px.dist-wheels"
-    _, _, outdir, dist = get_dirs(prefix)
+    _, outdir, dist = get_paths("px.dist", "wheels")
     if "--force" in sys.argv:
         rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
@@ -406,8 +414,8 @@ def deps():
     os.system(sys.executable + " -m pip wheel . -w " + dist)
 
 def depspkg():
-    prefix = "px.dist-wheels"
-    osname, machine, outdir, dist = get_dirs(prefix)
+    prefix = "px.dist"
+    archfile, outdir, dist = get_paths(prefix, "wheels")
 
     if sys.platform == "linux":
         # Use auditwheel to include libraries and --strip
@@ -416,7 +424,7 @@ def depspkg():
 
         rmtree("wheelhouse")
         for whl in glob.glob("*.whl"):
-            if machine not in whl:
+            if platform.machine().lower() not in whl:
                 # Not platform specific wheel
                 continue
 
@@ -443,7 +451,6 @@ def depspkg():
     shutil.copy(os.path.join("..", "wheel", whl), prefix)
 
     # Compress all wheels
-    archfile = "px-v%s-%s-%s-wheels" % (__version__, osname, machine)
     arch = "gztar"
     if sys.platform == "win32":
         arch = "zip"

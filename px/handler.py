@@ -11,6 +11,7 @@ import sys
 from .config import STATE, CLIENT_REALM
 from .debug import pprint, dprint
 
+from . import config
 from . import mcurl
 from . import wproxy
 
@@ -27,7 +28,7 @@ try:
     )
 except ImportError:
     pprint("Requires module pyspnego")
-    sys.exit()
+    sys.exit(config.ERROR_IMPORT)
 
 ###
 # spnego _ntlm monkey patching
@@ -205,8 +206,26 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
 
         STATE.mcurl.remove(self.curl)
 
+    def do_quit(self):
+        "Handle quit request - client has to be host"
+        hostips = config.get_host_ips()
+        for listen in STATE.listen:
+            if ((len(listen) == 0 and self.client_address[0] in hostips) or
+                # client address matches any hostip since --hostonly or --gateway
+                (self.client_address[0] == listen)):
+                # client address matches --listen
+                    # Quit request from same host
+                    self.send_response(200)
+                    self.end_headers()
+                    os._exit(config.ERROR_SUCCESS)
+
+        self.send_error(403)
+
     def do_GET(self):
-        self.do_curl()
+        if self.path == "/PxQuit":
+            self.do_quit()
+        else:
+            self.do_curl()
 
     def do_HEAD(self):
         self.do_curl()

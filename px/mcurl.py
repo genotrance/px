@@ -18,7 +18,7 @@ except OSError as exc:
         print("  Download from https://curl.se/windows and extract DLLs to px/libcurl")
     else:
         print("  Install libcurl with package manager")
-    sys.exit()
+    sys.exit(1)
 
 # Debug shortcut
 dprint = lambda x: None
@@ -31,12 +31,18 @@ MCURL = None
 def sanitized(msg):
     "Hide user sensitive data from debug output"
     lower = msg.lower()
-    if "authorization: " in lower or "authenticate: " in lower or \
-        lower.startswith("proxy auth using"):
-        # Hide SSPI responses and username
-        spl = msg.split(" ")
-        if len(spl) > 2 or "authorization: " in lower:
-            return " ".join(spl[0:-1]) + " sanitized len(%d)" % len(spl[-1])
+    # Hide auth responses and username
+    if "authorization: " in lower or "authenticate: " in lower:
+        fspace = lower.find(" ")
+        if fspace != -1:
+            sspace = lower.find(" ", fspace + 1)
+            if sspace != -1:
+                return msg[0:sspace] + " sanitized len(%d)" % len(msg[sspace:])
+    elif lower.startswith("proxy auth using"):
+        fspace = lower.find(" ", len("proxy auth using "))
+        if fspace != -1:
+            return msg[0:fspace] + " sanitized len(%d)" % len(msg[fspace:])
+
     return msg
 
 def gethash(easy):
@@ -98,25 +104,29 @@ def save_auth(curl, msg):
 
 def save_upstream(curl, msg):
     "Find which server libcurl connected to - upstream proxy or target server"
-    if curl.upstream is None:
-        if msg.startswith("Connected to"):
-            curl.upstream = msg.split(" ")[2]
-        elif msg.startswith("Re-using existing connection"):
-            curl.upstream = msg.split(" ")[-1]
+    if curl.upstream is not None:
+        # Already cached
+        return True
 
-        if curl.upstream is not None:
-            if curl.upstream == "(nil)":
-                # Older libcurl workaround
-                ret, curl.upstream = curl.get_primary_ip()
-            if curl.upstream == "127.0.0.1" and curl.proxy == "localhost":
-                # Older libcurl workaround
-                curl.upstream = curl.proxy
-            dprint(curl.easyhash + ": Upstream server = " + curl.upstream)
-            if curl.proxy is not None and curl.upstream == curl.proxy:
-                dprint(curl.easyhash + ": Upstream server is proxy")
-                curl.is_proxied = True
-            return True
+    if msg.startswith("Connected to"):
+        curl.upstream = msg.split(" ")[2]
+    elif msg.startswith("Re-using existing connection"):
+        curl.upstream = msg.split(" ")[-1]
 
+    if curl.upstream is not None:
+        if curl.upstream == "(nil)":
+            # Older libcurl workaround
+            ret, curl.upstream = curl.get_primary_ip()
+        if curl.upstream == "127.0.0.1" and curl.proxy == "localhost":
+            # Older libcurl workaround
+            curl.upstream = curl.proxy
+        dprint(curl.easyhash + ": Upstream server = " + curl.upstream)
+        if curl.proxy is not None and curl.upstream == curl.proxy:
+            dprint(curl.easyhash + ": Upstream server is proxy")
+            curl.is_proxied = True
+        return True
+
+    # Not yet cached
     return False
 
 # Active thread running callbacks can print debug output for any other
@@ -525,7 +535,7 @@ class Curl:
                 # Forward user agent via setopt
                 self.set_useragent(xheaders[header])
                 continue
-            dprint(self.easyhash + sanitized(": Adding header => %s: %s" % (header, xheaders[header])))
+            dprint(self.easyhash + ": Adding header => " + sanitized("%s: %s" % (header, xheaders[header])))
             self.headers = libcurl.slist_append(self.headers,
                 ("%s: %s" % (header, xheaders[header])).encode("utf-8"))
 
@@ -758,6 +768,8 @@ class MCurl:
         global dprint
         if debug_print is not None:
             dprint = debug_print
+        else:
+            sanitized = lambda msg: msg
 
         # Save as global to enable access via callbacks
         global MCURL
@@ -961,8 +973,8 @@ class MCurl:
                     # Setup client to authenticate directly with upstream proxy
                     dprint(curl.easyhash + ": Client to authenticate with upstream proxy")
                     if not curl.is_connect:
+                        # curl.errstr not set else connection will get closed during auth
                         curl.resp = codep
-                        out = "Proxy authentication required"
 
         if curl.is_connect and curl.sock_fd is None:
             # Need sock_fd for select()
@@ -1038,7 +1050,7 @@ class MCurl:
                         data = i.recv(4096)
                     except ConnectionError as exc:
                         # Fix #152 - handle connection errors gracefully
-                        dprint(curl.easyhash + ": Read error from %s: " % source + str(exc))
+                        dprint(curl.easyhash + ": from %s: " % source + str(exc))
                         data = ""
                     datalen = len(data)
                     if datalen != 0:

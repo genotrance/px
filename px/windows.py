@@ -6,12 +6,13 @@ import sys
 import winreg
 
 from .debug import pprint, dprint
+from . import config
 
 try:
     import psutil
 except ImportError:
     pprint("Requires module psutil")
-    sys.exit()
+    sys.exit(config.ERROR_IMPORT)
 
 ###
 # Install Px to startup
@@ -42,7 +43,7 @@ def install(script_cmd):
     else:
         pprint("Px already installed")
 
-    sys.exit()
+    sys.exit(config.ERROR_SUCCESS)
 
 def uninstall():
     "Uninstall Px from Windows registry if installed"
@@ -56,7 +57,7 @@ def uninstall():
     else:
         pprint("Px is not installed")
 
-    sys.exit()
+    sys.exit(config.ERROR_SUCCESS)
 
 ###
 # Attach/detach console

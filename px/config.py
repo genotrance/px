@@ -20,6 +20,16 @@ from . import wproxy
 if sys.platform == "win32":
     from . import windows
 
+# Errors
+PxErrors = int
+(
+    ERROR_SUCCESS,  # 0
+    ERROR_IMPORT,   # 1
+    ERROR_CONFIG,   # 2
+    ERROR_QUIT,     # 3
+    ERROR_TEST      # 4
+) = range(5)
+
 try:
     import keyring
 
@@ -32,25 +42,25 @@ try:
         import keyring.backends.macOS
 except ImportError:
     pprint("Requires module keyring")
-    sys.exit()
+    sys.exit(ERROR_IMPORT)
 
 try:
     import netaddr
 except ImportError:
     pprint("Requires module netaddr")
-    sys.exit()
+    sys.exit(ERROR_IMPORT)
 
 try:
     import psutil
 except ImportError:
     pprint("Requires module psutil")
-    sys.exit()
+    sys.exit(ERROR_IMPORT)
 
 try:
     import dotenv
 except ImportError:
     pprint("Requires module python-dotenv")
-    sys.exit()
+    sys.exit(ERROR_IMPORT)
 
 # Realms for keyring and authentication
 REALM = "Px"
@@ -151,76 +161,121 @@ def file_url_to_local_path(file_url):
     if len(path) > 2 and path[1] == ':':
         return path
 
+def get_listen():
+    "Get local interface that Px will listen on"
+    listen = STATE.listen[0]
+    if len(listen) == 0:
+        # Listening on all interfaces - figure out which one is allowed
+        hostips = get_host_ips()
+        if STATE.gateway:
+            # Check allow list
+            for ip in hostips:
+                if ip in STATE.allow:
+                    listen = str(ip)
+                    break
+            if len(listen) == 0:
+                return ""
+        elif STATE.hostonly:
+            # Use first host IP
+            listen = str(list(hostips)[0])
+
+    return listen
+
 ###
 # Actions
 
-def quit(checkOnly = False, exit = True):
+def quit(exit = True):
+    "Quit running instances of Px for loaded configuration"
+    listen = get_listen()
+    port = STATE.config.getint("proxy", "port")
+
+    if len(listen) == 0:
+        pprint("Failed: Px not listening on localhost - cannot quit")
+        sys.exit(ERROR_QUIT)
+
+    # Check if Px is running
     count = 0
-    mypids = [os.getpid(), os.getppid()]
-    mypath = os.path.realpath(sys.executable).lower()
-
-    # Add .exe for Windows
-    ext = ""
-    if sys.platform == "win32":
-        ext = ".exe"
-        _, tail = os.path.splitext(mypath)
-        if len(tail) == 0:
-            mypath += ext
-    mybin = os.path.basename(mypath)
-
-    for pid in sorted(psutil.pids(), reverse=True):
-        if pid in mypids:
-            continue
-
+    while True:
         try:
-            p = psutil.Process(pid)
-            exepath = p.exe().lower()
-            if sys.platform == "win32":
-                # Set \IP to \\IP for Windows shares
-                if len(exepath) > 1 and exepath[0] == "\\" and exepath[1] != "\\":
-                    exepath = "\\" + exepath
-            if exepath == mypath:
-                qt = False
-                if "python" in mybin:
-                    # Verify px is the script being run by this instance of Python
-                    if "-m" in p.cmdline() and "px" in p.cmdline():
-                        qt = True
-                    else:
-                        for param in p.cmdline():
-                            if param.endswith("px.py") or param.endswith("px" + ext):
-                                qt = True
-                                break
-                elif is_compiled():
-                    # Binary
-                    qt = True
-                if qt:
-                    count += 1
-                    for child in p.children(recursive=True):
-                        child.kill()
-                    p.kill()
-        except (psutil.AccessDenied, psutil.NoSuchProcess, PermissionError, SystemError):
-            pass
-        except:
-            traceback.print_exc(file=sys.stdout)
-
-    ret = False
-    if count != 0:
-        if checkOnly:
-            pprint(" Failed")
-        else:
-            sys.stdout.write("Quitting Px ..")
-            sys.stdout.flush()
-            time.sleep(4)
-            ret = quit(checkOnly = True, exit = exit)
-    else:
-        if checkOnly:
-            pprint(" DONE")
-            ret = True
-        else:
+            socket.create_connection((listen, port), 1)
+            break
+        except socket.timeout:
+            # Too busy?
+            time.sleep(0.1)
+            count += 1
+            if count == 5:
+                pprint("Failed: Px not responding")
+                if exit:
+                    sys.exit(ERROR_QUIT)
+        except ConnectionRefusedError:
+            # Px not running
             pprint("Px is not running")
+            if exit:
+                sys.exit(ERROR_QUIT)
+            return False
 
+    try:
+        sys.stdout.write("Quitting Px ..")
+        sys.stdout.flush()
+    except:
+        pass
+
+    # Connect to Px and send quit request
+    url = f"http://{listen}:{port}/PxQuit"
+    mc = mcurl.MCurl(debug_print = dprint)
+    ec = mcurl.Curl(url)
+    ec.buffer()
+    success = False
+    while True:
+        # Loop until all workers quit
+        ret = ec.perform()
+        if ret in [0, 56]:
+            # Success / disconnected
+
+            # Get response code
+            ret, resp = ec.get_response()
+            if ret != 0:
+                pprint(f" Failed: response error {ret}\n{ec.errstr}")
+                break
+            if resp == 200:
+                # Quit successful
+                success = True
+                continue
+            elif resp == 403:
+                pprint(" Failed: cannot quit Px on remote host")
+                break
+            else:
+                pprint(f" Failed: response {resp}\n{ec.get_data()}")
+                break
+        elif ret == 7:
+            # Px no longer running
+            break
+        elif ret == 52:
+            # Connection rejected - not in allow list
+            break
+        else:
+            # Quit failed - other error
+            pprint(f" Failed: error {ret}\n{ec.errstr}")
+            break
+
+        ec.reset(url)
+        ec.buffer()
+        time.sleep(0.01)
+
+    if success:
+        # Check if Px still running
+        try:
+            socket.create_connection((listen, port), 1)
+            pprint(" Failed: Px still running")
+            success = False
+        except (socket.timeout, ConnectionRefusedError):
+            pprint(" DONE")
+    else:
+        pprint(" Failed")
+
+    ret = 0 if success else ERROR_QUIT
     if exit:
-        sys.exit()
+        sys.exit(ret)
 
     return ret
 
@@ -357,7 +412,7 @@ class State:
             self.pac = pac
         else:
             pprint("Unsupported PAC location or file not found: %s" % pac)
-            sys.exit()
+            sys.exit(ERROR_CONFIG)
 
     def set_listen(self, listen):
         if len(listen) == 0:
@@ -393,7 +448,7 @@ class State:
         try:
             if len(self.username) == 0:
                 pprint("domain\\username missing - specify via --username or configure in px.ini")
-                sys.exit()
+                sys.exit(ERROR_CONFIG)
             pprint("Setting password for '" + self.username + "'")
 
             pwd = ""
@@ -407,7 +462,7 @@ class State:
         except KeyboardInterrupt:
             pprint("")
 
-        sys.exit()
+        sys.exit(ERROR_SUCCESS)
 
     def set_auth(self, auth):
         if len(auth) == 0:
@@ -426,7 +481,7 @@ class State:
         try:
             if len(self.client_username) == 0:
                 pprint("domain\\username missing - specify via --client-username")
-                sys.exit()
+                sys.exit(ERROR_CONFIG)
             pprint("Setting client password for '" + self.client_username + "'")
 
             pwd = ""
@@ -440,7 +495,7 @@ class State:
         except KeyboardInterrupt:
             pprint("")
 
-        sys.exit()
+        sys.exit(ERROR_SUCCESS)
 
     def set_client_auth(self, auth):
         "Set client authentication"
@@ -576,7 +631,7 @@ class State:
         with open(self.ini, "r") as cfgfile:
             sys.stdout.write(cfgfile.read())
 
-        sys.exit()
+        sys.exit(ERROR_SUCCESS)
 
     # Config sources
 
@@ -643,7 +698,7 @@ class State:
 
         if "-h" in sys.argv or "--help" in sys.argv:
             pprint(HELP)
-            sys.exit()
+            sys.exit(ERROR_SUCCESS)
 
         # Load CLI flags and environment variables
         flags = self.parse_cli()
@@ -662,7 +717,7 @@ class State:
             if not (os.path.exists(self.ini) or is_save):
                 # Specified file doesn't exist and not --save
                 pprint(f"Could not find config file: {self.ini}")
-                sys.exit()
+                sys.exit(ERROR_CONFIG)
         else:
             # Default "CWD/px.ini"
             cwd = os.getcwd()
@@ -751,8 +806,9 @@ class State:
         if "--quit" in sys.argv:
             quit()
         elif "--restart" in sys.argv:
-            if not quit(exit = False):
-                sys.exit()
+            ret = quit(exit = False)
+            if ret != 0:
+                sys.exit(ret)
             sys.argv.remove("--restart")
         elif "--save" in sys.argv:
             self.save()

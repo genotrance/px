@@ -1,4 +1,4 @@
-v0.9.0
+v0.9.0 - 2024-01-20
 - Added support for domains in noproxy - #2
 - Expanded noproxy to work in all proxy modes - #177
 - Added --test to verify Px configuration
@@ -30,6 +30,11 @@ v0.9.0
   proxy that is not directly connected
 - Fixed issue with getting all interfaces correctly for --hostonly
 - Fixed issue with HTTP PUT not working in some scenarios
+- Added support for client authentication - support for NEGOTIATE, NTLM, DIGEST
+  and BASIC auth with SSPI when available - #117
+- Refined --quit to directly communicate with running instances instead of looking
+  for process matches - fixed issue on OSX where Px was not quitting in script and
+  pip modes
 
 v0.8.4 - 2023-02-06
 - Support for specifying PAC file encoding - #167

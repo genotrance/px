@@ -10,7 +10,7 @@ try:
     import netaddr
 except ImportError:
     print("Requires module netaddr")
-    sys.exit()
+    sys.exit(1)
 
 # PAC processing using quickjs
 from .pac import Pac

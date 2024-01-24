@@ -313,6 +313,7 @@ class Curl:
 
     # Flags
     is_connect = False
+    is_easy = False
     is_patch = False
     is_post = False
     is_proxied = False
@@ -372,6 +373,12 @@ class Curl:
                 libcurl.easy_setopt(self.easy, libcurl.CURLOPT_FRESH_CONNECT, True)
                 dprint(self.easyhash + ": Fresh connection requested")
 
+                # Need to know socket assigned for CONNECT since used later in select()
+                # CURLINFO_ACTIVESOCKET not available on libcurl < v7.45  so need this
+                # hack for older versions
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SOCKOPTFUNCTION, _sockopt_callback)
+                libcurl.easy_setopt(self.easy, libcurl.CURLOPT_SOCKOPTDATA, id(self.easyhash))
+
             # We want libcurl to make a simple HTTP connection to auth
             # with the upstream proxy and let client establish SSL
             if "://" not in url:
@@ -405,6 +412,9 @@ class Curl:
 
         # Debug callback default disabled
         libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _wa_callback)
+
+        # Need libcurl verbose to save proxy auth mechanism and upstream server
+        self.set_verbose()
 
     def reset(self, url, method = "GET", request_version = "HTTP/1.1", connect_timeout = 60):
         "Reuse existing curl instance for another request"
@@ -565,7 +575,6 @@ class Curl:
           auth mechanism - libcurl does not provide an API to get this today - need to
           find it in sent header debug output
         """
-        self.set_verbose(enable)
         if enable:
             libcurl.easy_setopt(self.easy, libcurl.CURLOPT_DEBUGFUNCTION, _debug_callback)
 
@@ -838,12 +847,6 @@ class MCurl:
         dprint(curl.easyhash + ": Add handle")
         if curl.easyhash not in self.handles:
             self.handles[curl.easyhash] = curl
-            if curl.is_connect and curl_version() < 0x072D00:
-                # Need to know socket assigned for CONNECT since used later in select()
-                # CURLINFO_ACTIVESOCKET not available on libcurl < v7.45  so need this
-                # hack for older versions
-                libcurl.easy_setopt(curl.easy, libcurl.CURLOPT_SOCKOPTFUNCTION, _sockopt_callback)
-                libcurl.easy_setopt(curl.easy, libcurl.CURLOPT_SOCKOPTDATA, id(curl.easyhash))
             libcurl.multi_add_handle(self._multi, curl.easy)
             dprint(curl.easyhash + ": Added handle")
         else:
@@ -915,12 +918,16 @@ class MCurl:
 
     def do(self, curl: Curl):
         "Add a Curl handle and peform until completion"
-        self.add(curl)
-        while True:
-            if curl.done:
-                break
-            self._perform()
-            time.sleep(0.01)
+        if not curl.is_easy:
+            self.add(curl)
+            while True:
+                if curl.done:
+                    break
+                self._perform()
+                time.sleep(0.01)
+        else:
+            dprint(curl.easyhash + ": Using easy interface")
+            curl.perform()
 
         # Map some libcurl error codes to HTTP errors
         if curl.cerr == libcurl.CURLE_URL_MALFORMAT:

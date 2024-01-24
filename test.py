@@ -81,12 +81,11 @@ def waitasync(pool, results):
                 break
         time.sleep(0.5)
 
-        if os.system("grep fail -i *.log") == 0:
-            if "--stoponfail" in sys.argv:
-                # Kill all child processes if any - could prevent some logging
-                killProcTree(os.getpid(), False)
+        if os.system("grep fail -i *.log") == 0 and "--stoponfail" in sys.argv:
+            # Kill all child processes if any - could prevent some logging
+            killProcTree(os.getpid(), False)
 
-                sys.exit()
+            sys.exit()
 
     return ret
 
@@ -214,8 +213,7 @@ def quitPx(cmd, port):
     cmd = cmd + " --quit"
     if "--port" not in cmd:
         cmd += f" --port={port}"
-    if "--nodebug" not in sys.argv:
-        cmd += " --uniqlog"
+    cmd = cmd.replace(" --uniqlog", "")
 
     writeflush(port, f"quit cmd: {cmd}\n")
     ret, data = exec(cmd)
@@ -529,8 +527,6 @@ def auto():
     client_cmd = "--client-auth=ANY"
     if sys.platform == "win32":
         client_cmd += " --client-nosspi"
-    if "--nodebug" not in sys.argv:
-        client_cmd += " --uniqlog"
 
     if "--noscript" not in sys.argv:
         # Run as script - python px.py

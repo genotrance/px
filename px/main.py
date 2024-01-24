@@ -174,7 +174,7 @@ def test(testurl):
 
     if len(listen) == 0:
         pprint("Failed: Px not listening on localhost - cannot run test")
-        sys.exit(ERROR_TEST)
+        sys.exit(config.ERROR_TEST)
 
     # Tweak Px configuration for test - only 1 process required
     STATE.config.set("settings", "workers", "1")

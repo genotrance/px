@@ -107,6 +107,7 @@ def set_curl_auth(curl, auth):
     else:
         # Explicitly deferring proxy authentication to the client
         dprint(curl.easyhash + ": Skipping proxy authentication")
+        curl.is_easy = True
 
 ###
 # Proxy handler
@@ -360,7 +361,7 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
         # Check if nonce is present and matches
         nonce = params.get("nonce", "")
         if len(nonce) == 0 or not hasattr(self, "client_nonce"):
-            dprint("Authentication failed: No nonce or unknown client_address")
+            dprint("Authentication failed: No nonce")
             self.send_error(401, "Authentication failed")
             return False
         if nonce != self.client_nonce:

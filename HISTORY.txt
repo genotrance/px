@@ -1,4 +1,4 @@
-v0.9.0 - 2024-01-20
+v0.9.0 - 2024-01-24
 - Added support for domains in noproxy - #2
 - Expanded noproxy to work in all proxy modes - #177
 - Added --test to verify Px configuration

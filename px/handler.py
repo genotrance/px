@@ -7,6 +7,7 @@ import http.server
 import os
 import socket
 import sys
+import time
 
 from .config import STATE, CLIENT_REALM
 from .debug import pprint, dprint
@@ -265,8 +266,58 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
 
     def get_digest_nonce(self):
         "Get a new nonce for Digest authentication"
-        self.client_nonce = os.urandom(16).hex()
-        return self.client_nonce
+
+        # Timestamp in seconds
+        timestamp = int(time.time())
+
+        # key = timestamp:clientIP:CLIENT_REALM
+        key = f"{timestamp}:{self.client_address[0]}:{CLIENT_REALM}"
+
+        # Compute the SHA-256 hash of the key
+        keyhash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+        # Combine with timestamp
+        nonce_dec = f"{timestamp}:{keyhash}"
+
+        # Base64 encode the nonce
+        nonce = base64.b64encode(nonce_dec.encode("utf-8")).decode("utf-8")
+        return nonce
+
+    def verify_digest_nonce(self, nonce):
+        "Verify the nonce received from the client"
+
+        # Base64 decode the nonce
+        nonce_dec = base64.b64decode(nonce.encode("utf-8")).decode("utf-8")
+
+        # Split the nonce by colons
+        try:
+            # Should be timestamp:keyhash
+            timestamp_str, keyhash = nonce_dec.split(":", 1)
+
+            # Convert the timestamp to an integer
+            timestamp = int(timestamp_str)
+        except ValueError:
+            dprint("Invalid nonce format")
+            return False
+
+        # Check if the timestamp is not more than 2 minutes old
+        if time.time() - timestamp > 120:
+            dprint("Nonce has expired")
+            return False
+
+        # Regenerate key
+        key = f"{timestamp}:{self.client_address[0]}:{CLIENT_REALM}"
+
+        # Compute the SHA-256 hash of the key
+        keyhash_new = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+        # Check if the keyhash matches
+        if keyhash != keyhash_new:
+            dprint("Invalid nonce hash")
+            return False
+
+        # Nonce is valid
+        return True
 
     def send_html(self, code, message):
         "Send HTML error page - from BaseHTTPRequestHandler.send_error()"
@@ -358,14 +409,14 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
             key, value = param.strip().split("=", 1)
             params[key] = value.strip('"').replace("\\\\", "\\")
 
-        # Check if nonce is present and matches
+        # Check if nonce is present and valid
         nonce = params.get("nonce", "")
-        if len(nonce) == 0 or not hasattr(self, "client_nonce"):
+        if len(nonce) == 0:
             dprint("Authentication failed: No nonce")
             self.send_error(401, "Authentication failed")
             return False
-        if nonce != self.client_nonce:
-            dprint("Authentication failed: Nonce mismatch")
+        if not self.verify_digest_nonce(nonce):
+            dprint("Authentication failed: Invalid nonce")
             self.send_error(401, "Authentication failed")
             return False
 
@@ -392,7 +443,6 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
             # Username and password matches
             dprint("Authenticated Digest client")
             self.client_authed = True
-            del self.client_nonce
             for key in list(self.headers.keys()):
                 # Remove any proxy headers
                 if key.startswith("Proxy-"):

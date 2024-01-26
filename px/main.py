@@ -187,9 +187,22 @@ def test(testurl):
     else:
         auth = "NONE"
 
+    def waitforpx():
+        count = 0
+        while True:
+            try:
+                socket.create_connection((listen, port), 1)
+                break
+            except (socket.timeout, ConnectionRefusedError):
+                time.sleep(0.1)
+                count += 1
+                if count == 5:
+                    pprint("Failed: Px did not start")
+                    os._exit(config.ERROR_TEST)
+
     def query(url, method="GET", data = None, quit=True, check=False, insecure=False):
         if quit:
-            time.sleep(0.1)
+            waitforpx()
 
         ec = mcurl.Curl(url, method)
         ec.set_proxy(listen, port)
@@ -225,6 +238,8 @@ def test(testurl):
 
     def queryall(testurl):
         import uuid
+
+        waitforpx()
 
         insecure = False
         if testurl in ["all", "1"]:

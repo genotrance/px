@@ -1,3 +1,9 @@
+v0.9.1 - TBD
+- Fixed issue with logging not working when set from px.ini - #204
+- Fixed issue with environment variables not propagating to all processes in Linux
+- Documented how to install binary version of Px on Windows without running in a
+  console window - #203
+
 v0.9.0 - 2024-01-25
 - Added support for domains in noproxy - #2
 - Expanded noproxy to work in all proxy modes - #177

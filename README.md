@@ -239,6 +239,9 @@ NOTE: Command line parameters passed with `--install` are not saved for use on
 startup. The `--save` flag or manual editing of `px.ini` is required to provide
 configuration to Px on startup.
 
+NOTE: When using the Px binary distribution on Windows, run `.\pythonw -m px --install`
+instead of using `px.exe`. This will avoid the popup console window on startup.
+
 ## Usage
 
 ```

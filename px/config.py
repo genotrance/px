@@ -752,8 +752,8 @@ class State:
         if "settings" not in self.config.sections():
             self.config.add_section("settings")
 
-        # Override --log if --debug | --verbose | --uniqlog specified
-        self.cfg_int_init("settings", "log", str(self.location), override = True)
+        # Save --log state if --debug | --verbose | --uniqlog specified
+        save_location = self.location
 
         # Default initilize if not already from config file
         for name, val in DEFAULTS.items():
@@ -766,6 +766,10 @@ class State:
         # Final override from CLI which takes highest precedence
         for name, val in flags.items():
             self.cfg_init(name, val, override=True)
+
+        # Restore --log state if --debug | --verbose | --uniqlog specified
+        if save_location != LOG_NONE:
+            self.cfg_int_init("settings", "log", str(save_location), override = True)
 
         ###
         # Dependency propagation

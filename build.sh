@@ -89,13 +89,22 @@ gen_px_image() {
     MUSL="quay.io/pypa/musllinux_1_1_$ARCH"
     GLIBC="quay.io/pypa/manylinux2014_$ARCH"
 
-    # Check if image generated
-    PX_IMAGE="px_$1"
-
-    if [[ ! "$PX_IMAGE" =~ ":" ]]; then
-        PX_IMAGE="$PX_IMAGE:latest"
+    # Split $1 into tag and version
+    TAG=`echo $1 | cut -d ":" -f 1`
+    if [ "$TAG" = "$1" ]; then
+        VERSION="latest"
+    else
+        VERSION=`echo $1 | cut -d ":" -f 2`
     fi
 
+    # Create image tag
+    if [ ! "$ARCH" = `uname -m` ]; then
+        PX_IMAGE="px_$TAG"_"$ARCH:$VERSION"
+    else
+        PX_IMAGE="px_$TAG:$VERSION"
+    fi
+
+    # Generate if image does not exist
     exists=`docker images -q $PX_IMAGE`
     if [ -z "$exists" ]; then
         if [ "$1" = "musl" ]; then
@@ -113,6 +122,8 @@ gen_px_image() {
         docker commit $CONTAINER_ID $PX_IMAGE
         docker rm $CONTAINER_ID
         echo "Generated $PX_IMAGE"
+    else
+        echo "Tag: $PX_IMAGE"
     fi
 }
 
@@ -166,7 +177,8 @@ if [ -f "/.dockerenv" ]; then
             apk add curl psmisc \
                 python3 python3-dev \
                 dbus gnome-keyring openssh \
-                ccache gcc musl-dev patchelf upx libffi-dev
+                ccache gcc musl-dev patchelf libffi-dev
+            apk add upx
             if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
                 # Extract static libs for embedding if musllinux
                 cd /opt/_internal && tar xf static-libs-for-embedding-only.tar.xz && cd -
@@ -188,7 +200,8 @@ if [ -f "/.dockerenv" ]; then
             yum install -y psmisc \
                 python3 python3-devel \
                 gnome-keyring openssh \
-                ccache libffi-devel patchelf upx
+                ccache libffi-devel patchelf
+            yum install -y upx
             yum clean all
             if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
                 # Extract static libs for embedding if manylinux
@@ -479,16 +492,21 @@ elif [ "$OS" = "Darwin" ]; then
 else
     # Build / start containers on Linux
 
+    # Docker flags
+    DOCKERCMD="docker run -it --network host --privileged -v `pwd`:/px -v /root/.ssh:/root/.ssh"
+
     # Detect architecture
     if [ -z "$ARCH" ]; then
         ARCH=`uname -m`
     elif [ "$ARCH" != `uname -m` ]; then
         # Install binfmt to add support for multiple architectures
         docker run --privileged --rm tonistiigi/binfmt --install all
-    fi
 
-    # Docker flags
-    DOCKERCMD="docker run -it --network host --privileged -v `pwd`:/px -v /root/.ssh:/root/.ssh"
+        # Specify --platform for multi-arch images
+        if [ ! "$IMAGE" = "musl" ] && [ ! "$IMAGE" = "glibc" ]; then
+            DOCKERCMD="$DOCKERCMD --platform $ARCH"
+        fi
+    fi
 
     # Forward env vars to container
     if [ ! -z "$REMOTE_SSH" ]; then

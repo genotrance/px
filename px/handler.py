@@ -101,8 +101,11 @@ def set_curl_auth(curl, auth):
             if sys.platform == "win32":
                 dprint(curl.easyhash + ": Using SSPI to login")
                 key = ":"
+            if sys.platform == "linux":
+                dprint(curl.easyhash + ": Using GSSAPI to login")
+                key = ":"
             else:
-                dprint("SSPI not available and no username configured - no auth")
+                dprint("SSPI/GSSPI not available and no username configured - no auth")
                 return
         curl.set_auth(user = key, password = pwd, auth = auth)
     else:

@@ -8,7 +8,6 @@ import socket
 import sys
 import threading
 import time
-import traceback
 import urllib.parse
 
 from .debug import pprint, dprint, Debug

@@ -3,6 +3,7 @@ v0.9.1 - TBD
 - Fixed issue with environment variables not propagating to all processes in Linux
 - Documented how to install binary version of Px on Windows without running in a
   console window - #203
+- Fixed issue with quickjs crashing in PAC mode with multiple threads - #198 / #206
 
 v0.9.0 - 2024-01-25
 - Added support for domains in noproxy - #2

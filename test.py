@@ -465,7 +465,9 @@ def socketTestSetup():
         localips = getips()
         localips.insert(0, "")
         localips.remove("127.0.0.1")
-        for ip in localips[:3]:
+        for ip in localips:
+            if ip.startswith("172.1"):
+                continue
             cmd = ""
             if ip != "":
                 cmd = "--listen=" + ip

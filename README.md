@@ -108,6 +108,66 @@ Px can then be uninstalled using `pip` as follows:
 
 	python -m pip uninstall px-proxy
 
+## Docker
+
+Px is available as a prebuilt Docker [image](https://hub.docker.com/r/genotrance/px).
+
+Two images are posted - the default includes keyring and associated dependencies
+whereas the mini version is smaller but will have to depend on `PX_PASSWORD` and
+`PX_CLIENT_PASSWORD` for credentials.
+
+The following Docker flags will be useful to configure and run Px:
+```
+--name px       name container so it is easy to stop it
+-d              run in the background
+--rm            remove container on exit
+```
+
+#### Networking
+```
+--network host  make Px directly accessible from host network
+  OR
+-p 3128:3128    publish the port - Px needs to run in --gateway mode
+```
+
+#### Configuration
+```
+-e PX_LOG=4     set environment variables to configure Px
+
+-v /dir:/px     mount a host directory with a px.ini or .env file to configure Px
+  OR
+--mount source=/dir,target=/px
+                mount a volume if preferred
+
+docker run ... genotrance/px --gateway --verbose
+                configure directly from the command line
+```
+
+#### Credentials
+
+Keyring credentials can be stored in a host folder and mounted into the container
+as follows:
+```
+-v /keyrings:/root/.local/share/keyrings
+                mount a local dir to store keyring info
+  OR
+--mount source=/keyrings,target=/root/.local/share/keyrings
+                mount a volume if preferred
+```
+
+Credentials can be saved using the command line:
+```
+docker run ... genotrance/px --username=... --password
+                configure keyring directly from the command line
+```
+
+The mini version does not have keyring so credentials need to be set using environment
+variables:
+```
+-e PX_PASSWORD=... -e PX_CLIENT_PASSWORD=...
+                set environment variables to configure credentials
+```
+
 ## Configuration
 
 Px requires only one piece of information in order to function - the server

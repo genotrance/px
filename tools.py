@@ -480,6 +480,40 @@ def scoop():
 
     get_pip()
 
+def docker():
+    os.chdir("docker")
+
+    tag = "genotrance/px"
+    dbuild = "docker build --network host --build-arg VERSION=" + __version__
+
+    # Build mini image
+    mtag = f"{tag}:{__version__}-mini"
+    ret = os.system(dbuild + f" -t {mtag} --target=mini .")
+    if ret != 0:
+        print("Failed to build mini image")
+        sys.exit()
+
+    # Tag mini image
+    ret = os.system(f"docker tag {mtag} {tag}:latest-mini")
+    if ret != 0:
+        print("Failed to tag mini image")
+        sys.exit()
+
+    # Build full image
+    ftag = f"{tag}:{__version__}"
+    ret = os.system(dbuild + f" -t {ftag} .")
+    if ret != 0:
+        print("Failed to build full image")
+        sys.exit()
+
+    # Tag full image
+    ret = os.system(f"docker tag {ftag} {tag}:latest")
+    if ret != 0:
+        print("Failed to tag full image")
+        sys.exit()
+
+    os.chdir("..")
+
 # Github related
 
 def get_all_releases():
@@ -668,6 +702,9 @@ def main():
 
             if "--scoop" in sys.argv:
                 scoop()
+        elif sys.platform == "linux":
+            if "--docker" in sys.argv:
+                docker()
 
         if "--nuitka" in sys.argv:
             nuitka()
@@ -715,6 +752,7 @@ Build:
 --deps		Build all wheel dependencies for this Python version
 --depspkg	Build an archive of all dependencies
 --scoop		Clean and initialize Python distro installed via scoop
+--docker    Build Docker images
 
 Post:
 --twine		Post wheels to pypi.org

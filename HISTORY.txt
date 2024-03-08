@@ -1,3 +1,6 @@
+v0.9.2 - 2024-03-08
+- Fixed issue with libcurl binary on Windows - #212
+
 v0.9.1 - 2024-03-02
 - Fixed issue with logging not working when set from px.ini - #204
 - Fixed issue with environment variables not propagating to all processes in Linux

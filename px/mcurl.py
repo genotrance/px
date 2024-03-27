@@ -1021,8 +1021,9 @@ class MCurl:
             # upstream proxy
             dprint(curl.easyhash + ": Sending original client headers")
             curl_sock.sendall(f"{curl.method} {curl.url} {curl.request_version}\r\n".encode("utf-8"))
-            for header in curl.xheaders:
-                curl_sock.sendall(f"{header}: {curl.xheaders[header]}\r\n".encode("utf-8"))
+            if curl.xheaders is not None:
+                for header in curl.xheaders:
+                    curl_sock.sendall(f"{header}: {curl.xheaders[header]}\r\n".encode("utf-8"))
             curl_sock.sendall(b"\r\n")
 
         # sockets will be removed from these lists, when they are

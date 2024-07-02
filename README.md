@@ -46,6 +46,7 @@ Once installed, Px can be run as follows:
 - Running `px` directly
 - In the background: `pythonw -m px`
 - In the foreground in a console window: `python -m px`
+- As a wrapped service using [WinSW] (https://github.com/winsw/winsw)
 
 Px requires [libcurl](https://curl.se/libcurl/) and the Windows builds ship with
 a copy. On Linux, it is required to install libcurl using the package manager:

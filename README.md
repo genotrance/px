@@ -46,6 +46,7 @@ Once installed, Px can be run as follows:
 - Running `px` directly
 - In the background: `pythonw -m px`
 - In the foreground in a console window: `python -m px`
+- As a wrapped service using [WinSW](https://github.com/winsw/winsw)
 
 Px requires [libcurl](https://curl.se/libcurl/) and the Windows builds ship with
 a copy. On Linux, it is required to install libcurl using the package manager:
@@ -53,6 +54,33 @@ a copy. On Linux, it is required to install libcurl using the package manager:
 - RHEL: `yum install libcurl`
 - Ubuntu: `apt install libcurl4`
 - Alpine: `apk add libcurl`
+
+### Running as a windows service using WinSW
+
+Manually prepare and configure px to be able to run it and verify the connectivity.
+Download the executable WinSW-x64.exe from [WinSW](https://github.com/winsw/winsw). We are using 2.12.0.
+
+Place a minimal WinSW-x64.xml configuration file next to the executable. 
+```
+<service>
+  
+  <!-- ID of the service. It should be unique across the Windows system-->
+  <id>Px</id>
+  <!-- Display name of the service -->
+  <name>Px Service (powered by WinSW)</name>
+  <!-- Service description -->
+  <description>This service is a service created from a minimal configuration</description>
+  
+  <!-- Path to the executable, which should be started -->
+  <executable>D:\px\px.exe</executable>
+
+</service>
+```
+
+Run 
+```WinSW-x64.exe install WinSW-x64.xml``` from elevated administrator cmd. You should now have a new service on your computer named `Px Service (powered by WinSW)`.
+You can run it from Services window or run ```WinSW-x64.exe start WinSW-x64.xml```.
+
 
 ### Source install
 

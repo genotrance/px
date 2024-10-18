@@ -31,7 +31,7 @@ if ($null -eq (Invoke-Expression "scoop list ^python$")) {
 } else {
     # Upgrade Python
     scoop update python
-    
+
     # Make latest Python the default
     scoop reset python
 }
@@ -77,7 +77,7 @@ while ($count -le $LATEST) {
     }
 
     # Tools
-    Invoke-Expression "python$pyver -m pip install --upgrade pip setuptools build wheel"
+    Invoke-Expression "python$pyver -m pip install --upgrade pip setuptools build wheel pymcurl"
 
     # Create wheel dependencies for this Python version
     Invoke-Expression "python$pyver tools.py --deps"
@@ -97,9 +97,6 @@ Invoke-Expression "python$pyver -m pip install --upgrade twine"
 
 # Install wheel dependencies
 Invoke-Expression "python$pyver -m pip install --upgrade px-proxy --no-index -f px.dist-wheels-windows-amd64\px.dist-wheels"
-
-# Download libcurl
-Invoke-Expression "python$pyver tools.py --libcurl"
 
 # Build wheels
 Invoke-Expression "python$pyver tools.py --wheel"

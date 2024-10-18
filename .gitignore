@@ -64,3 +64,4 @@ _*.stats
 *.log
 *.crt
 .env
+.tox

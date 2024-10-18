@@ -13,7 +13,6 @@ import urllib.parse
 from .debug import pprint, dprint, Debug
 from .help import HELP
 
-from . import mcurl
 from . import wproxy
 
 if sys.platform == "win32":
@@ -28,6 +27,12 @@ PxErrors = int
     ERROR_QUIT,     # 3
     ERROR_TEST      # 4
 ) = range(5)
+
+try:
+    import mcurl
+except ImportError:
+    pprint("Requires module pymcurl")
+    sys.exit(ERROR_IMPORT)
 
 try:
     import keyring

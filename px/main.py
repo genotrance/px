@@ -18,10 +18,11 @@ from .version import __version__
 
 from . import config
 from . import handler
-from . import mcurl
 
 if sys.platform == "win32":
     from . import windows
+
+import mcurl
 
 warnings.filterwarnings("ignore")
 

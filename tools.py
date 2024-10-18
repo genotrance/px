@@ -10,7 +10,11 @@ import time
 import zipfile
 
 if "--libcurl" not in sys.argv:
-    from px import mcurl
+    try:
+        import mcurl
+    except ImportError:
+        print("Requires module pymcurl")
+        sys.exit()
 else:
     import urllib.request
 
@@ -188,19 +192,14 @@ def get_curl():
 # Build
 
 def wheel():
-    # Wheels to create - any, win32, win_amd64
-    platforms = ["any"]
-    if sys.platform == "win32":
-        platforms += ["win32", "win_amd64"]
-
-    for platform in platforms:
-        rmtree("build px_proxy.egg-info")
-        whls = glob.glob(f"wheel/*{platform}.whl")
-        for whl in whls:
-            os.remove(whl)
-        if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k -p " + platform) != 0:
-            print("Failed to build wheel for " + platform)
-            sys.exit()
+    # Create wheel
+    rmtree("build px_proxy.egg-info")
+    whls = glob.glob(f"wheel/*.whl")
+    for whl in whls:
+        os.remove(whl)
+    if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k") != 0:
+        print("Failed to build wheel")
+        sys.exit()
 
     # Check wheels
     os.system(sys.executable + " -m twine check wheel/*")
@@ -231,14 +230,6 @@ def nuitka():
         flags = "--include-package=win32ctypes"
     os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
     copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
-    if sys.platform == "win32":
-        pxdir = os.path.join(dist, "px")
-        lcdir = os.path.join(pxdir, "libcurl")
-        os.mkdir(pxdir)
-        os.mkdir(lcdir)
-        # 64-bit only for Windows for now
-        copy(os.path.join("px", "libcurl", "libcurl-x64.dll"), lcdir)
-        copy(os.path.join("px", "libcurl", "curl-ca-bundle.crt"), lcdir)
 
     time.sleep(1)
 
@@ -439,15 +430,11 @@ def depspkg():
         os.chdir(outdir)
 
     # Replace with official Px wheel
+    whl = "px_proxy-" + __version__ + "-py3-none-any.whl"
     try:
-        os.remove(os.path.join(prefix, "px_proxy-%s-py3-none-any.whl" % __version__))
+        os.remove(os.path.join(prefix, whl))
     except:
         pass
-    whl = "px_proxy-" + __version__
-    if sys.platform == "win32":
-        whl += "-py3-none-win_amd64.whl"
-    else:
-        whl += "-py3-none-any.whl"
     shutil.copy(os.path.join("..", "wheel", whl), prefix)
 
     # Compress all wheels

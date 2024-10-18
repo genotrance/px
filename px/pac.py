@@ -4,14 +4,15 @@ import socket
 import sys
 import threading
 
+from .pacutils import PACUTILS
+
+import mcurl
+
 try:
     import quickjs
 except ImportError:
     print("Requires module quickjs")
     sys.exit(1)
-
-from .mcurl import Curl
-from .pacutils import PACUTILS
 
 # Debug shortcut
 dprint = lambda x: None
@@ -68,7 +69,7 @@ class Pac:
 
     def load_url(self, jsurl, pac_encoding):
         dprint(f"Loading PAC url: {jsurl}")
-        c = Curl(jsurl)
+        c = mcurl.Curl(jsurl)
         c.set_debug()
         c.buffer()
         c.set_follow()

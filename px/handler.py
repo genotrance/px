@@ -13,11 +13,11 @@ from .config import STATE, CLIENT_REALM
 from .debug import pprint, dprint
 
 from . import config
-from . import mcurl
 from . import wproxy
 
 # External dependencies
 import keyring
+import mcurl
 
 try:
     import spnego._ntlm

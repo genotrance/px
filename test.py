@@ -37,12 +37,14 @@ try:
 except AttributeError:
     DEVNULL = open(os.devnull, 'wb')
 
-def exec(cmd, port = 0, shell = True, delete = False):
+
+def exec(cmd, port=0, shell=True, delete=False):
     global COUNT
     log = "%d-%d.txt" % (port, COUNT)
     COUNT += 1
     with open(log, "wb") as l:
-        p = subprocess.run(cmd, shell = shell, stdout = l, stderr = subprocess.STDOUT, check = False, timeout = 60)
+        p = subprocess.run(cmd, shell=shell, stdout=l,
+                           stderr=subprocess.STDOUT, check=False, timeout=60)
 
     with open(log, "r") as l:
         data = l.read()
@@ -52,7 +54,8 @@ def exec(cmd, port = 0, shell = True, delete = False):
 
     return p.returncode, data
 
-def curlcli(url, port, method = "GET", data = "", proxy = ""):
+
+def curlcli(url, port, method="GET", data="", proxy=""):
     cmd = ["curl", "-s", "-k", url]
     if method == "HEAD":
         cmd.append("--head")
@@ -66,9 +69,10 @@ def curlcli(url, port, method = "GET", data = "", proxy = ""):
     writeflush(port, " ".join(cmd) + "\n")
 
     try:
-        return exec(cmd, port, shell = False)
+        return exec(cmd, port, shell=False)
     except subprocess.TimeoutExpired:
         return -1, "Subprocess timed out"
+
 
 def waitasync(pool, results):
     ret = True
@@ -79,7 +83,7 @@ def waitasync(pool, results):
                     ret = False
                 results.pop(i)
                 break
-        time.sleep(0.5)
+        time.sleep(2)
 
         if os.system("grep fail -i *.log") == 0 and "--stoponfail" in sys.argv:
             # Kill all child processes if any - could prevent some logging
@@ -89,6 +93,7 @@ def waitasync(pool, results):
 
     return ret
 
+
 def writeflush(port, data):
     if port not in STDOUT:
         return
@@ -96,6 +101,7 @@ def writeflush(port, data):
     if data[-1] != "\n":
         STDOUT[port].write("\n")
     STDOUT[port].flush()
+
 
 def killProcTree(pid, top=True):
     try:
@@ -109,6 +115,7 @@ def killProcTree(pid, top=True):
             pxproc.kill()
     except psutil.NoSuchProcess:
         pass
+
 
 def runPx(name, cmd, args, port):
     cmd += f"{args} --port={port}"
@@ -128,10 +135,11 @@ def runPx(name, cmd, args, port):
 
     return cmd, subp
 
+
 def runTest(test, cmd, offset, port):
     start = time.time()
 
-    if  "--norun" not in sys.argv:
+    if "--norun" not in sys.argv:
         # Multiple tests in parallel, each on their own port
         port += offset
 
@@ -179,8 +187,10 @@ def runTest(test, cmd, offset, port):
 
     return ret
 
+
 def getips():
     return [str(ip) for ip in get_host_ips()]
+
 
 def checkPxStart(ip, port):
     # Make sure Px starts
@@ -201,6 +211,7 @@ def checkPxStart(ip, port):
 
     return True
 
+
 def getUnusedPort(port, step):
     while True:
         try:
@@ -208,6 +219,7 @@ def getUnusedPort(port, step):
             port += step
         except (socket.timeout, ConnectionRefusedError):
             return port
+
 
 def quitPx(cmd, port):
     cmd = cmd + " --quit"
@@ -226,6 +238,8 @@ def quitPx(cmd, port):
     return True
 
 # Test --listen and --port, --hostonly, --gateway and --allow
+
+
 def checkCommon(name, ips, port, checkProc):
     if ips == [""]:
         ips = ["127.0.0.1"]
@@ -254,6 +268,7 @@ def checkCommon(name, ips, port, checkProc):
 
     return True
 
+
 def checkSocket(ips, port):
     def checkProc(lip, pport):
         try:
@@ -265,12 +280,15 @@ def checkSocket(ips, port):
 
     return checkCommon("checkSocket", ips, port, checkProc)
 
+
 def checkFilter(ips, port):
     def checkProc(lip, port):
         if "--curlcli" in sys.argv:
-            rcode, _ = curlcli(url = "http://google.com", port = port, proxy = "%s:%d" % (lip, port))
+            rcode, _ = curlcli(url="http://google.com",
+                               port=port, proxy="%s:%d" % (lip, port))
         else:
-            rcode, _ = tools.curl(url = "http://google.com", proxy = "%s:%d" % (lip, port))
+            rcode, _ = tools.curl(url="http://google.com",
+                                  proxy="%s:%d" % (lip, port))
         writeflush(port, f"Returned {rcode}\n")
         if rcode == 0:
             return True
@@ -282,21 +300,25 @@ def checkFilter(ips, port):
 
     return checkCommon("checkFilter", ips, port, checkProc)
 
+
 def remoteTest(port, fail=False):
     lip = "\\$(echo \\$SSH_CLIENT | cut -d ' ' -f 1,1)"
     cmd = os.getenv("REMOTE_SSH")
     if cmd is None:
         writeflush(port, "Skipping: Remote test - REMOTE_SSH not set\n")
         writeflush(port, "  E.g. export REMOTE_SSH=plink user:pass@\n")
-        writeflush(port, "  E.g. export REMOTE_SSH=ssh -i ~/.ssh/id_rsa_px user@IP\n")
+        writeflush(
+            port, "  E.g. export REMOTE_SSH=ssh -i ~/.ssh/id_rsa_px user@IP\n")
         return True
-    cmd = cmd + ' "curl --proxy %s:%s --connect-timeout 2 -s http://google.com"' % (lip, port)
+    cmd = cmd + \
+        ' "curl --proxy %s:%s --connect-timeout 2 -s http://google.com"' % (
+            lip, port)
     ret = subprocess.call(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
     if ret == 255:
         writeflush(port, f"Skipping: Remote test - remote not up\n")
     else:
         writeflush(port, f"Checking: Remote: :{port}\n")
-        if (ret == 0 and fail == False) or (ret != 0 and fail == True) :
+        if (ret == 0 and fail == False) or (ret != 0 and fail == True):
             writeflush(port, f"Returned {ret}: Passed\n")
         else:
             writeflush(port, f"Returned {ret}: Failed\n")
@@ -304,23 +326,30 @@ def remoteTest(port, fail=False):
 
     return True
 
+
 def hostonlyTest(ips, port):
     return checkSocket(ips, port) and remoteTest(port, fail=True)
+
 
 def gatewayTest(ips, port):
     return checkSocket(ips, port) and remoteTest(port)
 
+
 def allowTest(ips, port):
     return checkFilter(ips, port) and remoteTest(port)
+
 
 def allowTestNot(ips, port):
     return checkFilter(ips, port) and remoteTest(port, fail=True)
 
+
 def listenTestLocal(ip, port):
     return checkSocket([ip], port) and remoteTest(port, fail=True)
 
+
 def listenTestRemote(ip, port):
     return checkSocket([ip], port) and remoteTest(port)
+
 
 def chainTest(proxyarg, port):
     if not checkPxStart("127.0.0.1", port):
@@ -337,13 +366,15 @@ def chainTest(proxyarg, port):
         # Upstream Px is direct
 
         # Client -> Px -> [ Px -> Target ]
-        ret = runTest((f"{testflag} --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+        ret = runTest((f"{testflag} --proxy=127.0.0.1:{port}",
+                      testTest, None), cmd, offset, port*10)
         if not ret:
             return False
         offset += 1
 
         # Client -> Px --auth=NONE -> [ Px -> Target ]
-        ret = runTest((f"{testflag} --test-auth --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+        ret = runTest((f"{testflag} --test-auth --proxy=127.0.0.1:{port}",
+                      testTest, None), cmd, offset, port*10)
         if not ret:
             return False
         offset += 1
@@ -353,7 +384,8 @@ def chainTest(proxyarg, port):
             if "--auth=NONE" not in proxyarg:
                 # Upstream Px will authenticate
                 # Client -> Px --auth=NONE -> [ Px auth -> Px client auth -> Target ]
-                ret = runTest((f"{testflag} --auth=NONE --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+                ret = runTest(
+                    (f"{testflag} --auth=NONE --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
                 if not ret:
                     return False
                 offset += 1
@@ -369,32 +401,38 @@ def chainTest(proxyarg, port):
 
                 for auth in ["NTLM", "DIGEST", "BASIC"]:
                     # Client -> Px auth -> [ Px --auth=NONE -> Px client auth -> Target ]
-                    ret = runTest((f"{testflag} --proxy=127.0.0.1:{port} {parg} --auth={auth}", testTest, None), cmd, offset, port*10)
+                    ret = runTest((f"{testflag} --proxy=127.0.0.1:{port} {parg} --auth={
+                                  auth}", testTest, None), cmd, offset, port*10)
                     if not ret:
                         return False
                     offset += 1
 
                     # Client auth -> Px --auth=NONE -> [ Px --auth=NONE -> Px client auth -> Target ]
-                    ret = runTest((f"{testflag} --test-auth --proxy=127.0.0.1:{port} {parg} --auth={auth}", testTest, None), cmd, offset, port*10)
+                    ret = runTest((f"{testflag} --test-auth --proxy=127.0.0.1:{port} {
+                                  parg} --auth={auth}", testTest, None), cmd, offset, port*10)
                     if not ret:
                         return False
                     offset += 1
         else:
             # Upstream Px will bypass proxy
             # Client -> Px -> [ Px bypass proxy -> Target ]
-            ret = runTest((f"{testflag} --auth=NONE --proxy=127.0.0.1:{port}", testTest, None), cmd, offset, port*10)
+            ret = runTest((f"{testflag} --auth=NONE --proxy=127.0.0.1:{port}",
+                          testTest, None), cmd, offset, port*10)
             if not ret:
                 return False
             offset += 1
 
     return True
 
+
 def testTest(skip, port):
     return True
 
+
 def installTest(cmd, port):
     time.sleep(0.5)
-    ret, data = exec("reg query HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v Px", port)
+    ret, data = exec(
+        "reg query HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v Px", port)
     if ret != 0:
         writeflush(port, f"Failed: registry query failed: {ret}\n{data}\n")
         return False
@@ -403,14 +441,17 @@ def installTest(cmd, port):
         return False
     return True
 
+
 def uninstallTest(skip, port):
     del skip
     time.sleep(0.5)
-    ret, data = exec("reg query HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v Px", port)
+    ret, data = exec(
+        "reg query HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v Px", port)
     if ret == 0:
         writeflush(port, f"reg query passed after uninstall\n{data}\n")
         return False
     return True
+
 
 def quitTest(cmd, port):
     if not checkPxStart("127.0.0.1", port):
@@ -418,6 +459,7 @@ def quitTest(cmd, port):
         return False
 
     return quitPx(cmd, port)
+
 
 def getproxyargs():
     proxyargs = []
@@ -440,6 +482,7 @@ def getproxyargs():
 
     return proxyargs
 
+
 def socketTestSetup():
     if "--nohostonly" not in sys.argv:
         TESTS.append(("--hostonly", hostonlyTest, getips()))
@@ -459,7 +502,7 @@ def socketTestSetup():
                 atest = allowTest
 
             TESTS.append(("--gateway --allow=%s.*.*" % oct,
-                atest, list(filter(lambda x: oct in x, getips()))))
+                          atest, list(filter(lambda x: oct in x, getips()))))
 
     if "--nolisten" not in sys.argv:
         localips = getips()
@@ -478,10 +521,15 @@ def socketTestSetup():
 
             TESTS.append((cmd, testproc, ip))
 
+
 def get_newest_file(path, ext=".py"):
+    if not os.path.exists(path):
+        return ""
     files = [file for file in os.listdir(path) if file.endswith(ext)]
-    latest = max(files, key=lambda file: os.path.getmtime(os.path.join(path, file)))
+    latest = max(files, key=lambda file: os.path.getmtime(
+        os.path.join(path, file)))
     return os.path.join(path, latest)
+
 
 def is_obsolete(testfile):
     "Check if testfile is older than px source code - wheels or px binary are out of date"
@@ -492,17 +540,22 @@ def is_obsolete(testfile):
     if not os.path.exists("px"):
         src = "../px"
     latest = get_newest_file(src)
+    if len(latest) == 0:
+        return True
     latest_date = os.path.getmtime(latest)
 
     testdate = os.path.getmtime(testfile)
     return testdate < latest_date
 
+
 def auto():
     if "--norun" not in sys.argv:
         osname = tools.get_os()
         if sys.platform == "linux":
-            _, distro = exec("cat /etc/os-release | grep ^ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
-            _, version = exec("cat /etc/os-release | grep ^VERSION_ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete = True)
+            _, distro = exec(
+                "cat /etc/os-release | grep ^ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete=True)
+            _, version = exec(
+                "cat /etc/os-release | grep ^VERSION_ID | head -n 1 | cut -d\"=\" -f2 | sed 's/\"//g'", delete=True)
             osname += "-%s-%s" % (distro.strip(), version.strip())
         testdir = f"test-{PORT}-{osname}-{platform.machine().lower()}"
 
@@ -537,7 +590,8 @@ def auto():
 
         # Start client authenticating Px
         if len(PROXY) == 0 and "--noproxy" not in sys.argv:
-            subps.append(runPx("scriptMode", cmd, client_cmd, PORT+len(cmds)-1))
+            subps.append(
+                runPx("scriptMode", cmd, client_cmd, PORT+len(cmds)-1))
 
     # Nuitka binary test
     _, _, dist = tools.get_paths("px.dist")
@@ -575,7 +629,8 @@ def auto():
 
             # Start client authenticating Px
             if len(PROXY) == 0 and "--noproxy" not in sys.argv:
-                subps.append(runPx("pipModule", cmd, client_cmd, PORT+len(cmds)-1))
+                subps.append(
+                    runPx("pipModule", cmd, client_cmd, PORT+len(cmds)-1))
 
             # Run as Python console script
             cmd = shutil.which("px")
@@ -585,7 +640,8 @@ def auto():
 
                 # Start client authenticating Px
                 if len(PROXY) == 0 and "--noproxy" not in sys.argv:
-                    subps.append(runPx("pipBinary", cmd, client_cmd, PORT+len(cmds)-1))
+                    subps.append(
+                        runPx("pipBinary", cmd, client_cmd, PORT+len(cmds)-1))
             else:
                 print("Skipped: console script could not be found")
     else:
@@ -606,19 +662,23 @@ def auto():
                     # Going through proxy with different auth methods
 
                     # Client -> Px auth -> Px client auth -> Target
-                    TESTS.append((f"{proxyarg} {testflag} --auth={auth}", testTest, None))
+                    TESTS.append(
+                        (f"{proxyarg} {testflag} --auth={auth}", testTest, None))
 
                     # Client auth -> Px --auth=NONE -> Px client auth -> Target
-                    TESTS.append((f"{proxyarg} {testflag} --test-auth --auth={auth}", testTest, None))
+                    TESTS.append(
+                        (f"{proxyarg} {testflag} --test-auth --auth={auth}", testTest, None))
 
                 if "--nonoproxy" not in sys.argv and len(proxyarg) != 0:
                     # Going through proxy but bypassing it with noproxy - no authentication
 
                     # Client -> Px auth bypass proxy -> Target
-                    TESTS.append((f"{proxyarg} {testflag} --noproxy=*.*.*.*", testTest, None))
+                    TESTS.append(
+                        (f"{proxyarg} {testflag} --noproxy=*.*.*.*", testTest, None))
 
                     # Client auth -> Px bypass proxy -> Target
-                    TESTS.append((f"{proxyarg} {testflag} --test-auth --noproxy=*.*.*.*", testTest, None))
+                    TESTS.append(
+                        (f"{proxyarg} {testflag} --test-auth --noproxy=*.*.*.*", testTest, None))
             else:
                 # Direct test - no upstream proxy - no authentication
                 # Client -> Px -> Target
@@ -647,18 +707,20 @@ def auto():
                     if "--nonoproxy" not in sys.argv:
                         # Bypass with noproxy
                         # ? -> [ Px auth bypass proxy -> Target ]
-                        TESTS.append((proxyarg + " --noproxy=*.*.*.*", chainTest, proxyarg))
+                        TESTS.append(
+                            (proxyarg + " --noproxy=*.*.*.*", chainTest, proxyarg))
 
     time.sleep(1)
 
     workers = tools.get_argval("workers") or "8"
-    pool = multiprocessing.Pool(processes = int(workers))
+    pool = multiprocessing.Pool(processes=int(workers))
 
     def getTests(ncmd):
         if len(PROXY) == 0:
             tests = []
             for test in TESTS:
-                tests.append((test[0].replace("PORT", str(PORT+ncmd)), test[1], test[2]))
+                tests.append(
+                    (test[0].replace("PORT", str(PORT+ncmd)), test[1], test[2]))
         else:
             tests = TESTS
 
@@ -672,7 +734,8 @@ def auto():
         tests = getTests(ncmd)
         cmd = cmds[ncmd]
         ncmd += 1
-        results = [pool.apply_async(runTest, args = (tests[count], cmd, count + offset, PORT)) for count in range(len(tests))]
+        results = [pool.apply_async(runTest, args=(
+            tests[count], cmd, count + offset, PORT)) for count in range(len(tests))]
         offset += len(TESTS)
 
     # Nuitka binary test
@@ -680,7 +743,8 @@ def auto():
         tests = getTests(ncmd)
         cmd = cmds[ncmd]
         ncmd += 1
-        results.extend([pool.apply_async(runTest, args = (tests[count], cmd, count + offset, PORT)) for count in range(len(tests))])
+        results.extend([pool.apply_async(runTest, args=(
+            tests[count], cmd, count + offset, PORT)) for count in range(len(tests))])
         offset += len(TESTS)
 
     # Wheel pip installed test
@@ -689,7 +753,8 @@ def auto():
         tests = getTests(ncmd)
         cmd = cmds[ncmd]
         ncmd += 1
-        results.extend([pool.apply_async(runTest, args = (tests[count], cmd, count + offset, PORT)) for count in range(len(tests))])
+        results.extend([pool.apply_async(runTest, args=(
+            tests[count], cmd, count + offset, PORT)) for count in range(len(tests))])
         offset += len(TESTS)
 
         # Run as Python console script
@@ -697,7 +762,8 @@ def auto():
             tests = getTests(ncmd)
             cmd = cmds[ncmd]
             ncmd += 1
-            results.extend([pool.apply_async(runTest, args = (tests[count], cmd, count + offset, PORT)) for count in range(len(tests))])
+            results.extend([pool.apply_async(runTest, args=(
+                tests[count], cmd, count + offset, PORT)) for count in range(len(tests))])
             offset += len(TESTS)
 
     ret = waitasync(pool, results)
@@ -723,7 +789,8 @@ def auto():
                     runTest(("--install", installTest, cmd), cmd, offset, PORT)
                     offset += 1
 
-                    runTest(("--uninstall", uninstallTest, cmd), cmd, offset, PORT)
+                    runTest(("--uninstall", uninstallTest, cmd),
+                            cmd, offset, PORT)
                     offset += 1
 
         if "--noquit" not in sys.argv:
@@ -739,7 +806,8 @@ def auto():
                     runTest(("", quitTest, cmd), shell + cmd, offset, PORT)
                     offset += 1
 
-                    runTest(("", quitTest, shell + cmd), shell + cmd, offset, PORT)
+                    runTest(("", quitTest, shell + cmd),
+                            shell + cmd, offset, PORT)
                     offset += 1
 
     if len(lwhl) != 0:
@@ -755,6 +823,7 @@ def auto():
         os.system("grep took -h *.log")
 
         os.chdir("..")
+
 
 def main():
     """
@@ -837,7 +906,8 @@ def main():
     else:
         PORT = getUnusedPort(3128, 200)
     USERNAME = tools.get_argval("username") or (
-        os.getenv("OSX_USERNAME", "") if sys.platform == "darwin" else os.getenv("USERNAME", "")
+        os.getenv("OSX_USERNAME", "") if sys.platform == "darwin" else os.getenv(
+            "USERNAME", "")
     )
     if sys.platform != "win32":
         if len(USERNAME) == 0:
@@ -853,6 +923,7 @@ def main():
     start = time.time()
     auto()
     print(f"Took {(time.time()-start):.2f} sec")
+
 
 if __name__ == "__main__":
     main()

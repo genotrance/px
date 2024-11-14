@@ -249,7 +249,8 @@ def nuitka():
             os.system("upx --best px.exe python3*.dll libcrypto*.dll")
         else:
             os.rename("px.bin", "px")
-            os.system("upx --best px")
+            force_macos_flag = "" if sys.platform != "darwin" else "--force-macos "
+            os.system(f"upx --best {force_macos_flag}px")
 
     # Create archive
     os.chdir("..")

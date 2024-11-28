@@ -802,7 +802,7 @@ class State:
 
         if sys.platform == "win32":
             if "--install" in sys.argv:
-                windows.install(get_script_cmd())
+                windows.install(get_script_cmd(), '--force' in sys.argv)
             elif "--uninstall" in sys.argv:
                 windows.uninstall()
 

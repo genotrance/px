@@ -321,7 +321,8 @@ quit by running `px --quit`. When running in the foreground, use `CTRL-C`.
 
 Px can also be setup to automatically run on startup on Windows with the
 `--install` flag. This is done by adding an entry into the Window registry which
-can be removed with `--uninstall`.
+can be removed with `--uninstall`. You can provide `--force` to the install command
+in order to always write the key, even if an existing one is there.
 
 NOTE: Command line parameters passed with `--install` are not saved for use on
 startup. The `--save` flag or manual editing of `px.ini` is required to provide
@@ -344,8 +345,8 @@ Actions:
     Values specified on CLI override any values in existing config file
     Values not specified on CLI or config file are set to defaults
 
-  --install
-  Add Px to the Windows registry to run on startup
+  --install [--force]
+  Add Px to the Windows registry to run on startup. Use '--force' to overwrite a possible existing key.
 
   --uninstall
   Remove Px from the Windows registry

@@ -95,7 +95,7 @@ def attach_console(state):
     ppid_with_console = -1
     for par in process.parents():
         if os.path.basename(par.name()).lower() in [
-                "cmd", "cmd.exe", "powershell", "powershell.exe"]:
+                "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"]:
             # Found it
             ppid_with_console = par.pid
             break

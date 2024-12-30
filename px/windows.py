@@ -91,30 +91,22 @@ def attach_console(state):
         return
 
     # Find parent cmd.exe if exists
-    pid = os.getpid()
-    while True:
-        try:
-            p = psutil.Process(pid)
-        except psutil.NoSuchProcess:
-            # No such parent - started without console
-            pid = -1
-            break
-
-        if os.path.basename(p.name()).lower() in [
+    process = psutil.Process()
+    ppid_with_console = -1
+    for par in process.parents():
+        if os.path.basename(par.name()).lower() in [
                 "cmd", "cmd.exe", "powershell", "powershell.exe"]:
             # Found it
+            ppid_with_console = par.pid
             break
 
-        # Search parent
-        pid = p.ppid()
-
     # Not found, started without console
-    if pid == -1:
+    if ppid_with_console == -1:
         dprint("No parent console to attach to")
         return
 
-    dprint("Attaching to console " + str(pid))
-    if ctypes.windll.kernel32.AttachConsole(pid) == 0:
+    dprint("Attaching to console " + str(ppid_with_console))
+    if ctypes.windll.kernel32.AttachConsole(ppid_with_console) == 0:
         dprint("Attach failed with error " +
             str(ctypes.windll.kernel32.GetLastError()))
         return

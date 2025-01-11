@@ -1,10 +1,12 @@
 import glob
+import gzip
 import hashlib
 import json
 import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 import time
 import zipfile
@@ -21,8 +23,10 @@ else:
 from px.version import __version__
 
 REPO = "genotrance/px"
+WHEEL = "px_proxy-" + __version__ + "-py3-none-any.whl"
 
 # CLI
+
 
 def get_argval(name):
     for i in range(len(sys.argv)):
@@ -32,6 +36,7 @@ def get_argval(name):
                 return val
 
     return ""
+
 
 def get_auth():
     token = get_argval("token")
@@ -44,15 +49,18 @@ def get_auth():
 
 # File utils
 
+
 def rmtree(dirs):
     for dir in dirs.split(" "):
         while os.path.exists(dir):
             shutil.rmtree(dir, True)
             time.sleep(0.2)
 
+
 def copy(files, dir):
     for file in files.split(" "):
         shutil.copy(file, dir)
+
 
 def remove(files):
     for file in files.split(" "):
@@ -68,6 +76,7 @@ def remove(files):
             except:
                 pass
 
+
 def extract(zfile, fileend):
     with zipfile.ZipFile(zfile) as czip:
         for file in czip.namelist():
@@ -78,6 +87,7 @@ def extract(zfile, fileend):
 
 # OS
 
+
 def get_os():
     if sys.platform == "linux":
         if os.system("ldd /bin/ls | grep musl > /dev/null") == 0:
@@ -87,9 +97,10 @@ def get_os():
     elif sys.platform == "win32":
         return "windows"
     elif sys.platform == "darwin":
-        return "osx"
+        return "mac"
 
     return "unsupported"
+
 
 def get_paths(prefix, suffix=""):
     osname = get_os()
@@ -113,14 +124,15 @@ def get_paths(prefix, suffix=""):
 
 # URL
 
-def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile = None, rfile_size = 0, wfile = None, encoding="utf-8"):
+
+def curl(url, method="GET", proxy=None, headers=None, data=None, rfile=None, rfile_size=0, wfile=None, encoding="utf-8"):
     """
     data - for POST/PUT
     rfile - upload from open file - requires rfile_size
     wfile - download into open file
     """
     if mcurl.MCURL is None:
-        mc = mcurl.MCurl(debug_print = None)
+        mc = mcurl.MCurl(debug_print=None)
     ec = mcurl.Curl(url, method)
     ec.set_debug()
 
@@ -140,9 +152,9 @@ def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile =
             headers = {}
         headers["Content-Length"] = rfile_size
 
-        ec.bridge(client_rfile = rfile, client_wfile = wfile)
+        ec.bridge(client_rfile=rfile, client_wfile=wfile)
     elif wfile is not None:
-        ec.bridge(client_wfile = wfile)
+        ec.bridge(client_wfile=wfile)
     else:
         ec.buffer()
 
@@ -159,6 +171,7 @@ def curl(url, method = "GET", proxy = None, headers = None, data = None, rfile =
 
     return 0, ec.get_data(encoding)
 
+
 def get_curl():
     os.chdir("px/libcurl")
 
@@ -168,7 +181,8 @@ def get_curl():
             lcurlzip = "curl%s.zip" % bit
             if not os.path.exists(lcurl):
                 if not os.path.exists(lcurlzip):
-                    urllib.request.urlretrieve("https://curl.se/windows/latest.cgi?p=win%s-mingw.zip" % bit, lcurlzip)
+                    urllib.request.urlretrieve(
+                        "https://curl.se/windows/latest.cgi?p=win%s-mingw.zip" % bit, lcurlzip)
                 extract(lcurlzip, lcurl)
 
                 if not os.path.exists("curl-ca-bundle.crt"):
@@ -191,32 +205,35 @@ def get_curl():
 
 # Build
 
+
 def wheel():
     # Create wheel
     rmtree("build px_proxy.egg-info")
-    whls = glob.glob(f"wheel/*.whl")
-    for whl in whls:
-        os.remove(whl)
-    if os.system(sys.executable + " setup.py bdist_wheel -d wheel -k") != 0:
-        print("Failed to build wheel")
-        sys.exit()
+    if not os.path.exists("wheel/" + WHEEL):
+        rmtree("wheel")
+        if os.system(sys.executable + " -m build -s -w -o wheel --installer=uv") != 0:
+            print("Failed to build wheel")
+            sys.exit()
 
-    # Check wheels
-    os.system(sys.executable + " -m twine check wheel/*")
+        # Check wheels
+        os.system(sys.executable + " -m twine check wheel/*")
 
-    rmtree("build px_proxy.egg-info")
+        rmtree("build px_proxy.egg-info")
+
 
 def pyinstaller():
     _, dist, _ = get_paths("pyinst")
     rmtree("build dist " + dist)
 
-    os.system("pyinstaller --clean --noupx -w px.py --collect-submodules win32ctypes")
+    os.system(
+        "pyinstaller --clean --noupx -w px.py --collect-submodules win32ctypes")
     copy("px.ini HISTORY.txt LICENSE.txt README.md", "dist")
 
     time.sleep(1)
     os.remove("px.spec")
     rmtree("build")
     os.rename("dist", dist)
+
 
 def nuitka():
     prefix = "px.dist"
@@ -228,18 +245,43 @@ def nuitka():
     if sys.platform == "win32":
         # keyring dependency
         flags = "--include-package=win32ctypes"
-    os.system(sys.executable + " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
+    os.system(sys.executable +
+              " -m nuitka --standalone %s --prefer-source-code --output-dir=%s px.py" % (flags, outdir))
+
+    # Copy files
     copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
+    if sys.platform != "win32":
+        # Copy cacert.pem to dist/mcurl/.
+        cacert = os.path.join(os.path.dirname(mcurl.__file__), "cacert.pem")
+        mcurl_dir = os.path.join(dist, "mcurl")
+        os.makedirs(mcurl_dir, exist_ok=True)
+        copy(cacert, mcurl_dir)
 
     time.sleep(1)
 
-    # Compress some binaries
     os.chdir(dist)
+    # Fix binary name on Linux/Mac
+    try:
+        os.rename("px.bin", "px")
+    except FileNotFoundError:
+        pass
+
+    # Nuitka imports wrong openssl libs on Mac
+    if sys.platform == "darwin":
+        # Get brew openssl path
+        osslpath = subprocess.check_output(
+            "brew --prefix openssl", shell=True, text=True).strip()
+        for lib in ["libssl.3.dylib", "libcrypto.3.dylib"]:
+            shutil.copy(os.path.join(osslpath, "lib", lib), ".")
+
+    # Compress some binaries
     if shutil.which("upx") is not None:
         if sys.platform == "win32":
             os.system("upx --best px.exe python3*.dll libcrypto*.dll")
+        elif sys.platform == "darwin":
+            if platform.machine() != "arm64":
+                os.system("upx --best --force-macos px")
         else:
-            os.rename("px.bin", "px")
             os.system("upx --best px")
 
     # Create archive
@@ -260,7 +302,8 @@ def nuitka():
 
     os.chdir("..")
 
-def get_pip(executable = sys.executable):
+
+def get_pip(executable=sys.executable):
     # Download get-pip.py
     url = "https://bootstrap.pypa.io/get-pip.py"
     ret, data = curl(url)
@@ -276,6 +319,7 @@ def get_pip(executable = sys.executable):
     # Remove get-pip.py
     os.remove("get-pip.py")
 
+
 def embed():
     # Get wheels path
     prefix = "px.dist"
@@ -290,7 +334,13 @@ def embed():
     os.makedirs(dist, exist_ok=True)
 
     # Get latest releases from web
-    ret, data = curl("https://www.python.org/downloads/windows/")
+    ret, data = curl(
+        "https://www.python.org/downloads/windows/", encoding=None)
+    try:
+        data = gzip.decompress(data)
+    except gzip.BadGzipFile:
+        pass
+    data = data.decode("utf-8")
 
     # Get Python version from CLI if specified
     version = get_argval("tag")
@@ -338,7 +388,8 @@ def embed():
         get_pip(executable)
 
         # Setup px
-        os.system(f"{executable} -m pip install px-proxy --no-index -f {wdist} --no-warn-script-location")
+        os.system(
+            f"{executable} -m pip install px-proxy --no-index -f {wdist} --no-warn-script-location")
 
         # Remove pip
         os.system(f"{executable} -m pip uninstall setuptools wheel pip -y")
@@ -354,10 +405,10 @@ def embed():
     dataout = bytearray()
     skip = False
     for i, byte in enumerate(data):
-        if byte == 0x23 and data[i+1] == 0x21:  #!
+        if byte == 0x23 and data[i+1] == 0x21:  # !
             if (data[i+2] >= 0x41 and data[i+2] <= 0x5a) or \
-                (data[i+2] >= 0x61 and data[i+2] <= 0x7a):    # A-Za-z - drive letter
-                if data[i+3] == 0x3A: # Colon
+                    (data[i+2] >= 0x61 and data[i+2] <= 0x7a):    # A-Za-z - drive letter
+                if data[i+3] == 0x3A:  # Colon
                     skip = True
                     continue
 
@@ -372,6 +423,9 @@ def embed():
 
     with open(pxexe, "wb") as f:
         f.write(dataout)
+
+    # Copy data files
+    copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)
 
     # Delete Scripts directory
     rmtree(os.path.join(dist, "Scripts"))
@@ -395,6 +449,7 @@ def embed():
 
     os.chdir("..")
 
+
 def deps():
     _, outdir, dist = get_paths("px.dist", "wheels")
     if "--force" in sys.argv:
@@ -402,7 +457,8 @@ def deps():
     os.makedirs(dist, exist_ok=True)
 
     # Build
-    os.system(sys.executable + " -m pip wheel . -w " + dist)
+    os.system(sys.executable + f" -m pip wheel . -w {dist} -f mcurllib")
+
 
 def depspkg():
     prefix = "px.dist"
@@ -418,6 +474,9 @@ def depspkg():
             if platform.machine().lower() not in whl:
                 # Not platform specific wheel
                 continue
+            if whl.startswith("pymcurl"):
+                # pymcurl is already audited
+                continue
 
             if os.system(f"auditwheel repair --strip {whl}") == 0:
                 os.remove(whl)
@@ -430,12 +489,21 @@ def depspkg():
         os.chdir(outdir)
 
     # Replace with official Px wheel
-    whl = "px_proxy-" + __version__ + "-py3-none-any.whl"
     try:
-        os.remove(os.path.join(prefix, whl))
+        os.remove(os.path.join(prefix, WHEEL))
     except:
         pass
-    shutil.copy(os.path.join("..", "wheel", whl), prefix)
+    shutil.copy(os.path.join("..", "wheel", WHEEL), prefix)
+
+    # Replace with local pymcurl wheel
+    mcurllib = os.path.join("..", "mcurllib")
+    if os.path.exists(mcurllib):
+        # Delete downloaded pymcurl wheel
+        for whl in glob.glob(os.path.join(prefix, "pymcurl*.whl")):
+            os.remove(whl)
+        newwhl = re.sub(r'(\d+\.\d+\.\d+\.\d+|\d+_\d+)',
+                        '*', os.path.basename(whl))
+        shutil.copy(glob.glob(os.path.join(mcurllib, newwhl))[0], prefix)
 
     # Compress all wheels
     arch = "gztar"
@@ -454,6 +522,7 @@ def depspkg():
 
     os.chdir("..")
 
+
 def scoop():
     # Delete Python lib
     version = f"{sys.version_info.major}{sys.version_info.minor}"
@@ -467,11 +536,11 @@ def scoop():
 
     get_pip()
 
-def docker():
-    os.chdir("docker")
 
+def docker():
     tag = "genotrance/px"
-    dbuild = "docker build --network host --build-arg VERSION=" + __version__
+    dbuild = "docker build --network host --build-arg VERSION=" + \
+        __version__ + " -f docker/Dockerfile"
 
     # Build mini image
     mtag = f"{tag}:{__version__}-mini"
@@ -499,13 +568,13 @@ def docker():
         print("Failed to tag full image")
         sys.exit()
 
-    os.chdir("..")
-
 # Github related
+
 
 def get_all_releases():
     ret, data = curl("https://api.github.com/repos/" + REPO + "/releases")
     return json.loads(data)
+
 
 def get_release_by_tag(tag):
     j = get_all_releases()
@@ -515,25 +584,29 @@ def get_release_by_tag(tag):
 
     return None
 
+
 def get_release_id(rel):
     return str(rel["id"])
+
 
 def get_num_downloads(rel, aname="px-v"):
     for asset in rel["assets"]:
         if aname in asset["name"]:
             return asset["download_count"]
 
+
 def delete_release(rel):
     id = get_release_id(rel)
     ret, data = curl(
         "https://api.github.com/repos/" + REPO + "/releases/" + id,
-        method = "DELETE", headers = get_auth())
+        method="DELETE", headers=get_auth())
     if ret != 0:
         print("Failed to delete release " + id + " with " + str(ret))
         print(data)
         sys.exit(2)
 
     print("Deleted release " + id)
+
 
 def has_downloads(rel):
     dl = get_num_downloads(rel)
@@ -543,18 +616,19 @@ def has_downloads(rel):
 
     return False
 
+
 def edit_release_tag(rel, offset=""):
     new_tag_name = rel["created_at"].split("T")[0] + offset
     sha = get_tag_by_name(rel["tag_name"])["object"]["sha"]
     data = json.dumps({
-      "tag_name": new_tag_name,
-      "target_commitish": sha
+        "tag_name": new_tag_name,
+        "target_commitish": sha
     })
 
     id = get_release_id(rel)
     ret, data = curl(
         "https://api.github.com/repos/" + REPO + "/releases/" + id,
-        method = "PATCH", headers = get_auth(), data = data)
+        method="PATCH", headers=get_auth(), data=data)
     if ret != 0:
         if offset:
             edit_release_tag(rel, "-1")
@@ -565,9 +639,11 @@ def edit_release_tag(rel, offset=""):
 
     print("Edited release tag name to " + rel["created_at"].split("T")[0])
 
+
 def get_all_tags():
     ret, data = curl("https://api.github.com/repos/" + REPO + "/git/refs/tag")
     return json.loads(data)
+
 
 def get_tag_by_name(tag):
     j = get_all_tags()
@@ -577,11 +653,12 @@ def get_tag_by_name(tag):
 
     return None
 
+
 def delete_tag(tg):
     ref = tg["ref"]
     ret, data = curl(
         "https://api.github.com/repos/" + REPO + "/git/" + ref,
-        method = "DELETE", headers = get_auth())
+        method="DELETE", headers=get_auth())
     if ret != 0:
         print("Failed to delete tag with " + str(ret))
         print(data)
@@ -589,10 +666,12 @@ def delete_tag(tg):
 
     print("Deleted tag " + ref)
 
+
 def delete_tag_by_name(tag):
     tg = get_tag_by_name(tag)
     if tg:
         delete_tag(tg)
+
 
 def get_history():
     h = open("HISTORY.txt", "r").read().split("\n\n")[0]
@@ -600,19 +679,20 @@ def get_history():
 
     return h
 
+
 def create_release(tag, name, body, prerelease):
     data = json.dumps({
-      "tag_name": tag,
-      "target_commitish": "master",
-      "name": name,
-      "body": body,
-      "draft": False,
-      "prerelease": prerelease
+        "tag_name": tag,
+        "target_commitish": "master",
+        "name": name,
+        "body": body,
+        "draft": False,
+        "prerelease": prerelease
     })
 
     ret, data = curl(
         "https://api.github.com/repos/" + REPO + "/releases",
-        method = "POST", headers = get_auth(), data = data)
+        method="POST", headers=get_auth(), data=data)
     if ret != 0:
         print("Create release failed with " + str(ret))
         print(data)
@@ -623,6 +703,7 @@ def create_release(tag, name, body, prerelease):
 
     return id
 
+
 def add_asset_to_release(filename, relid):
     print("Uploading " + filename)
     rfile_size = os.stat(filename).st_size
@@ -630,14 +711,16 @@ def add_asset_to_release(filename, relid):
         headers = get_auth()
         headers["Content-Type"] = "application/octet-stream"
         ret, data = curl(
-            "https://uploads.github.com/repos/" + REPO + "/releases/" + relid + "/assets?name=" + os.path.basename(filename),
-            method = "POST", headers = headers, rfile = rfile, rfile_size = rfile_size)
+            "https://uploads.github.com/repos/" + REPO + "/releases/" +
+            relid + "/assets?name=" + os.path.basename(filename),
+            method="POST", headers=headers, rfile=rfile, rfile_size=rfile_size)
         if ret != 0:
             print("Asset upload failed with " + str(ret))
             print(data)
             sys.exit(6)
         else:
             print("Asset upload successful")
+
 
 def check_code_change():
     if "--force" in sys.argv:
@@ -647,6 +730,7 @@ def check_code_change():
         return True
 
     return False
+
 
 def post():
     tagname = get_argval("tag") or "v" + __version__
@@ -669,6 +753,8 @@ def post():
         add_asset_to_release(archive, id)
 
 # Main
+
+
 def main():
     # Setup
     if "--libcurl" in sys.argv:
@@ -752,6 +838,7 @@ Post:
 
 --token=$GITHUB_TOKEN required for Github operations
 """)
+
 
 if __name__ == "__main__":
     main()

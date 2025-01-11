@@ -53,6 +53,7 @@ px.build/
 px.dist*/
 pyinst*/
 wheel/
+mcurllib/
 debug-*
 *.pyc
 *.pyc.*

@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "px-proxy"
+version = "0.10.0"
+description = "An HTTP proxy server to automatically authenticate through an NTLM proxy"
+authors = [
+  {name = "Ganesh Viswanathan", email = "dev@genotrance.com"}
+]
+readme = "README.md"
+classifiers = [
+        "Development Status :: 4 - Beta",
+        "Environment :: Win32 (MS Windows)",
+        "Environment :: MacOS X",
+        "Intended Audience :: Developers",
+        "Intended Audience :: End Users/Desktop",
+        "Intended Audience :: System Administrators",
+        "License :: OSI Approved :: MIT License",
+        "Natural Language :: English",
+        "Operating System :: MacOS :: MacOS X",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Topic :: Internet :: Proxy Servers"
+]
+dependencies = [
+    "keyring",
+    "netaddr",
+    "psutil",
+    "pymcurl",
+    "pyspnego",
+    "python-dotenv",
+    "quickjs"
+]
+
+[project.urls]
+Homepage = "https://github.com/genotrance/px"
+Repository = "https://github.com/genotrance/px"
+Issues = "https://github.com/genotrance/px/issues"
+
+[project.scripts]
+px = "px.main:main"
+
+[tool.setuptools]
+packages = ["px"]
+
+[tool.tox]
+envlist = ["py38", "py39", "py310", "py311", "py312", "py313", "binary"]
+
+[tool.tox.env_run_base]
+commands_pre = [["uv", "pip", "install", "keyring", "psutil", "pytest", "pytest-xdist", "pytest-httpbin"]]
+commands = [["pytest", "-n", "auto", "tests"]]
+passenv = ["DBUS_SESSION_BUS_ADDRESS", "UV_PYTHON_PREFERENCE"]
+
+[tool.tox.env.binary]
+passenv = ["PXBIN", "DBUS_SESSION_BUS_ADDRESS"]

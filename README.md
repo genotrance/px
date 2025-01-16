@@ -29,7 +29,7 @@ Px and all dependencies can be installed with `pip`:
 
 - If Python is not available, get the latest compiled binary from the
 [releases](https://github.com/genotrance/px/releases) page instead. The Windows
-binary is built using Python Embedded and the Linux and OSX binaries are compiled
+binary is built using Python Embedded and the Mac and Linux binaries are compiled
 with [Nuitka](https://nuitka.net) and contain everything needed to run standalone.
 
 If direct internet access is available along with Python, Px can be easily
@@ -47,13 +47,6 @@ Once installed, Px can be run as follows:
 - In the background: `pythonw -m px`
 - In the foreground in a console window: `python -m px`
 - As a wrapped service using [WinSW](https://github.com/winsw/winsw)
-
-Px requires [libcurl](https://curl.se/libcurl/) and the Windows builds ship with
-a copy. On Linux, it is required to install libcurl using the package manager:
-
-- RHEL: `yum install libcurl`
-- Ubuntu: `apt install libcurl4`
-- Alpine: `apk add libcurl`
 
 ### Running as a windows service using WinSW
 
@@ -107,19 +100,13 @@ NOTE: Source install methods will require internet access since Python will try
 to install Px dependencies from the internet. The binaries mentioned in the
 previous section could be used to bootstrap a source install.
 
-NOTE: libcurl will need to be installed on Linux, as described earlier, using
-the package manager. For Windows, [download](https://curl.se/windows/) and
-extract `libcurl.dll` and `libcurl-x64.dll` to `$PATH`.
-
 ### Without installation
 
 Px can be run as a local Python script without installation. Download the source
 as described above, install all dependencies and then run Px:
 
 ```
-pip install keyring netaddr psutil python-dotenv pyspnego quickjs
-
-# Download/install libcurl
+pip install keyring netaddr psutil pymcurl pyspnego python-dotenv quickjs
 
 pythonw px.py # run in the background
 python px.py # run in a console window
@@ -251,6 +238,19 @@ Credential Manager can be accessed as follows:
 	Control Panel > User Accounts > Credential Manager > Windows Credentials
 
 	Or on the command line: `rundll32.exe keymgr.dll, KRShowKeyMgr`
+
+#### Mac
+
+Keychain Access is used to store to passwords on Mac.
+- Pick 'Passwords' on the top menu and 'login' on the left menu
+- Add a new keychain item for 'Px' and 'PxClient' as needed
+
+The first time Px tries to access the passwords, it will prompt to unlock the
+keychain. Select 'Always Allow' to give Px access indefinitely.
+
+On the command line, the 'security' tool can be used to manage credentials:
+
+	security add-generic-password -s Px -a username -w password
 
 #### Linux
 
@@ -553,33 +553,75 @@ the following Python packages:
 
 - [keyring](https://pypi.org/project/keyring/)
 - [netaddr](https://pypi.org/project/netaddr/)
+- [pymcurl](https://pypi.org/project/pymcurl/)
 - [psutil](https://pypi.org/project/psutil/)
 - [pyspnego](https://pypi.org/project/pyspnego/)
 - [python-dotenv](https://pypi.org/projects/python-dotenv/)
 - [quickjs](https://pypi.org/project/quickjs/)
 
-Px also depends on [libcurl](https://curl.se/libcurl) for all outbound HTTP
-connections and proxy authentication.
-
 ## Limitations
 
-Windows multiprocessing only works on Python 3.3+ since that's when support was
-added to share sockets across processes. On older versions of Python, Px will run
-multi-threaded but in a single process.
-
-MacOSX socket sharing is not implemented at this time and is limited to running
+Mac socket sharing is not implemented at this time and is limited to running
 in a single process.
 
-While it should mostly work, Px is not tested on MacOSX since there's no test
-environment available at this time to verify functionality. PRs are welcome to
-help fix any issues.
+The `--hostonly` and `--quit` features do not work on Linux aarch64 systems.
 
 ## Building
 
-To build a self-sufficient executable that does not depend on the presence of
-Python and dependency modules, both Nuitka and PyInstaller scripts are provided.
-There is also a Python Embedded build that is preferable on Windows. Check out
-`python tools.py` for more details.
+Px is a pure Python app but depends on several packages that have OS and
+machine specific binaries. As a result, Px ships two kinds of binaries as
+already mentioned in the installation section above.
+- Wheels - all packages needed to install Px on supported versions of Python
+- Binary - compiled binary using Python Embedded on Windows and Nuitka on Mac
+  and Linux
+
+These binaries are provided for the following:
+- Windows - amd64
+- Mac - x86_64, arm64
+- Linux - x86_64, aarch64 for glibc and musl based systems
+
+To build the wheels package:
+
+	./build.sh -b -d
+
+To build the binary package:
+
+	./build.sh -b -n
+
+On Windows, [build.ps1](build.ps1) is provided to install the required dependencies using
+`scoop`. It then calls [build.sh](build.sh) with the arguments provided.
+
+Commands used to build all released artifacts:
+```bash
+# Windows
+#   Builds wheels archive
+#   Builds embedded binary
+.\build.ps1 -b
+
+# Mac
+#   Builds wheels archive
+#   Builds Nuitka binary
+./build.sh -b
+
+# Linux glibc systems
+#   Docker + manylinux container
+#   Builds wheels archive
+#   Builds Nuitka binary
+./build.sh -i glibc -b
+./build.sh -i glibc -a aarch64 -b
+
+# Linux musl systems
+#   Docker + musllinux container
+#   Builds wheels archive
+./build.sh -i musl -b -d
+./build.sh -i musl -a aarch64 -b -d
+#   Docker + Alpine legacy container [#bug](https://github.com/Nuitka/Nuitka/issues/2625)
+#   Builds Nuitka binary
+./build.sh -i alpine:3.13 -b -n
+./build.sh -i alpine:3.13 -a aarch64 -b -n
+```
+
+See [build.sh](build.sh) for more details.
 
 ## Feedback
 

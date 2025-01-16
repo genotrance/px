@@ -1,3 +1,13 @@
+v0.10.0 - 2025-01-10
+- Replaced ctypes based libcurl backend with pymcurl which uses cffi and includes
+  the latest libcurl binaries
+- Fixed #219, #224 - pymcurl uses libcurl with schannel on Windows which loads
+  certs from the OS
+- Fixed #214 - handle case where no headers are received from client
+- Fixed issue curl/discussions/15700 where POST was failing in auth=NONE mode for
+  NTLM proxies
+- Fixed issue in the Px docker container that would not stop unless it was killed
+
 v0.9.2 - 2024-03-08
 - Fixed issue with libcurl binary on Windows - #212
 

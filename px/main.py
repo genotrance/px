@@ -18,15 +18,17 @@ from .version import __version__
 
 from . import config
 from . import handler
-from . import mcurl
 
 if sys.platform == "win32":
     from . import windows
+
+import mcurl
 
 warnings.filterwarnings("ignore")
 
 ###
 # Multi-processing and multi-threading
+
 
 class PoolMixIn(socketserver.ThreadingMixIn):
     pool = None
@@ -46,14 +48,15 @@ class PoolMixIn(socketserver.ThreadingMixIn):
         dprint("Client not allowed: %s" % client_address[0])
         return False
 
+
 class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
     def __init__(self, server_address, RequestHandlerClass,
-            bind_and_activate=True):
+                 bind_and_activate=True):
         socketserver.TCPServer.__init__(self, server_address,
-            RequestHandlerClass, bind_and_activate)
+                                        RequestHandlerClass, bind_and_activate)
 
         try:
             # Workaround bad thread naming code in Python 3.6+, fixed in master
@@ -64,8 +67,10 @@ class ThreadedTCPServer(PoolMixIn, socketserver.TCPServer):
             self.pool = concurrent.futures.ThreadPoolExecutor(
                 max_workers=STATE.config.getint("settings", "threads"))
 
+
 def print_banner(listen, port):
-    pprint(f"Serving at {listen}:{port} proc {multiprocessing.current_process().name}")
+    pprint(f"Serving at {listen}:{port} proc " +
+           multiprocessing.current_process().name)
 
     if sys.platform == "win32":
         if config.is_compiled() or "pythonw.exe" in sys.executable:
@@ -77,18 +82,21 @@ def print_banner(listen, port):
             dprint(section + ":" + option + " = " + STATE.config.get(
                 section, option))
 
+
 def serve_forever(httpd):
     httpd.serve_forever()
     httpd.shutdown()
 
+
 def start_httpds(httpds):
     for httpd in httpds[:-1]:
         # Start server in a thread for each listen address
-        thrd = threading.Thread(target = serve_forever, args = (httpd,))
+        thrd = threading.Thread(target=serve_forever, args=(httpd,))
         thrd.start()
 
     # Start server in main thread for last listen address
     serve_forever(httpds[-1])
+
 
 def start_worker(pipeout):
     # CTRL-C should exit the process
@@ -105,7 +113,8 @@ def start_worker(pipeout):
             mainsock = socket.fromshare(mainsock)
 
         # Start server but use socket from parent process
-        httpd = ThreadedTCPServer((listen, port), handler.PxHandler, bind_and_activate=False)
+        httpd = ThreadedTCPServer(
+            (listen, port), handler.PxHandler, bind_and_activate=False)
         httpd.socket = mainsock
 
         httpds.append(httpd)
@@ -113,6 +122,7 @@ def start_worker(pipeout):
         print_banner(listen, port)
 
     start_httpds(httpds)
+
 
 def run_pool():
     # CTRL-C should exit the process
@@ -126,11 +136,13 @@ def run_pool():
         try:
             httpd = ThreadedTCPServer((listen, port), handler.PxHandler)
         except OSError as exc:
-            if "attempt was made" in str(exc):
+            strexc = str(exc)
+            if "attempt was made" in strexc or "already in use" in strexc:
                 pprint("Px failed to start - port in use")
+                os._exit(config.ERROR_PORTINUSE)
             else:
-                pprint(exc)
-            return
+                pprint(strexc)
+            os._exit(config.ERROR_UNKNOWN)
 
         httpds.append(httpd)
         mainsocks.append(httpd.socket)
@@ -148,7 +160,8 @@ def run_pool():
             workers = STATE.config.getint("settings", "workers")
             for _ in range(workers-1):
                 (pipeout, pipein) = multiprocessing.Pipe()
-                p = multiprocessing.Process(target=start_worker, args=(pipeout,))
+                p = multiprocessing.Process(
+                    target=start_worker, args=(pipeout,))
                 p.daemon = True
                 p.start()
                 while p.pid is None:
@@ -166,6 +179,7 @@ def run_pool():
 
 ###
 # Actions
+
 
 def test(testurl):
     # Get Px configuration
@@ -200,7 +214,7 @@ def test(testurl):
                     pprint("Failed: Px did not start")
                     os._exit(config.ERROR_TEST)
 
-    def query(url, method="GET", data = None, quit=True, check=False, insecure=False):
+    def query(url, method="GET", data=None, quit=True, check=False, insecure=False):
         if quit:
             waitforpx()
 
@@ -227,10 +241,12 @@ def test(testurl):
             if check:
                 # Tests against httpbin
                 if url not in ret_data:
-                    pprint(f"Failed: response does not contain {url}:\n{ret_data}")
+                    pprint("Failed: response does not contain " +
+                           f"{url}:\n{ret_data}")
                     os._exit(config.ERROR_TEST)
                 if data is not None and data not in ret_data:
-                    pprint(f"Failed: response does not match {data}:\n{ret_data}")
+                    pprint("Failed: response does not match " +
+                           f"{data}:\n{ret_data}")
                     os._exit(config.ERROR_TEST)
 
         if quit:
@@ -242,25 +258,39 @@ def test(testurl):
         waitforpx()
 
         insecure = False
+        urls = []
         if testurl in ["all", "1"]:
             url = "://httpbin.org/"
+            urls.append("http" + url)
+            urls.append("https" + url)
         elif testurl.startswith("all:"):
-            url = f"://{testurl[4:]}/"
             insecure = True
+            url = testurl[4:]
+            if "://" not in url:
+                url = f"://{url}"
+                if url[-1] != "/":
+                    url += "/"
+                urls.append("http" + url)
+                urls.append("https" + url)
+            else:
+                if url[-1] != "/":
+                    url += "/"
+                urls.append(url)
 
         for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
-            for protocol in ["http", "https"]:
-                testurl = protocol + url + method.lower()
-                data = str(uuid.uuid4()) if method in ["POST", "PUT", "PATCH"] else None
-                query(testurl, method, data, quit=False, check=True, insecure=insecure)
+            for url in urls:
+                data = str(uuid.uuid4()) if method in [
+                    "POST", "PUT", "PATCH"] else None
+                query(url + method.lower(), method, data, quit=False,
+                      check=True, insecure=insecure)
 
         os._exit(config.ERROR_SUCCESS)
 
     # Run testurl query in a thread
     if testurl in ["all", "1"] or testurl.startswith("all:"):
-        t = threading.Thread(target = queryall, args = (testurl,))
+        t = threading.Thread(target=queryall, args=(testurl,))
     else:
-        t = threading.Thread(target = query, args = (testurl,))
+        t = threading.Thread(target=query, args=(testurl,))
     t.daemon = True
     t.start()
 
@@ -270,10 +300,11 @@ def test(testurl):
 ###
 # Exit related
 
+
 def handle_exceptions(extype, value, tb):
     # Create traceback log
     lst = (traceback.format_tb(tb, None) +
-        traceback.format_exception_only(extype, value))
+           traceback.format_exception_only(extype, value))
     tracelog = '\nTraceback (most recent call last):\n' + "%-20s%s\n" % (
         "".join(lst[:-1]), lst[-1])
 
@@ -289,6 +320,7 @@ def handle_exceptions(extype, value, tb):
 ###
 # Startup
 
+
 def main():
     multiprocessing.freeze_support()
     multiprocessing.set_start_method("spawn")
@@ -300,6 +332,7 @@ def main():
         test(STATE.test)
 
     run_pool()
+
 
 if __name__ == "__main__":
     main()

@@ -13,11 +13,11 @@ from .config import STATE, CLIENT_REALM
 from .debug import pprint, dprint
 
 from . import config
-from . import mcurl
 from . import wproxy
 
 # External dependencies
 import keyring
+import mcurl
 
 try:
     import spnego._ntlm
@@ -34,6 +34,7 @@ except ImportError:
 ###
 # spnego _ntlm monkey patching
 
+
 def _get_credential(store, domain, username):
     "Get credentials for domain\\username for NTLM authentication"
     domainuser = username
@@ -41,21 +42,27 @@ def _get_credential(store, domain, username):
         domainuser = f"{domain}\\{username}"
 
     password = get_client_password(domainuser)
-    if password is not  None:
+    if password is not None:
         lmhash = lmowfv1(password)
         nthash = ntowfv1(password)
         return domain, username, lmhash, nthash
 
     raise spnego.exceptions.SpnegoError(
         spnego.exceptions.ErrorCode.failure, "Bad credentials")
+
+
 spnego._ntlm._get_credential = _get_credential
+
 
 def _get_credential_file():
     "Not using a credential file"
     return True
+
+
 spnego._ntlm._get_credential_file = _get_credential_file
 
 import spnego
+
 
 def get_client_password(username):
     "Get client password from environment variables or keyring"
@@ -83,6 +90,7 @@ def get_client_password(username):
     # Blank password = failure
     return password or None
 
+
 def set_curl_auth(curl, auth):
     "Set proxy authentication info for curl object"
     if auth != "NONE":
@@ -104,14 +112,18 @@ def set_curl_auth(curl, auth):
             else:
                 dprint("SSPI not available and no username configured - no auth")
                 return
-        curl.set_auth(user = key, password = pwd, auth = auth)
+        curl.set_auth(user=key, password=pwd, auth=auth)
     else:
         # Explicitly deferring proxy authentication to the client
         dprint(curl.easyhash + ": Skipping proxy authentication")
+
+        # Use easy interface to maintain a persistent connection
+        # for NTLM auth, multi interface does not guarantee this
         curl.is_easy = True
 
 ###
 # Proxy handler
+
 
 class PxHandler(http.server.BaseHTTPRequestHandler):
     "Handler for each proxy connection - unique instance for each thread in each process"
@@ -139,7 +151,7 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
 
     def address_string(self):
         host, port = self.client_address[:2]
-        #return socket.getfqdn(host)
+        # return socket.getfqdn(host)
         return host
 
     def log_message(self, format, *args):
@@ -151,9 +163,11 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if self.curl is None:
-            self.curl = mcurl.Curl(self.path, self.command, self.request_version, STATE.socktimeout)
+            self.curl = mcurl.Curl(
+                self.path, self.command, self.request_version, STATE.socktimeout)
         else:
-            self.curl.reset(self.path, self.command, self.request_version, STATE.socktimeout)
+            self.curl.reset(self.path, self.command,
+                            self.request_version, STATE.socktimeout)
 
         dprint(self.curl.easyhash + ": Path = " + self.path)
         ipport = self.get_destination()
@@ -165,10 +179,12 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
             # since libcurl only supports CIDR addresses since v7.86 and does not support wildcards
             # (192.168.0.*) or ranges (192.168.0.1-192.168.0.255)
             noproxy_hosts = ",".join(STATE.wproxy.noproxy_hosts) or None
-            ret = self.curl.set_proxy(proxy = server, port = port, noproxy = noproxy_hosts)
+            ret = self.curl.set_proxy(
+                proxy=server, port=port, noproxy=noproxy_hosts)
             if not ret:
                 # Proxy server has had auth issues so returning failure to client
-                self.send_error(401, f"Proxy server authentication failed: {server}:{port}")
+                self.send_error(
+                    401, f"Proxy server authentication failed: {server}:{port}")
                 return
 
             # Set proxy authentication
@@ -184,6 +200,18 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
         if not self.curl.is_connect:
             self.curl.bridge(self.rfile, self.wfile, self.wfile)
 
+            # Support NTLM auth from http client in auth=NONE mode with upstream proxy
+            # https://github.com/curl/curl/discussions/15700
+            if ipport is None and STATE.auth == "NONE":
+                if self.command in ["POST", "PUT", "PATCH"]:
+                    # POST / PUT / PATCH with Content-Length = 0
+                    content_length = self.headers.get("Content-Length")
+                    if content_length is not None and content_length == "0":
+                        dprint(self.curl.easyhash +
+                               ": Setting CURLOPT_KEEP_SENDING_ON_ERROR")
+                        mcurl.libcurl.curl_easy_setopt(
+                            self.curl.easy, mcurl.libcurl.CURLOPT_KEEP_SENDING_ON_ERROR, mcurl.py2cbool(True))
+
         # Set headers for request
         self.curl.set_headers(self.headers)
 
@@ -194,10 +222,15 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
         self.curl.set_useragent(STATE.useragent)
 
         if not STATE.mcurl.do(self.curl):
-            dprint(self.curl.easyhash + ": Connection failed: " + self.curl.errstr)
+            dprint(self.curl.easyhash +
+                   ": Connection failed: " + self.curl.errstr)
             self.send_error(self.curl.resp, self.curl.errstr)
         elif self.curl.is_connect:
-            if self.curl.is_tunnel or not self.curl.is_proxied:
+            ret, used_proxy = self.curl.get_used_proxy()
+            if ret != 0:
+                dprint(self.curl.easyhash +
+                       ": Failed to get used proxy: " + str(ret))
+            elif self.curl.is_tunnel or not used_proxy:
                 # Inform client that SSL connection has been established
                 dprint(self.curl.easyhash + ": SSL connected")
                 self.send_response(200, "Connection established")
@@ -213,13 +246,13 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
         hostips = config.get_host_ips()
         for listen in STATE.listen:
             if ((len(listen) == 0 and self.client_address[0] in hostips) or
-                # client address matches any hostip since --hostonly or --gateway
-                (self.client_address[0] == listen)):
-                # client address matches --listen
-                    # Quit request from same host
-                    self.send_response(200)
-                    self.end_headers()
-                    os._exit(config.ERROR_SUCCESS)
+                    # client address matches any hostip since --hostonly or --gateway
+                    (self.client_address[0] == listen)):
+                    # client address matches --listen
+                # Quit request from same host
+                self.send_response(200)
+                self.end_headers()
+                os._exit(config.ERROR_SUCCESS)
 
         self.send_error(403)
 
@@ -322,10 +355,10 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
     def send_html(self, code, message):
         "Send HTML error page - from BaseHTTPRequestHandler.send_error()"
         content = (self.error_message_format % {
-                'code': code,
-                'message': html.escape(message, quote=False),
-                'explain': self.responses[code]
-            })
+            'code': code,
+            'message': html.escape(message, quote=False),
+            'explain': self.responses[code]
+        })
         body = content.encode('UTF-8', 'replace')
         self.send_header("Content-Type", self.error_content_type)
         self.send_header('Content-Length', str(len(body)))
@@ -356,7 +389,8 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Proxy-Authenticate", digest_header)
 
             if "BASIC" in STATE.client_auth:
-                self.send_header("Proxy-Authenticate", f'Basic realm="{CLIENT_REALM}"')
+                self.send_header("Proxy-Authenticate",
+                                 f'Basic realm="{CLIENT_REALM}"')
 
         self.send_header("Proxy-Connection", "Keep-Alive")
         self.send_html(407, "Proxy authentication required")
@@ -376,7 +410,8 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
             self.client_ctxt = spnego.auth.server(
                 protocol=authtype.lower(), options=options)
         try:
-            outok = self.client_ctxt.step(base64.b64decode(encoded_credentials))
+            outok = self.client_ctxt.step(
+                base64.b64decode(encoded_credentials))
         except (spnego.exceptions.InvalidTokenError,
                 spnego.exceptions.SpnegoError,
                 ValueError) as exc:
@@ -388,7 +423,7 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
             # Send challenge = client needs to send response
             dprint(f"Sending {authtype} challenge")
             self.send_auth_headers(
-                authtype = authtype, challenge = base64.b64encode(outok).decode("utf-8"))
+                authtype=authtype, challenge=base64.b64encode(outok).decode("utf-8"))
             return False
         else:
             # Authentication complete
@@ -479,7 +514,7 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
                     self.send_auth_headers()
                     return False
                 elif self.command in ["POST", "PUT", "PATCH"]:
-                    # POST / PUT with Content-Length = 0
+                    # POST / PUT / PATCH with Content-Length = 0
                     content_length = self.headers.get("Content-Length")
                     if content_length is not None and content_length == "0":
                         dprint("POST/PUT expects to receive auth headers")

@@ -13,7 +13,6 @@ import urllib.parse
 from .debug import pprint, dprint, Debug
 from .help import HELP
 
-from . import mcurl
 from . import wproxy
 
 if sys.platform == "win32":
@@ -22,12 +21,20 @@ if sys.platform == "win32":
 # Errors
 PxErrors = int
 (
-    ERROR_SUCCESS,  # 0
-    ERROR_IMPORT,   # 1
-    ERROR_CONFIG,   # 2
-    ERROR_QUIT,     # 3
-    ERROR_TEST      # 4
-) = range(5)
+    ERROR_SUCCESS,    # 0
+    ERROR_IMPORT,     # 1
+    ERROR_CONFIG,     # 2
+    ERROR_QUIT,       # 3
+    ERROR_TEST,       # 4
+    ERROR_PORTINUSE,  # 5
+    ERROR_UNKNOWN,    # 6
+) = range(7)
+
+try:
+    import mcurl
+except ImportError:
+    pprint("Requires module pymcurl")
+    sys.exit(ERROR_IMPORT)
 
 try:
     import keyring
@@ -78,13 +85,16 @@ LogLocation = int
 ###
 # Get info
 
+
 def get_script_path():
     "Get full path of running script or compiled executable"
     return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
 
+
 def get_script_dir():
     "Get directory of running script or compiled executable"
     return os.path.dirname(get_script_path())
+
 
 def get_script_cmd():
     "Get command for starting Px"
@@ -100,6 +110,7 @@ def get_script_cmd():
     # Case: "px.exe" from pip
     # Case: "px.exe" from nuitka
     return spath
+
 
 def get_logfile(location):
     "Get file path for debug output"
@@ -132,9 +143,11 @@ def get_logfile(location):
     # Log to file
     return os.path.join(path, f"debug-{name}.log")
 
+
 def is_compiled():
     "Return True if compiled with PyInstaller or Nuitka"
     return getattr(sys, "frozen", False) or "__compiled__" in globals()
+
 
 def get_host_ips():
     "Get IP addresses assigned to this host"
@@ -145,10 +158,11 @@ def get_host_ips():
         if stats[intf].isup:
             for addr in addrs[intf]:
                 # IPv4 only for now
-                if addr.family in [socket.AF_INET]:#, socket.AF_INET6]:
+                if addr.family in [socket.AF_INET]:  # , socket.AF_INET6]:
                     localips.add(addr.address.split("%")[0])
 
     return localips
+
 
 def file_url_to_local_path(file_url):
     parts = urllib.parse.urlparse(file_url)
@@ -159,6 +173,7 @@ def file_url_to_local_path(file_url):
         return 'C:' + path
     if len(path) > 2 and path[1] == ':':
         return path
+
 
 def get_listen():
     "Get local interface that Px will listen on"
@@ -183,7 +198,8 @@ def get_listen():
 ###
 # Actions
 
-def quit(exit = True):
+
+def quit(exit=True):
     "Quit running instances of Px for loaded configuration"
     listen = get_listen()
     port = STATE.config.getint("proxy", "port")
@@ -221,7 +237,7 @@ def quit(exit = True):
 
     # Connect to Px and send quit request
     url = f"http://{listen}:{port}/PxQuit"
-    mc = mcurl.MCurl(debug_print = dprint)
+    mc = mcurl.MCurl(debug_print=dprint)
     ec = mcurl.Curl(url)
     ec.buffer()
     success = False
@@ -281,6 +297,7 @@ def quit(exit = True):
 ###
 # Parse settings and command line
 
+
 # Default values for all keys
 DEFAULTS = {
     "server": "",
@@ -308,6 +325,7 @@ DEFAULTS = {
 
 # Client authentication related
 AUTH_SUPPORTED = ["NEGOTIATE", "NTLM", "DIGEST", "BASIC"]
+
 
 class State:
     """Stores runtime state per process - shared across threads"""
@@ -432,7 +450,7 @@ class State:
         self.hostonly = True if hostonly == 1 else False
 
     def set_allow(self, allow):
-        self.allow, _ = wproxy.parse_noproxy(allow, iponly = True)
+        self.allow, _ = wproxy.parse_noproxy(allow, iponly=True)
 
     def set_noproxy(self, noproxy):
         self.noproxy = noproxy
@@ -446,7 +464,8 @@ class State:
     def set_password(self):
         try:
             if len(self.username) == 0:
-                pprint("domain\\username missing - specify via --username or configure in px.ini")
+                pprint(
+                    "domain\\username missing - specify via --username or configure in px.ini")
                 sys.exit(ERROR_CONFIG)
             pprint("Setting password for '" + self.username + "'")
 
@@ -481,7 +500,8 @@ class State:
             if len(self.client_username) == 0:
                 pprint("domain\\username missing - specify via --client-username")
                 sys.exit(ERROR_CONFIG)
-            pprint("Setting client password for '" + self.client_username + "'")
+            pprint("Setting client password for '" +
+                   self.client_username + "'")
 
             pwd = ""
             while len(pwd) == 0:
@@ -521,7 +541,7 @@ class State:
         if nosspi == 1:
             self.client_nosspi = True
 
-    def set_debug(self, location = LOG_SCRIPTDIR):
+    def set_debug(self, location=LOG_SCRIPTDIR):
         if self.debug is None:
             logfile = get_logfile(location)
 
@@ -768,7 +788,8 @@ class State:
 
         # Restore --log state if --debug | --verbose | --uniqlog specified
         if save_location != LOG_NONE:
-            self.cfg_int_init("settings", "log", str(save_location), override = True)
+            self.cfg_int_init("settings", "log", str(
+                save_location), override=True)
 
         ###
         # Dependency propagation
@@ -809,7 +830,7 @@ class State:
         if "--quit" in sys.argv:
             quit()
         elif "--restart" in sys.argv:
-            ret = quit(exit = False)
+            ret = quit(exit=False)
             if ret != 0:
                 sys.exit(ret)
             sys.argv.remove("--restart")
@@ -825,16 +846,19 @@ class State:
 
         servers = wproxy.parse_proxy(self.config.get("proxy", "server"))
         if len(servers) != 0:
-            self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG, servers, noproxy = self.noproxy, debug_print = dprint)
+            self.wproxy = wproxy.Wproxy(
+                wproxy.MODE_CONFIG, servers, noproxy=self.noproxy, debug_print=dprint)
         elif len(self.pac) != 0:
             pac_encoding = self.config.get("proxy", "pac_encoding")
-            self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [self.pac], noproxy = self.noproxy, pac_encoding = pac_encoding, debug_print = dprint)
+            self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [
+                                        self.pac], noproxy=self.noproxy, pac_encoding=pac_encoding, debug_print=dprint)
         else:
-            self.wproxy = wproxy.Wproxy(noproxy = self.noproxy, debug_print = dprint)
+            self.wproxy = wproxy.Wproxy(
+                noproxy=self.noproxy, debug_print=dprint)
             self.proxy_last_reload = time.time()
 
         # Curl multi object to manage all easy connections
-        self.mcurl = mcurl.MCurl(debug_print = dprint)
+        self.mcurl = mcurl.MCurl(debug_print=dprint)
 
     def reload_proxy(self):
         # Return if proxies specified in Px config
@@ -852,12 +876,14 @@ class State:
                 return
 
             # Reload proxy information
-            self.wproxy = wproxy.Wproxy(noproxy = self.noproxy, debug_print = dprint)
+            self.wproxy = wproxy.Wproxy(
+                noproxy=self.noproxy, debug_print=dprint)
 
             self.proxy_last_reload = time.time()
 
         finally:
             self.state_lock.release()
+
 
 # Create instance of State object
 STATE = State()

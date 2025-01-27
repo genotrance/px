@@ -17,22 +17,21 @@ except ImportError:
 ###
 # Install Px to startup
 
-def check_installed():
+def is_installed():
     "Check if Px is already installed in the Windows registry"
-    ret = True
     runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
         r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
     try:
         winreg.QueryValueEx(runkey, "Px")
     except FileNotFoundError:
-        ret = False
-    winreg.CloseKey(runkey)
+        return False
+    finally:
+        winreg.CloseKey(runkey)
+        return True
 
-    return ret
-
-def install(script_cmd):
+def install(script_cmd, force_overwrite):
     "Install Px to Windows registry if not already"
-    if check_installed() is False:
+    if not is_installed() or force_overwrite:
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
             winreg.KEY_WRITE)
@@ -47,7 +46,7 @@ def install(script_cmd):
 
 def uninstall():
     "Uninstall Px from Windows registry if installed"
-    if check_installed() is True:
+    if is_installed() is True:
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
             winreg.KEY_WRITE)

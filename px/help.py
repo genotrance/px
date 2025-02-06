@@ -18,8 +18,8 @@ Actions:
     Values specified on CLI override any values in existing config file
     Values not specified on CLI or config file are set to defaults
 
-  --install
-  Add Px to the Windows registry to run on startup
+  --install [--force]
+  Add Px to the Windows registry to run on startup. Use '--force' to overwrite a possible existing key.
 
   --uninstall
   Remove Px from the Windows registry

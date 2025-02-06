@@ -321,8 +321,8 @@ quit by running `px --quit`. When running in the foreground, use `CTRL-C`.
 
 Px can also be setup to automatically run on startup on Windows with the
 `--install` flag. This is done by adding an entry into the Window registry which
-can be removed with `--uninstall`. You can provide `--force` to the install command
-in order to always write the key, even if an existing one is there.
+can be removed with `--uninstall`. Use `--force` to overwrite an existing entry
+in the registry.
 
 NOTE: Command line parameters passed with `--install` are not saved for use on
 startup. The `--save` flag or manual editing of `px.ini` is required to provide
@@ -346,7 +346,8 @@ Actions:
     Values not specified on CLI or config file are set to defaults
 
   --install [--force]
-  Add Px to the Windows registry to run on startup. Use '--force' to overwrite a possible existing key.
+  Add Px to the Windows registry to run on startup. Use --force to overwrite
+  an existing entry in the registry.
 
   --uninstall
   Remove Px from the Windows registry
@@ -361,13 +362,13 @@ Actions:
   Collect and save password to default keyring. Username needs to be provided
   via --username, PX_USERNAME or in the config file.
   As an alternative, Px can also load credentials from the environment variable
-  `PX_PASSWORD` or a dotenv file.
+  PX_PASSWORD or a dotenv file.
 
   --client-password | PX_CLIENT_PASSWORD
   Collect and save password to default keyring. Username needs to be provided
   via --client-username, PX_CLIENT_USERNAME or in the config file.
   As an alternative, Px can also load credentials from the environment variable
-  `PX_CLIENT_PASSWORD` or a dotenv file.
+  PX_CLIENT_PASSWORD or a dotenv file.
 
   --test=URL | --test
   Test Px as configured with the URL specified. This can be used to confirm that

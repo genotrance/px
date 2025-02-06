@@ -1,3 +1,9 @@
+v0.10.1 - TBD
+- Fixed docker image to work correctly with command line flags
+- Merged PR #233 - force flag to overwrite existing installation of Px in the
+  Windows registry
+- Merged PR #237 - handle pid reuse and support for pwsh
+
 v0.10.0 - 2025-01-10
 - Replaced ctypes based libcurl backend with pymcurl which uses cffi and includes
   the latest libcurl binaries

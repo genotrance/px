@@ -29,8 +29,7 @@ WORKDIR /px
 ENV PATH="/root/.local/bin:$PATH"
 
 # Run px using tini
-ENTRYPOINT ["tini", "--"]
-CMD ["px"]
+ENTRYPOINT ["tini", "--", "px"]
 
 ###
 # Create full image
@@ -43,5 +42,4 @@ RUN apk add --no-cache dbus gnome-keyring
 COPY docker/start.sh /px/start.sh
 
 # Run start.sh using tini
-ENTRYPOINT ["tini", "--"]
-CMD [ "/bin/sh", "/px/start.sh" ]
+ENTRYPOINT ["tini", "--", "/bin/sh", "/px/start.sh"]

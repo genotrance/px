@@ -12,14 +12,14 @@ COPY px.dist-linux-musl-x86_64-wheels/px-v${VERSION}-linux-musl-x86_64-wheels.ta
 RUN tar -xzf /tmp/wheels.tar.gz -C /tmp
 
 # Install px
-RUN python -m pip install --user px-proxy --no-index -f /tmp
+RUN python -m pip install --user px-proxy --no-index -f /tmp --no-cache-dir
 
 ###
 # Create mini image
 FROM base AS mini
 
 # Install dependencies
-RUN apk add --no-cache tini
+RUN apk add --no-cache krb5 tini
 
 # Copy python packages installed in user
 COPY --from=builder /root /root

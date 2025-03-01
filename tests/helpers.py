@@ -1,5 +1,4 @@
 import contextlib
-import io
 import os
 import platform
 import socket
@@ -96,7 +95,8 @@ def run_px(name, port, tmp_path_factory, flags, env=None):
     tmp_path = tmp_path_factory.mktemp(f"{name}-{port}")
     buffer = open(f"{tmp_path}{os.sep}{name}-{port}.log", "w+t")
     subp = subprocess.Popen(
-        cmd, shell=True, stdout=buffer, stderr=buffer, env=env, cwd=tmp_path)
+        cmd, shell=True, stdout=buffer, stderr=buffer, env=env, cwd=tmp_path
+    )
 
     assert is_px_running(port), f"{name} Px didn't start @ {port}"
     time.sleep(0.5)
@@ -127,7 +127,7 @@ def run_in_temp(cmd, tmp_path, upstream_buffer=None, chain_buffer=None):
         print("Chain Px:")
         print_buffer(chain_buffer)
 
-    assert ret == 0
+    assert ret == 0, f"Px exited with {ret}"
 
 
 def setup_keyring(username, password):

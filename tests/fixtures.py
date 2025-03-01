@@ -1,4 +1,6 @@
 import copy
+import os
+import sys
 
 import pytest
 import pytest_httpbin
@@ -26,7 +28,7 @@ def px_port(request):
         # 1st (+0) = client Px
         # 2nd (+1) = upstream Px
         # 3rd (+2) = chain Px
-        port += (int(worker_id.replace("gw", "")) * 3)
+        port += int(worker_id.replace("gw", "")) * 3
     except AttributeError:
         # Not using pytest-xdist
         pass
@@ -70,7 +72,7 @@ def px_chain(px_port, tmp_path_factory):
 
     # Run px in the background
     name = "Chain"
-    flags = f" --auth=NONE --proxy=127.0.0.1:{px_port+1}"
+    flags = f" --auth=NONE --proxy=127.0.0.1:{px_port + 1}"
     subp, cmd, buffer = run_px(name, port, tmp_path_factory, flags)
 
     # Let tests run
@@ -84,23 +86,24 @@ def px_chain(px_port, tmp_path_factory):
 # Function scope
 
 
-@pytest.fixture
-def px_bin():
+PARAMS_CLI_ENV = ["cli", "env"]
+
+
+@pytest.fixture(params=PARAMS_CLI_ENV)
+def px_bin(request):
     # px module or binary = 2
-    pxbin = os.getenv("PXBIN")
-    if pxbin is None:
+    if request.param == "env":
+        pxbin = os.getenv("PXBIN")
+        if pxbin is not None and os.path.exists(pxbin):
+            # binary test
+            return pxbin
+        pytest.skip("Skip binary - not found")
+    else:
         # module test
         return "px"
-    elif os.path.exists(pxbin):
-        # binary test
-        return pxbin
-    pytest.skip("Skip binary - not found")
 
 
 # CLI and env testing
-
-
-PARAMS_CLI_ENV = ["cli", "env"]
 
 
 @pytest.fixture(params=PARAMS_CLI_ENV)
@@ -113,6 +116,7 @@ def px_cli_env(request):
 def px_cli_env_none(request):
     # cli or env or none = 3
     return request.param
+
 
 # Debug
 
@@ -200,6 +204,7 @@ def px_password(px_cli_env, monkeypatch):
 
 # Basic CLI
 
+
 @pytest.fixture
 def px_basic_cli(px_bin, px_debug_none, px_port, httpbin_both):
     # px module or binary = 1 (run in separate tox envs)
@@ -207,9 +212,11 @@ def px_basic_cli(px_bin, px_debug_none, px_port, httpbin_both):
     # unique port for this worker = 1
     # with http and https testing = 2
     # 6 combinations
-    cmd = (f"{px_bin} {px_debug_none} --port={px_port}" +
-           f" --test=all:{httpbin_both.url}")
+    cmd = (
+        f"{px_bin} {px_debug_none} --port={px_port}" + f" --test=all:{httpbin_both.url}"
+    )
     return cmd
+
 
 # Test auth
 

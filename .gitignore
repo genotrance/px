@@ -69,3 +69,4 @@ _*.stats
 *.crt
 .env
 .tox
+uv.lock

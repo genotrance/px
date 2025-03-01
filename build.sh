@@ -88,7 +88,7 @@ setup_venv() {
         . $VENV/bin/activate
     fi
     if [ "$FRESH" = "True" ]; then
-        $UV pip install --upgrade pip pymcurl setuptools build wheel cffi $TESTDEPS -f mcurllib
+        $UV pip install --upgrade pip setuptools build wheel cffi $TESTDEPS
     fi
 }
 

@@ -89,18 +89,17 @@ def px_chain(px_port, tmp_path_factory):
 PARAMS_CLI_ENV = ["cli", "env"]
 
 
-@pytest.fixture(params=PARAMS_CLI_ENV)
-def px_bin(request):
+@pytest.fixture
+def px_bin():
     # px module or binary = 2
-    if request.param == "env":
-        pxbin = os.getenv("PXBIN")
-        if pxbin is not None and os.path.exists(pxbin):
-            # binary test
-            return pxbin
-        pytest.skip("Skip binary - not found")
-    else:
+    pxbin = os.getenv("PXBIN")
+    if pxbin is None:
         # module test
         return "px"
+    elif os.path.exists(pxbin):
+        # binary test
+        return pxbin
+    pytest.skip("Skip binary - not found")
 
 
 # CLI and env testing

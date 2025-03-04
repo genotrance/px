@@ -88,7 +88,7 @@ setup_venv() {
         . $VENV/bin/activate
     fi
     if [ "$FRESH" = "True" ]; then
-        $UV pip install --upgrade pip setuptools build wheel cffi $TESTDEPS
+        $UV pip install --upgrade pip pymcurl setuptools build wheel cffi $TESTDEPS -f mcurllib
     fi
 }
 
@@ -161,6 +161,35 @@ get_python_path() {
     fi
 }
 
+isolate() {
+  ISOLATED=$TMP/pxbuild
+  echo "Isolating to $ISOLATED"
+  rm -rf $ISOLATED
+  mkdir -p $ISOLATED
+  cp -r -t $ISOLATED *.txt px px.* *.toml *.md tools.py
+  cp -r mcurllib $ISOLATED/. || true
+  cd $ISOLATED
+}
+
+deisolate() {
+  ISOLATED=$TMP/pxbuild
+  echo "Copying artifacts from $ISOLATED"
+
+  cd -
+
+  # Copy px wheel
+  if [ ! -d "wheel" ]; then
+    cp -r $ISOLATED/wheel .
+  fi
+
+  # Copy px.dist wheels
+  whls=$ISOLATED/`dirname $1`
+  rm -rf $1
+  if [ -d "$whls" ]; then
+    cp -r $whls .
+  fi
+}
+
 if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
     ARCH=`uname -m`
 
@@ -175,8 +204,8 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
             ABI="musl"
         fi
 
-        export PXBIN="/px/px.dist-linux-$ABI-$ARCH/px.dist/px"
-        export WHEELS="/px/px.dist-linux-$ABI-$ARCH-wheels/px.dist"
+        export PXBIN="./px.dist-linux-$ABI-$ARCH/px.dist/px"
+        export WHEELS="./px.dist-linux-$ABI-$ARCH-wheels/px.dist"
 
         if [ "$DISTRO" = "alpine" ]; then
             if [ "$DOCKERBUILD" = "yes" ]; then
@@ -261,8 +290,8 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
             . ~/.local/bin/env
         fi
     elif [ "$OS" = "darwin" ]; then
-        export PXBIN="`pwd`/px.dist-mac-$ARCH/px.dist/px"
-        export WHEELS="`pwd`/px.dist-mac-$ARCH-wheels/px.dist"
+        export PXBIN="./px.dist-mac-$ARCH/px.dist/px"
+        export WHEELS="./px.dist-mac-$ARCH-wheels/px.dist"
     
         # Install brew
         if ! brew -v > /dev/null; then
@@ -275,8 +304,8 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
 
         # Python versions should be manually installed using python.org installers
     elif [ "$OS" = "windows" ]; then
-        export PXBIN="`pwd`/px.dist-windows-amd64/px.dist/px.exe"
-        export WHEELS="`pwd`/px.dist-windows-amd64-wheels/px.dist"
+        export PXBIN="./px.dist-windows-amd64/px.dist/px.exe"
+        export WHEELS="./px.dist-windows-amd64-wheels/px.dist"
 
         # requires busybox and uv installed via scoop
         # uv will install Python in setup_venv if needed
@@ -353,8 +382,8 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
         fi
 
         if [ "$DEPS" = "yes" ] || [ ! -d "$WHEELS" ]; then
-            # Also run if $WHEELS does not exist since NUITKA depends on wheels
-            rm -rf $WHEELS
+            # Run in temp to enable parallel builds
+            isolate
 
             # Run for all Python versions if manylinux/musllinux
             for pyver in $PYVERS
@@ -384,6 +413,9 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
 
             # Package all wheels
             python tools.py --depspkg
+
+            # Copy artifacts back to source dir
+            deisolate $WHEELS
         fi
 
         if [ "$NUITKA" = "yes" ]; then
@@ -404,6 +436,9 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
     fi
 
     if [ "$TEST" = "yes" ]; then
+        export PXBIN=`pwd`/$PXBIN
+        export WHEELS=`pwd`/$WHEELS
+
         if [ ! -d "$WHEELS" ]; then
             echo "Wheels missing => ./build.sh -b -d"
             # Start shell
@@ -415,12 +450,12 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
 
         # Run tests
         if [ "$OS" = "windows" ]; then
-            UV_PYTHON_PREFERENCE="only-managed"
+            export UV_PYTHON_PREFERENCE="only-managed"
         else
-            UV_PYTHON_PREFERENCE="only-system"
+            export UV_PYTHON_PREFERENCE="only-system"
         fi
         PXWHEEL=`ls -d $WHEELS/px_proxy*.whl`
-        python -m tox -e binary --installpkg $PXWHEEL --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" --workdir $TMP | tee out.log
+        python -m tox --installpkg $PXWHEEL --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" --workdir $TMP | tee out.log
     fi
 
     if [ -z "$BUILD" ] && [ -z "$TEST" ]; then

@@ -3,6 +3,7 @@
 import concurrent.futures
 import multiprocessing
 import os
+import platform
 import signal
 import socket
 import socketserver
@@ -77,6 +78,7 @@ def print_banner(listen, port):
             if STATE.config.getint("settings", "foreground") == 0:
                 windows.detach_console(STATE)
 
+    dprint(f"Px v{__version__}")
     for section in STATE.config.sections():
         for option in STATE.config.options(section):
             dprint(section + ":" + option + " = " + STATE.config.get(

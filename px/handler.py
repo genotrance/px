@@ -287,7 +287,8 @@ class PxHandler(http.server.BaseHTTPRequestHandler):
         # Find proxy
         servers, netloc, path = STATE.wproxy.find_proxy_for_url(
             ("https://" if "://" not in self.path else "") + self.path)
-        if servers[0] == wproxy.DIRECT:
+        if len(servers) == 0 or servers[0] == wproxy.DIRECT:
+            # Fix #225 - empty list falls back to DIRECT
             dprint(self.curl.easyhash + ": Direct connection")
             return netloc
         else:

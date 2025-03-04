@@ -33,7 +33,8 @@ MODES = [
 DIRECT = ("DIRECT", 80)
 
 # Debug shortcut
-dprint = lambda x: None
+def dprint(_):
+    pass
 
 def parse_proxy(proxystrs):
     """

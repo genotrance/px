@@ -56,7 +56,7 @@ envlist = ["py38", "py39", "py310", "py311", "py312", "py313", "binary"]
 
 [tool.tox.env_run_base]
 commands_pre = [["uv", "pip", "install", "keyring", "psutil", "pytest", "pytest-xdist", "pytest-httpbin"]]
-commands = [["pytest", "-n", "auto", "tests"]]
+commands = [["pytest", "-n", "4", "tests"]]
 passenv = ["DBUS_SESSION_BUS_ADDRESS", "UV_PYTHON_PREFERENCE"]
 
 [tool.tox.env.binary]

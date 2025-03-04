@@ -14,8 +14,11 @@ except ImportError:
     print("Requires module quickjs")
     sys.exit(1)
 
+
 # Debug shortcut
-dprint = lambda x: None
+def dprint(_):
+    pass
+
 
 class Pac:
     "Load and run PAC files using quickjs"
@@ -23,7 +26,7 @@ class Pac:
     _ctxt = None
     _lock = None
 
-    def __init__(self, debug_print = None):
+    def __init__(self, debug_print=None):
         "Initialize a quickjs context with default PAC utility functions"
         global dprint
         if debug_print is not None:
@@ -52,14 +55,19 @@ class Pac:
     def load(self, pac_data, pac_encoding):
         "Load PAC data in specified encoding into this context"
         pac_encoding = pac_encoding or "utf-8"
-        text = pac_data.decode(pac_encoding)
+        try:
+            text = pac_data.decode(pac_encoding)
+        except UnicodeDecodeError as exc:
+            dprint(f"PAC file not encoded in {pac_encoding}")
+            dprint("Use --pac_encoding or proxy:pac_encoding in px.ini to change")
+            return
+
         try:
             with self._lock:
                 self._ctxt.eval(text)
         except quickjs.JSException as exc:
-            dprint(f"PAC file parsing failed - syntax error or file not encoded in {pac_encoding}")
-            dprint("Use --pac_encoding or proxy:pac_encoding in px.ini to change")
-            raise exc
+            dprint("PAC file parsing error")
+            return
 
     def load_jsfile(self, jsfile, pac_encoding):
         "Load specified JS file into this context"
@@ -75,18 +83,30 @@ class Pac:
         c.set_follow()
         ret = c.perform()
         if ret == 0:
-            self.load(c.get_data(None), pac_encoding)
+            ret, resp = c.get_response()
+            if ret == 0 and resp < 400:
+                self.load(c.get_data(None), pac_encoding)
+            else:
+                dprint(f"Failed to access PAC url: {jsurl}: {ret}, {resp}")
         else:
-            dprint(f"Failed to load PAC url: {jsurl}\n{ret}, {c.errstr}")
+            dprint(f"Failed to load PAC url: {jsurl}: {ret}, {c.errstr}")
 
     def find_proxy_for_url(self, url, host):
         """
         Return comma-separated list of proxy servers to use for this url
             DIRECT can be returned as one of the options in the response
+            DIRECT is returned if PAC file is not loading
         """
         dprint(f"Finding proxy for {url}")
+        proxies = "DIRECT"
         with self._lock:
-            proxies = self._ctxt.eval("FindProxyForURL")(url, host)
+            try:
+                proxies = self._ctxt.eval("FindProxyForURL")(url, host)
+            except quickjs.JSException as exc:
+                # Return DIRECT - cannot crash Px due to PAC file issues
+                # which could happen in reload_proxy()
+                dprint(f"FindProxyForURL failed, issues loading PAC file: {exc}")
+                dprint("Assuming DIRECT connection as fallback")
 
         # Fix #160 - convert PAC return values into CURLOPT_PROXY schemes
         for ptype in ["PROXY", "HTTP"]:

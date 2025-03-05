@@ -6,6 +6,7 @@ v0.10.1 - TBD
 - Merged PR #237 - handle pid reuse and support for pwsh
 - Fixed #225, #245 - better handling of PAC file failures and fallback to DIRECT
   mode when they happen
+- Fixed #208 - try GSS-API authentication on all OS if supported by libcurl
 
 v0.10.0 - 2025-01-10
 - Replaced ctypes based libcurl backend with pymcurl which uses cffi and includes

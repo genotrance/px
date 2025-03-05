@@ -106,11 +106,13 @@ def set_curl_auth(curl, auth):
                 # Use keyring to get password
                 pwd = keyring.get_password("Px", key)
         if len(key) == 0:
-            if sys.platform == "win32":
-                dprint(curl.easyhash + ": Using SSPI to login")
+            # No username, try SSPI / GSS-API
+            features = mcurl.get_curl_features()
+            if "SSPI" in features or "GSS-API" in features:
+                dprint(curl.easyhash + ": Using SSPI/GSS-API to login")
                 key = ":"
             else:
-                dprint("SSPI not available and no username configured - no auth")
+                dprint("SSPI/GSS-API not available and no username configured - no auth")
                 return
         curl.set_auth(user=key, password=pwd, auth=auth)
     else:

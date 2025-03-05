@@ -157,6 +157,7 @@ get_python_path() {
         pydotver=$(add_dot $1)
         echo /usr/local/bin/python$pydotver
     elif [ "$OS" = "windows" ]; then
+        $UV python install $1
         echo `$UV python find $1`
     fi
 }

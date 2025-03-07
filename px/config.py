@@ -843,27 +843,19 @@ class State:
 
         ###
         # Discover proxy info from OS
-
-        servers = wproxy.parse_proxy(self.config.get("proxy", "server"))
-        if len(servers) != 0:
-            self.wproxy = wproxy.Wproxy(
-                wproxy.MODE_CONFIG, servers, noproxy=self.noproxy, debug_print=dprint)
-        elif len(self.pac) != 0:
-            pac_encoding = self.config.get("proxy", "pac_encoding")
-            self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [
-                                        self.pac], noproxy=self.noproxy, pac_encoding=pac_encoding, debug_print=dprint)
-        else:
-            self.wproxy = wproxy.Wproxy(
-                noproxy=self.noproxy, debug_print=dprint)
-            self.proxy_last_reload = time.time()
+        self.reload_proxy()
 
         # Curl multi object to manage all easy connections
         self.mcurl = mcurl.MCurl(debug_print=dprint)
 
     def reload_proxy(self):
-        # Return if proxies specified in Px config
-        if self.wproxy.mode in [wproxy.MODE_CONFIG, wproxy.MODE_CONFIG_PAC]:
-            return
+        if self.wproxy is not None:
+            if self.wproxy.mode in [wproxy.MODE_CONFIG, wproxy.MODE_ENV]:
+                # Config file entries not reloaded, env for running process should not change
+                return
+            elif self.wproxy.mode == wproxy.MODE_CONFIG_PAC and not self.pac.startswith("http"):
+                # Local PAC file not reloaded
+                return
 
         # Do locking to avoid updating globally shared State object by multiple
         # threads simultaneously
@@ -876,8 +868,18 @@ class State:
                 return
 
             # Reload proxy information
-            self.wproxy = wproxy.Wproxy(
-                noproxy=self.noproxy, debug_print=dprint)
+            dprint("Reloading proxy")
+
+            servers = wproxy.parse_proxy(self.config.get("proxy", "server"))
+            if len(servers) != 0:
+                self.wproxy = wproxy.Wproxy(
+                    wproxy.MODE_CONFIG, servers, noproxy=self.noproxy, debug_print=dprint)
+            elif len(self.pac) != 0:
+                pac_encoding = self.config.get("proxy", "pac_encoding")
+                self.wproxy = wproxy.Wproxy(wproxy.MODE_CONFIG_PAC, [
+                                            self.pac], noproxy=self.noproxy, pac_encoding=pac_encoding, debug_print=dprint)
+            else:
+                self.wproxy = wproxy.Wproxy(noproxy=self.noproxy, debug_print=dprint)
 
             self.proxy_last_reload = time.time()
 

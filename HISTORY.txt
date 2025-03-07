@@ -6,6 +6,9 @@ v0.10.1 - TBD
 - Merged PR #237 - handle pid reuse and support for pwsh
 - Fixed #225, #245 - better handling of PAC file failures and fallback to DIRECT
   mode when they happen
+- Replaced quickjs Context with Function as recommended in #206 to avoid thread
+  safety issues in PAC handling
+- Proxy reload support also for MODE_CONFIG_PAC if loading a PAC URL
 - Fixed #208 - try GSS-API authentication on all OS if supported by libcurl
 
 v0.10.0 - 2025-01-10

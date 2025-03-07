@@ -485,7 +485,7 @@ Configuration:
 
   --proxyreload= | PX_PROXYRELOAD= | settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60
-    Proxy info reloaded from manual proxy info defined in Internet Options
+    Proxy info reloaded from Internet Options or --pac URL
 
   --foreground | PX_FOREGROUND= | settings:foreground=
   Run in foreground when compiled or run with pythonw.exe. 0 or 1, default: 0

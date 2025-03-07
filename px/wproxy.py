@@ -147,6 +147,10 @@ class _WproxyBase:
             # MODE_CONFIG or MODE_CONFIG_PAC
             self.mode = mode
             self.servers = servers or []
+
+            if mode == MODE_CONFIG_PAC:
+                # Load PAC file
+                self.pac = Pac(self.servers[0], self.pac_encoding, debug_print = dprint)
         else:
             # MODE_ENV
             proxy = urllib.request.getproxies()
@@ -247,16 +251,7 @@ class _WproxyBase:
 
         if self.mode == MODE_CONFIG_PAC:
             # Return proxy from configured PAC URL/file
-            if self.pac is None:
-                # Load PAC file
-                self.pac = Pac(debug_print = dprint)
-                if self.servers[0].startswith("http"):
-                    self.pac.load_url(self.servers[0], self.pac_encoding)
-                else:
-                    self.pac.load_jsfile(self.servers[0], self.pac_encoding)
-
-            if self.pac is not None:
-                return parse_proxy(self.pac.find_proxy_for_url(url, netloc[0])), netloc, path
+            return parse_proxy(self.pac.find_proxy_for_url(url, netloc[0])), netloc, path
 
         return None, netloc, path
 

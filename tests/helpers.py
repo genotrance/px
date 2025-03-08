@@ -65,25 +65,24 @@ def quit_px(name, subp, cmd):
         # psutil.net_if_stats() is not supported on aarch64
         # --hostonly and --quit don't work
         proc = psutil.Process(subp.pid)
-        for child in proc.children(recursive=True):
-            child.kill()
+        children = proc.children(recursive=True)
+        children.append(proc)
+        for child in children:
             try:
-                child.wait(10)
-            except psutil.TimeoutExpired:
-                assert False, f"{name} failed to stop child process"
-        subp.kill()
-        goodret = -9
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        gone, alive = psutil.wait_procs(children, timeout=10)
     else:
         cmd = cmd + " --quit"
         print(f"{name} quit cmd: {cmd}\n")
         ret = os.system(cmd)
         assert ret == 0, f"Failed: Unable to --quit Px: {ret}"
         print(f"{name} Px --quit succeeded")
-        goodret = 0
 
     # Check exit code
     retcode = subp.wait()
-    assert retcode == goodret, f"{name} Px exited with {retcode}"
+    assert retcode == 0, f"{name} Px exited with {retcode}"
     print(f"{name} Px exited")
 
 

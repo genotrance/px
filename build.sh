@@ -456,7 +456,8 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
             export UV_PYTHON_PREFERENCE="only-system"
         fi
         PXWHEEL=`ls -d $WHEELS/px_proxy*.whl`
-        python -m tox --installpkg $PXWHEEL --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" --workdir $TMP | tee out.log
+        python -m tox --installpkg $PXWHEEL --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" --workdir $TMP || \
+          (echo "Tests failed ... Ctrl-C to exit" && sleep inf)
     fi
 
     if [ -z "$BUILD" ] && [ -z "$TEST" ]; then

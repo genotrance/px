@@ -167,7 +167,7 @@ isolate() {
   echo "Isolating to $ISOLATED"
   rm -rf $ISOLATED
   mkdir -p $ISOLATED
-  cp -r -t $ISOLATED *.txt px px.* *.toml *.md tools.py
+  cp -r *.txt px px.* *.toml *.md tools.py $ISOLATED
   cp -r mcurllib $ISOLATED/. || true
   cd $ISOLATED
 }

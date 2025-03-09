@@ -1,4 +1,4 @@
-v0.10.1 - TBD
+v0.10.1 - 2025-03-08
 - Fixed docker image to work correctly with command line flags, include kerberos
   packages
 - Merged PR #233 - force flag to overwrite existing installation of Px in the

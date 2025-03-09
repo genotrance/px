@@ -800,7 +800,7 @@ def main():
         if not os.path.exists("wheel"):
             wheel()
 
-        os.system("twine upload wheel/*.whl")
+        os.system("twine upload wheel/*")
 
     if "--post" in sys.argv:
         bins = glob.glob("px.dist*/px-v%s*" % __version__)

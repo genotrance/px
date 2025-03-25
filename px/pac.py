@@ -113,13 +113,15 @@ class Pac:
         dprint(f"Finding proxy for {url}")
         proxies = "DIRECT"
         self._load_pac()
-        try:
-            proxies = self.pac_find_proxy_for_url(url, host)
-        except quickjs.JSException as exc:
-            # Return DIRECT - cannot crash Px due to PAC file issues
-            # which could happen in reload_proxy()
-            dprint(f"FindProxyForURL failed, issues loading PAC file: {exc}")
-            dprint("Assuming DIRECT connection as fallback")
+        if self.pac_find_proxy_for_url is not None:
+            # Fix #246 - handle case where PAC file failed to load
+            try:
+                proxies = self.pac_find_proxy_for_url(url, host)
+            except quickjs.JSException as exc:
+                # Return DIRECT - cannot crash Px due to PAC file issues
+                # which could happen in reload_proxy()
+                dprint(f"FindProxyForURL failed, issues loading PAC file: {exc}")
+                dprint("Assuming DIRECT connection as fallback")
 
         # Fix #160 - convert PAC return values into CURLOPT_PROXY schemes
         for ptype in ["PROXY", "HTTP"]:

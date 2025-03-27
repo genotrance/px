@@ -1,3 +1,7 @@
+v0.10.2 - TBD
+- Fixed #246 to fix crash caused by PAC hostname resolution
+- Added gui script `pxw.exe` to run Px in the background on Windows fixing #203
+
 v0.10.1 - 2025-03-08
 - Fixed docker image to work correctly with command line flags, include kerberos
   packages

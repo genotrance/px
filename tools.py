@@ -394,35 +394,38 @@ def embed():
         # Remove pip
         os.system(f"{executable} -m pip uninstall setuptools wheel pip -y")
 
-    # Move px.exe and update interpreter path
+    # Move px.exe and pxw.exe to root
     pxexe = os.path.join(dist, "px.exe")
     os.rename(os.path.join(dist, "Scripts", "px.exe"), pxexe)
+    pxwexe = os.path.join(dist, "pxw.exe")
+    os.rename(os.path.join(dist, "Scripts", "pxw.exe"), pxwexe)
 
-    # Update px.exe
-    with open(pxexe, "rb") as f:
-        data = f.read()
+    # Update interpreter path to relative sibling
+    for exe in [pxexe, pxwexe]:
+        with open(exe, "rb") as f:
+            data = f.read()
 
-    dataout = bytearray()
-    skip = False
-    for i, byte in enumerate(data):
-        if byte == 0x23 and data[i+1] == 0x21:  # !
-            if (data[i+2] >= 0x41 and data[i+2] <= 0x5a) or \
-                    (data[i+2] >= 0x61 and data[i+2] <= 0x7a):    # A-Za-z - drive letter
-                if data[i+3] == 0x3A:  # Colon
-                    skip = True
+        dataout = bytearray()
+        skip = False
+        for i, byte in enumerate(data):
+            if byte == 0x23 and data[i+1] == 0x21:  # !
+                if (data[i+2] >= 0x41 and data[i+2] <= 0x5a) or \
+                        (data[i+2] >= 0x61 and data[i+2] <= 0x7a):    # A-Za-z - drive letter
+                    if data[i+3] == 0x3A:  # Colon
+                        skip = True
+                        continue
+
+            if skip:
+                if byte == 0x0A:
+                    skip = False
+                    dataout += b"#!python.exe"
+                else:
                     continue
 
-        if skip:
-            if byte == 0x0A:
-                skip = False
-                dataout += b"#!python.exe"
-            else:
-                continue
+            dataout.append(byte)
 
-        dataout.append(byte)
-
-    with open(pxexe, "wb") as f:
-        f.write(dataout)
+        with open(exe, "wb") as f:
+            f.write(dataout)
 
     # Copy data files
     copy("px.ini HISTORY.txt LICENSE.txt README.md", dist)

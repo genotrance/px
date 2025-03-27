@@ -161,7 +161,7 @@ Configuration:
     Proxy info reloaded from Internet Options or --pac URL
 
   --foreground | PX_FOREGROUND= | settings:foreground=
-  Run in foreground when compiled or run with pythonw.exe. 0 or 1, default: 0
+  Run in foreground when run with pxw.exe or pythonw.exe. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 

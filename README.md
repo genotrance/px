@@ -43,9 +43,8 @@ On Windows, `scoop` can also be used to install Px:
 	scoop install px
 
 Once installed, Px can be run as follows:
-- Running `px` directly
-- In the background: `pythonw -m px`
-- In the foreground in a console window: `python -m px`
+- Running `px` or `python -m px`
+- In the background on Windows: `pxw` or `pythonw -m px`
 - As a wrapped service using [WinSW](https://github.com/winsw/winsw)
 
 ### Running as a windows service using WinSW
@@ -328,9 +327,6 @@ NOTE: Command line parameters passed with `--install` are not saved for use on
 startup. The `--save` flag or manual editing of `px.ini` is required to provide
 configuration to Px on startup.
 
-NOTE: When using the Px binary distribution on Windows, run `.\pythonw -m px --install`
-instead of using `px.exe`. This will avoid the popup console window on startup.
-
 ## Usage
 
 ```
@@ -488,7 +484,7 @@ Configuration:
     Proxy info reloaded from Internet Options or --pac URL
 
   --foreground | PX_FOREGROUND= | settings:foreground=
-  Run in foreground when compiled or run with pythonw.exe. 0 or 1, default: 0
+  Run in foreground when run with pxw.exe or pythonw.exe. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 

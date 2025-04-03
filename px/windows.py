@@ -27,16 +27,33 @@ def is_installed():
         return False
     finally:
         winreg.CloseKey(runkey)
-        return True
+    return True
 
-def install(script_cmd, force_overwrite):
+def install(script_cmd, pxini, force_overwrite):
     "Install Px to Windows registry if not already"
     if not is_installed() or force_overwrite:
+        # Adjust cmd to run in the background
+        cmd = script_cmd
+        dirname, basename = os.path.split(cmd)
+        if basename.lower() in ["px", "px.exe"]:
+            cmd = os.path.join(dirname, "pxw.exe")
+        if not os.path.exists(cmd):
+            pprint(f"Cannot find {cmd}")
+            sys.exit(config.ERROR_INSTALL)
+        if " " in cmd:
+            cmd = f'"{cmd}"'
+
+        # Add --config to cmd
+        if " " in pxini:
+            cmd += f' "--config={pxini}"'
+        else:
+            cmd += f' --config={pxini}'
+
+        # Write to registry
         runkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
             winreg.KEY_WRITE)
-        winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ,
-            script_cmd)
+        winreg.SetValueEx(runkey, "Px", 0, winreg.REG_EXPAND_SZ, cmd)
         winreg.CloseKey(runkey)
         pprint("Px installed successfully")
     else:

@@ -1,6 +1,15 @@
 v0.10.2 - TBD
-- Fixed #246 to fix crash caused by PAC hostname resolution
-- Added gui script `pxw.exe` to run Px in the background on Windows fixing #203
+- Fixed #246 - resolved crash caused by PAC hostname resolution
+- Added gui script `pxw.exe` to run Px in the background on Windows, addressing
+  #203, #213 and #235 by providing correct path for px.ini and logs.
+- Enhanced `px --install` to write `--config=path` into the registry to support
+  non-standard locations for `px.ini`
+- Fixed #217 - updated `px --install` to write `pxw` into the registry to run
+  Px in the background on Windows startup
+- Added support to read and write px.ini from the user config directory
+- Fixed #218 - improved config load order to cwd, user config or script path
+  if file already exists. If --save, the file should be writable, otherwise use
+  the user config directory.
 
 v0.10.1 - 2025-03-08
 - Fixed docker image to work correctly with command line flags, include kerberos

@@ -13,7 +13,9 @@ Usage:
 
 Actions:
   --save
-  Save configuration to file specified with --config or px.ini in working directory
+  Save configuration to file specified with --config or px.ini in working,
+  user config or script directory if present and writable or else use user
+  config directory
     Allows setting up Px config directly from command line
     Values specified on CLI override any values in existing config file
     Values not specified on CLI or config file are set to defaults
@@ -50,8 +52,9 @@ Actions:
 
 Configuration:
   --config= | PX_CONFIG=
-  Specify config file. Valid file path, default: px.ini in working directory
-  or script directory
+  Specify config file. Valid file path, default: px.ini in working, user config
+  or script directory if present. If --save, existing file should be writable
+  else use user config directory
 
   --proxy=  --server= | PX_SERVER= | proxy:server=
   NTLM server(s) to connect through. IP:port, hostname:port
@@ -161,7 +164,7 @@ Configuration:
     Proxy info reloaded from Internet Options or --pac URL
 
   --foreground | PX_FOREGROUND= | settings:foreground=
-  Run in foreground when run with pxw.exe or pythonw.exe. 0 or 1, default: 0
+  Run in foreground when compiled or frozen. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 

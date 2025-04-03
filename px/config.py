@@ -27,8 +27,9 @@ PxErrors = int
     ERROR_QUIT,       # 3
     ERROR_TEST,       # 4
     ERROR_PORTINUSE,  # 5
-    ERROR_UNKNOWN,    # 6
-) = range(7)
+    ERROR_INSTALL,    # 6
+    ERROR_UNKNOWN,    # 7
+) = range(8)
 
 try:
     import mcurl
@@ -86,9 +87,14 @@ LogLocation = int
 # Get info
 
 
+def get_norm_path(path):
+    "Get normalized path, relative to cwd if not absolute"
+    return os.path.normpath(os.path.join(os.getcwd(), path))
+
+
 def get_script_path():
     "Get full path of running script or compiled executable"
-    return os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
+    return get_norm_path(sys.argv[0])
 
 
 def get_script_dir():
@@ -110,6 +116,20 @@ def get_script_cmd():
     # Case: "px.exe" from pip
     # Case: "px.exe" from nuitka
     return spath
+
+
+def get_config_dir():
+    "Get OS specific config directory"
+    if sys.platform == "win32":
+        config_dir = os.getenv("APPDATA", os.path.join(
+            os.path.expanduser("~"), "AppData", "Roaming"))
+    elif sys.platform == "darwin":
+        config_dir = os.path.join(
+            os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        config_dir = os.getenv("XDG_CONFIG_HOME",
+            os.path.join(os.path.expanduser("~"), ".config"))
+    return os.path.join(config_dir, "px")
 
 
 def get_logfile(location):
@@ -644,6 +664,10 @@ class State:
             callback(val)
 
     def save(self):
+        "Save config to file"
+        path = os.path.dirname(self.ini)
+        if not os.path.exists(path):
+            os.makedirs(path)
         with open(self.ini, "w") as cfgfile:
             self.config.write(cfgfile)
         pprint("Saved config to " + self.ini + "\n")
@@ -727,10 +751,10 @@ class State:
         is_save = "save" in flags or "save" in env
         if "config" in flags:
             # From CLI
-            self.ini = flags["config"]
+            self.ini = get_norm_path(flags["config"])
         elif "config" in env:
             # From environment
-            self.ini = env["config"]
+            self.ini = get_norm_path(env["config"])
 
         if len(self.ini) != 0:
             if not (os.path.exists(self.ini) or is_save):
@@ -738,18 +762,38 @@ class State:
                 pprint(f"Could not find config file: {self.ini}")
                 sys.exit(ERROR_CONFIG)
         else:
-            # Default "CWD/px.ini"
-            cwd = os.getcwd()
-            path = os.path.join(cwd, "px.ini")
-            if os.path.exists(path) or is_save:
-                self.ini = path
+            # CWD/px.ini - instance
+            cwd_ini = os.path.join(os.getcwd(), "px.ini")
+            cw_exists = os.path.exists(cwd_ini)
+
+            # config/px.ini - user
+            cfg_ini = os.path.join(get_config_dir(), "px.ini")
+            co_exists = os.path.exists(cfg_ini)
+
+            # script_dir/px.ini - site
+            script_ini = os.path.join(get_script_dir(), "px.ini")
+            sp_exists = os.path.exists(script_ini)
+
+            if is_save:
+                # Find existing config to overwrite
+                cw_writable = os.access(cwd_ini, os.W_OK)
+                sp_writable = os.access(script_ini, os.W_OK)
+
+                if cw_exists and cw_writable: # CWD/px.ini
+                    self.ini = cwd_ini
+                elif co_exists: # config/px.ini
+                    self.ini = cfg_ini
+                elif sp_exists and sp_writable: # script_dir/px.ini
+                    self.ini = script_ini
+                else: # Default config/px.ini
+                    self.ini = cfg_ini
             else:
-                # Alternate "script_dir/px.ini"
-                script_dir = get_script_dir()
-                if script_dir != cwd:
-                    path = os.path.join(script_dir, "px.ini")
-                    if os.path.exists(path):
-                        self.ini = path
+                if cw_exists: # CWD/px.ini
+                    self.ini = cwd_ini
+                elif co_exists: # config/px.ini
+                    self.ini = cfg_ini
+                elif sp_exists: # script_dir/px.ini
+                    self.ini = script_ini
 
         # Load configuration file
         self.config = configparser.ConfigParser()
@@ -823,7 +867,7 @@ class State:
 
         if sys.platform == "win32":
             if "--install" in sys.argv:
-                windows.install(get_script_cmd(), '--force' in sys.argv)
+                windows.install(get_script_cmd(), self.ini, '--force' in sys.argv)
             elif "--uninstall" in sys.argv:
                 windows.uninstall()
 

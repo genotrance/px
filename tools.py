@@ -418,7 +418,8 @@ def embed():
             if skip:
                 if byte == 0x0A:
                     skip = False
-                    dataout += b"#!python.exe"
+                    pybin = b".exe" if exe == pxexe else b"w.exe"
+                    dataout += b"#!python" + pybin
                 else:
                     continue
 

@@ -293,7 +293,7 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
     elif [ "$OS" = "darwin" ]; then
         export PXBIN="./px.dist-mac-$ARCH/px.dist/px"
         export WHEELS="./px.dist-mac-$ARCH-wheels/px.dist"
-    
+
         # Install brew
         if ! brew -v > /dev/null; then
             bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"

@@ -52,24 +52,24 @@ Once installed, Px can be run as follows:
 Manually prepare and configure px to be able to run it and verify the connectivity.
 Download the executable WinSW-x64.exe from [WinSW](https://github.com/winsw/winsw). We are using 2.12.0.
 
-Place a minimal WinSW-x64.xml configuration file next to the executable. 
+Place a minimal WinSW-x64.xml configuration file next to the executable.
 ```
 <service>
-  
+
   <!-- ID of the service. It should be unique across the Windows system-->
   <id>Px</id>
   <!-- Display name of the service -->
   <name>Px Service (powered by WinSW)</name>
   <!-- Service description -->
   <description>This service is a service created from a minimal configuration</description>
-  
+
   <!-- Path to the executable, which should be started -->
   <executable>D:\px\px.exe</executable>
 
 </service>
 ```
 
-Run 
+Run
 ```WinSW-x64.exe install WinSW-x64.xml``` from elevated administrator cmd. You should now have a new service on your computer named `Px Service (powered by WinSW)`.
 You can run it from Services window or run ```WinSW-x64.exe start WinSW-x64.xml```.
 
@@ -117,8 +117,10 @@ If Px has been installed to the Windows registry to start on boot, it should be
 uninstalled before removal:
 
 	python -m px --uninstall
+  px --uninstall
 
-Px can then be uninstalled using `pip` as follows:
+If Px is installed to an existing Python installation using `pip`, it can be
+uninstalled as follows:
 
 	python -m pip uninstall px-proxy
 
@@ -202,6 +204,10 @@ Configuration can be specified in multiple ways, listed in order of precedence:
   - In the Px directory
 - Configuration file `px.ini`
   - In the working directory
+  - In the user config directory
+    - Windows: $APPDATA\Roaming\px
+    - Linux: ~/.config/px
+    - Mac: ~/Library/Application Support/px
   - In the Px directory
 
 There are many configuration options to tweak - refer to the [Usage](#usage)
@@ -314,6 +320,13 @@ authenticating proxy for smaller setups.
 
 The configuration file `px.ini` can be created or updated from the command line
 using `--save`.
+- Px will save any settings on the command line to `--config=path/px.ini` or to
+  `PX_CONFIG` if specified
+- If not, it will load `px.ini` from the working, user config or Px directory if
+  it exists and update it with any settings provided
+  - If the file is not writable, it will try the next location in order
+  - If no `px.ini` is found or existing ones are not writable, it will default
+    to the user config directory.
 
 The binary distribution of Px runs in the background once started and can be
 quit by running `px --quit`. When running in the foreground, use `CTRL-C`.
@@ -323,9 +336,15 @@ Px can also be setup to automatically run on startup on Windows with the
 can be removed with `--uninstall`. Use `--force` to overwrite an existing entry
 in the registry.
 
-NOTE: Command line parameters passed with `--install` are not saved for use on
-startup. The `--save` flag or manual editing of `px.ini` is required to provide
-configuration to Px on startup.
+  pxw --install
+
+Command line parameters passed with `--install` are not saved for use on startup.
+The `--save` flag or manual editing of `px.ini` is required to provide configuration
+to Px on startup.
+
+If `px.ini` is at a non-default location, it should be installed as follows:
+
+  pxw --install --config=path/px.ini
 
 ## Usage
 
@@ -336,7 +355,9 @@ python -m px [FLAGS]
 
 Actions:
   --save
-  Save configuration to file specified with --config or px.ini in working directory
+  Save configuration to file specified with --config or px.ini in working,
+  user config or script directory if present and writable or else use user
+  config directory
     Allows setting up Px config directly from command line
     Values specified on CLI override any values in existing config file
     Values not specified on CLI or config file are set to defaults
@@ -373,8 +394,9 @@ Actions:
 
 Configuration:
   --config= | PX_CONFIG=
-  Specify config file. Valid file path, default: px.ini in working directory
-  or script directory
+  Specify config file. Valid file path, default: px.ini in working, user config
+  or script directory if present. If --save, existing file should be writable
+  else use user config directory
 
   --proxy=  --server= | PX_SERVER= | proxy:server=
   NTLM server(s) to connect through. IP:port, hostname:port
@@ -484,7 +506,7 @@ Configuration:
     Proxy info reloaded from Internet Options or --pac URL
 
   --foreground | PX_FOREGROUND= | settings:foreground=
-  Run in foreground when run with pxw.exe or pythonw.exe. 0 or 1, default: 0
+  Run in foreground when compiled or frozen. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is
     available for further commands. CTRL-C in the console will exit Px
 

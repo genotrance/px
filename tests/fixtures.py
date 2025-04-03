@@ -201,6 +201,17 @@ def px_password(px_cli_env, monkeypatch):
         return "Keyring password=" + PARAMS_PASSWORD
 
 
+# px.ini locations
+
+
+LOCATIONS = ["cwd", "config", "script_dir", "custom"]
+
+
+@pytest.fixture(params=LOCATIONS)
+def pxini_location(request):
+    return request.param
+
+
 # Basic CLI
 
 

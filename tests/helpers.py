@@ -139,3 +139,12 @@ def setup_keyring(username, password):
         return
     keyring.set_password("Px", username, password)
     keyring.set_password("PxClient", username, password)
+
+
+def touch(path):
+    parent_dir = os.path.dirname(path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+    print("Writing " + path)
+    with open(path, "w") as f:
+        f.write("")

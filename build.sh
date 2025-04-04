@@ -520,6 +520,12 @@ else
             echo "REMOTE_SSH not configured"
         fi
 
+        # If $IMAGE = glibc, error since keyring doesn't work
+        if [ "$IMAGE" = "glibc" ]; then
+            echo "keyring does not work on CentOS"
+            exit
+        fi
+
         # Which image to test
         if [ -z "$IMAGE" ]; then
             IMAGE="alpine ubuntu debian opensuse/tumbleweed"

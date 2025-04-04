@@ -20,7 +20,7 @@ def monkeysession():
 @pytest.fixture(scope="session")
 def px_port(request):
     # unique port for this worker = 1
-    port = 3128
+    port = 3148
     try:
         worker_id = request.config.workerinput.get("workerid", "gw0")
 

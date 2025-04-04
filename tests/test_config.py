@@ -3,11 +3,10 @@ import os
 import shutil
 import subprocess
 import unittest.mock
-import winreg
 
 import pytest
 
-from px import config, windows
+from px import config
 
 from fixtures import *
 from helpers import *
@@ -107,7 +106,8 @@ def config_cleanup(backup, pxini_path):
         dirname = os.path.dirname(pxini_path)
         pxinibak_path = os.path.join(dirname, "px.ini.bak")
         if os.path.exists(pxinibak_path):
-            os.remove(pxini_path)
+            if os.path.exists(pxini_path):
+                os.remove(pxini_path)
             os.rename(pxinibak_path, pxini_path)
     elif os.path.exists(pxini_path):
         # Other tests don't have px.ini
@@ -131,7 +131,7 @@ def test_save(px_bin, pxini_location, monkeypatch, tmp_path):
     for name, value in values:
         cmd += f" --{name}={value}"
     with change_dir(tmp_path):
-        p = subprocess.run(cmd, stdout=None, env=env)
+        p = subprocess.run(cmd, shell=True, stdout=None, env=env)
         ret = p.returncode
     assert ret == 0, f"Px exited with {ret}"
 
@@ -172,6 +172,7 @@ def test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path
     mock_DeleteValue = unittest.mock.Mock()
 
     # Patch winreg
+    import winreg
     monkeypatch.setattr(winreg, "OpenKey", mock_OpenKey)
     monkeypatch.setattr(winreg, "QueryValueEx", mock_QueryValueEx)
     monkeypatch.setattr(winreg, "SetValueEx", mock_SetValueEx)
@@ -183,6 +184,7 @@ def test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path
     px_bin_full = shutil.which(px_bin)
     dirname = os.path.dirname(px_bin_full)
     try:
+        from px import windows
         windows.install(px_bin_full, pxini_path, False)
     except SystemExit:
         pass

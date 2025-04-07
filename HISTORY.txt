@@ -1,4 +1,4 @@
-v0.10.2 - TBD
+v0.10.2 - 2025-04-07
 - Fixed #246 - resolved crash caused by PAC hostname resolution
 - Added gui script `pxw.exe` to run Px in the background on Windows, addressing
   #203, #213 and #235 by providing correct path for px.ini and logs.

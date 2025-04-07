@@ -206,10 +206,32 @@ def get_curl():
 # Build
 
 
+def redo_wheel():
+    # Get the .whl file in the wheel directory
+    wheel_files = glob.glob("wheel/px_proxy*.whl")
+    if not wheel_files:
+        # No .whl files found - need to rebuild
+        return True
+
+    # Get the oldest .whl file mtime
+    oldest_wheel_file = min(wheel_files, key=os.path.getmtime)
+    wheel_file_mtime = os.path.getmtime(oldest_wheel_file)
+
+    # Get all .py files in the px directory
+    py_files = glob.glob("px/*.py")
+
+    # Check if any .py file is newer than the .whl file
+    for py_file in py_files:
+        if os.path.getmtime(py_file) > wheel_file_mtime:
+            return True
+
+    return False
+
+
 def wheel():
     # Create wheel
     rmtree("build px_proxy.egg-info")
-    if not os.path.exists("wheel/" + WHEEL):
+    if redo_wheel():
         rmtree("wheel")
         if os.system(sys.executable + " -m build -s -w -o wheel --installer=uv") != 0:
             print("Failed to build wheel")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "px-proxy"
-version = "0.10.2"
+version = "0.10.3"
 description = "An HTTP proxy server to automatically authenticate through an NTLM proxy"
 authors = [
   {name = "Ganesh Viswanathan", email = "dev@genotrance.com"}

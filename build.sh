@@ -305,7 +305,7 @@ if [ -f "/.dockerenv" ] || [ "$OS" = "darwin" ] || [ "$OS" = "windows" ]; then
 
         # Python versions should be manually installed using python.org installers
     elif [ "$OS" = "windows" ]; then
-        export PXBIN="./px.dist-windows-amd64/px.dist/px.exe"
+        export PXBIN="./px.dist-windows-amd64/px.dist/px"
         export WHEELS="./px.dist-windows-amd64-wheels/px.dist"
 
         # requires busybox and uv installed via scoop
@@ -473,7 +473,7 @@ else
     # Build / start containers on Linux
 
     # Docker flags
-    DOCKERCMD="docker run -it --privileged -v `pwd`:/px -v /root/.ssh:/root/.ssh -w /px"
+    DOCKERCMD="docker run -it --privileged --network host -v `pwd`:/px -v /root/.ssh:/root/.ssh -w /px"
 
     # Detect architecture
     if [ -z "$ARCH" ]; then

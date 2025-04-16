@@ -37,9 +37,10 @@ def install(script_cmd, pxini, force_overwrite):
         dirname, basename = os.path.split(cmd)
         if basename.lower() in ["px", "px.exe"]:
             cmd = os.path.join(dirname, "pxw.exe")
-        if not os.path.exists(cmd):
-            pprint(f"Cannot find {cmd}")
-            sys.exit(config.ERROR_INSTALL)
+            if not os.path.exists(cmd):
+                # Fix #248 - check only if cmd was modified
+                pprint(f"Cannot find {cmd}")
+                sys.exit(config.ERROR_INSTALL)
         if " " in cmd:
             cmd = f'"{cmd}"'
 

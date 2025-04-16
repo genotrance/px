@@ -114,7 +114,7 @@ def config_cleanup(backup, pxini_path):
         os.remove(pxini_path)
 
 
-def test_save(px_bin, pxini_location, monkeypatch, tmp_path):
+def _test_save(px_bin, pxini_location, monkeypatch, tmp_path):
     cmd = f"{px_bin} --save"
     values = generate_config()
 
@@ -155,10 +155,15 @@ def test_save(px_bin, pxini_location, monkeypatch, tmp_path):
             assert False, f"Unknown key: {name}"
 
 
-def test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path):
+def test_save(px_bin, pxini_location, monkeypatch, tmp_path):
     if sys.platform != "win32":
-        pytest.skip("Windows only test")
+        _test_save(px_bin, pxini_location, monkeypatch, tmp_path)
+    else:
+        for i in ["", "w"]:
+            _test_save(px_bin + i, pxini_location, monkeypatch, tmp_path)
 
+
+def _test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path):
     # Setup config
     cmd = ""
     backup, _, env, pxini_path = config_setup(
@@ -189,8 +194,16 @@ def test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path
     except SystemExit:
         pass
     cmd = mock_SetValueEx.call_args.args[-1]
-    assert f"{dirname}\\pxw.exe" in cmd, f"Px path incorrect: {cmd} vs {dirname}\\pxw.exe"
+    assert f"{dirname}\\pxw" in cmd, f"Px path incorrect: {cmd} vs {dirname}\\pxw"
     assert f"--config={pxini_path}" in cmd, f"Config path incorrect: {cmd} vs {pxini_path}"
 
     # Cleanup
     config_cleanup(backup, pxini_path)
+
+
+def test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path):
+    if sys.platform != "win32":
+        pytest.skip("Windows only test")
+
+    for i in ["", "w"]:
+        _test_install(px_bin + i, pxini_location, monkeypatch, tmp_path_factory, tmp_path)

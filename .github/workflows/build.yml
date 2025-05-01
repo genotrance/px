@@ -1,0 +1,61 @@
+# This is a basic workflow to build px on various platforms
+name: Build px
+
+on:
+  push:
+    branches: [ test-gh-actions ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install cibuildwheel
+      - name: Build px
+        run: |
+          python -m cibuildwheel --output-dir wheelhouse
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheelhouse
+          path: wheelhouse
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install cibuildwheel
+      - name: Build px
+        run: |
+          python -m cibuildwheel --output-dir wheelhouse
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheelhouse
+          path: wheelhouse
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install cibuildwheel
+      - name: Build px
+        run: |
+          python -m cibuildwheel --output-dir wheelhouse
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheelhouse
+          path: wheelhouse

@@ -205,7 +205,7 @@ Configuration can be specified in multiple ways, listed in order of precedence:
 - Configuration file `px.ini`
   - In the working directory
   - In the user config directory
-    - Windows: $APPDATA\Roaming\px
+    - Windows: $APPDATA\px
     - Linux: ~/.config/px
     - Mac: ~/Library/Application Support/px
   - In the Px directory

@@ -145,13 +145,13 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Download wheels
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: wheels-${{ matrix.name }}
           path: px.dist-${{ matrix.name }}-wheels/px.dist/
 
       - name: Download sdist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: sdist
           path: wheel/
@@ -219,7 +219,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download binary artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: binary-${{ matrix.name }}
           path: ./
@@ -269,13 +269,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download all binary artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
           pattern: binary-*
 
       - name: Download sdist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: sdist
           path: artifacts/sdist/

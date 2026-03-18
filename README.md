@@ -22,7 +22,11 @@ Px uses libcurl and supports all the authentication mechanisms supported by
 python -m pip install px-proxy
 ```
 
-On Windows, [scoop](https://scoop.sh) can also be used: `scoop install px`
+On Windows, the following package managers can be used:
+| Package Manager                                                             | Command                        |
+|-----------------------------------------------------------------------------|--------------------------------|
+| [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) | `winget install genotrance.tx` |
+| [Scoop](https://scoop.sh)                                                   | `scoop install px`             |
 
 Prebuilt binaries and offline wheel packages are available on the
 [releases](https://github.com/genotrance/px/releases) page. See the

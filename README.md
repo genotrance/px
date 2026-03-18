@@ -25,7 +25,7 @@ python -m pip install px-proxy
 On Windows, the following package managers can be used:
 | Package Manager                                                             | Command                        |
 |-----------------------------------------------------------------------------|--------------------------------|
-| [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) | `winget install genotrance.tx` |
+| [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) | `winget install genotrance.px` |
 | [Scoop](https://scoop.sh)                                                   | `scoop install px`             |
 
 Prebuilt binaries and offline wheel packages are available on the

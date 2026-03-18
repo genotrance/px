@@ -316,6 +316,15 @@ jobs:
         with:
           packages-dir: artifacts/sdist/
 
+      - name: Publish to Winget
+        uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: genotrance.px
+          version: ${{ needs.setup.outputs.version }}
+          installers-regex: '-windows-amd64\.zip$'
+          release-tag: v${{ needs.setup.outputs.version }}
+          token: ${{ secrets.WINGET_TOKEN }}
+
       # Build and push Docker images
       - name: Log in to Docker Hub
         uses: docker/login-action@v4

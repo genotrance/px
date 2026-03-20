@@ -8,9 +8,12 @@ If direct internet access is available along with Python (≥ 3.10):
 
     python -m pip install px-proxy
 
-On Windows, [scoop](https://scoop.sh) can also be used:
+On Windows, the following package managers can be used:
+| Package Manager                                                             | Command                        |
+|-----------------------------------------------------------------------------|--------------------------------|
+| [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) | `winget install genotrance.px` |
+| [Scoop](https://scoop.sh)                                                   | `scoop install px`             |
 
-    scoop install px
 
 ## Offline install via wheels
 

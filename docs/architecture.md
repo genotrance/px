@@ -13,8 +13,9 @@ scaling via `--workers`):
 
 1. **Process** (`main.py`) — parses config, runs an `asyncio` event loop with
    `asyncio.start_server` bound to the configured listen address and port.
-   Additional worker processes can be spawned with `--workers` but the default
-   is 1 since the async event loop handles concurrency efficiently.
+   Additional worker processes can be spawned with `--workers` on all platforms
+   but the default is 1 since the async event loop handles concurrency
+   efficiently.
 2. **Thread pool** (`--threads`, default 32) — blocking `mcurl.do()` calls are
    dispatched to a `ThreadPoolExecutor` via `asyncio.to_thread()`. Threads are
    held only for the duration of the upstream request, not the full connection
@@ -46,10 +47,21 @@ Client ─── HTTP request ──► ConnectionHandler._handle_request()
               BridgeWriter ──► transport.write() ──► Client
 ```
 
-### Mac limitation
+### Multi-process architecture
 
-macOS does not support `SO_REUSEPORT` in the way needed for multiple processes
-to accept on the same socket, so `--workers` must remain 1 on Mac.
+When `--workers` is greater than 1, the main process creates its own listening
+sockets and then spawns `workers - 1` additional child processes.  Each child
+creates its own independent listening sockets bound to the same port — no
+socket sharing or duplication between processes.
+
+- **Linux:** `SO_REUSEPORT` enables kernel-level load balancing across all
+  listening sockets on the same port.
+- **macOS:** `SO_REUSEPORT` allows multiple sockets to bind; the kernel
+  distributes connections (distribution may not be perfectly even).
+- **Windows:** `SO_REUSEADDR` allows multiple sockets to bind to the same
+  port.  Each process registers its own socket with its own IOCP, avoiding
+  the `WinError 87` that occurred when a shared socket was registered with
+  multiple IOCPs (#267).
 
 ## Package layout
 

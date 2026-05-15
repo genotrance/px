@@ -2,6 +2,19 @@
 
 ---
 
+## v0.12.0 — TBD
+
+### Bug fixes
+- Fixed `--workers` > 1 crashing on Windows with `OSError: [WinError 87]` due
+  to IOCP socket registration conflict.  Each worker now creates its own
+  independent listening sockets instead of sharing from the parent process
+  (#267).
+- Enabled `--workers` on macOS — previously disabled because the old socket
+  sharing approach was incompatible.  The new per-worker socket model uses
+  `SO_REUSEPORT` on Linux and macOS and `SO_REUSEADDR` on Windows.
+
+---
+
 ## v0.11.0 — 2026-04-03
 
 ### New features

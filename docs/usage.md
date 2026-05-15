@@ -299,5 +299,6 @@ Px depends on the following Python packages:
 
 ## Limitations
 
-- macOS does not support sharing listen sockets across multiple worker processes,
-  so `--workers` must remain 1 on Mac.
+- On Windows, connection distribution across multiple `--workers` processes may
+  not be perfectly even. The default `--workers=1` is sufficient for most
+  workloads since the async event loop handles concurrency efficiently.

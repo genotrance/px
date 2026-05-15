@@ -26,7 +26,7 @@ def pytest_xdist_auto_num_workers():
     ports + 10 network test ports).
 
     Windows uses fewer workers because socket/connection limits are
-    tighter.  macOS is limited because SO_REUSEPORT doesn't work."""
+    tighter."""
     import sys
 
     cpus = os.cpu_count() or 2

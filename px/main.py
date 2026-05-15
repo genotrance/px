@@ -32,6 +32,8 @@ def create_listen_socket(listen, port):
     "Create a bound, listening TCP socket for the given address and port"
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     try:
         sock.bind((listen, port))
     except OSError:
@@ -113,7 +115,7 @@ async def run_async_servers(listen_addrs, port, socks=None):
 # Multi-processing
 
 
-def start_worker(pipeout):
+def start_worker():
     # CTRL-C should exit the process
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -122,12 +124,11 @@ def start_worker(pipeout):
     port = STATE.config.getint("proxy", "port")
     socks = []
     for listen in STATE.listen:
-        # Get socket from parent process for each listen address
-        mainsock = pipeout.recv()
-        if hasattr(socket, "fromshare"):
-            mainsock = socket.fromshare(mainsock)
-
-        socks.append(mainsock)
+        # Each worker creates its own listening socket with SO_REUSEPORT/SO_REUSEADDR
+        # so each process has an independent IOCP registration (Windows) or kernel
+        # load-balanced accept (Linux/macOS)
+        sock = create_listen_socket(listen, port)
+        socks.append(sock)
         print_banner(listen, port)
 
     asyncio.run(run_async_servers(STATE.listen, port, socks=socks))
@@ -138,6 +139,9 @@ def run_pool():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     port = STATE.config.getint("proxy", "port")
+    workers = STATE.config.getint("settings", "workers")
+    Debug.workers = workers
+
     mainsocks = []
     for listen in STATE.listen:
         # Create listening socket for each listen address
@@ -155,31 +159,11 @@ def run_pool():
         mainsocks.append(sock)
         print_banner(listen, port)
 
-    if sys.platform != "darwin":
-        # Multiprocessing enabled on Windows and Linux, no idea how shared sockets
-        # work on MacOSX
-        if sys.platform == "linux" or hasattr(socket, "fromshare"):
-            # Windows needs Python > 3.3 which added socket.fromshare()- have to
-            # explicitly share socket with child processes
-            #
-            # Linux shares all open FD with children since it uses fork()
-            workers = STATE.config.getint("settings", "workers")
-            Debug.workers = workers
-            for _ in range(workers - 1):
-                (pipeout, pipein) = multiprocessing.Pipe()
-                p = multiprocessing.Process(target=start_worker, args=(pipeout,))
-                p.daemon = True
-                p.start()
-                while p.pid is None:
-                    time.sleep(1)
-                for mainsock in mainsocks:
-                    # Share socket for each listen address to child process
-                    if hasattr(socket, "fromshare"):
-                        # Send duplicate socket explicitly shared with child for Windows
-                        pipein.send(mainsock.share(p.pid))
-                    else:
-                        # Send socket as is for Linux
-                        pipein.send(mainsock)
+    # Spawn additional worker processes - each creates its own sockets
+    for _ in range(workers - 1):
+        p = multiprocessing.Process(target=start_worker)
+        p.daemon = True
+        p.start()
 
     asyncio.run(run_async_servers(STATE.listen, port, socks=mainsocks))
 

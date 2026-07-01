@@ -16,7 +16,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -31,7 +31,7 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -74,7 +74,7 @@ jobs:
     name: wheels ${{ matrix.name }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build wheels (Linux container)
         if: runner.os == 'Linux'
@@ -128,7 +128,7 @@ jobs:
     needs: [sdist, wheels]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up the environment
         if: runner.os != 'Linux'
@@ -197,7 +197,7 @@ jobs:
     needs: [binary]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download binary artifacts
         uses: actions/download-artifact@v8
@@ -238,7 +238,7 @@ jobs:
     environment: pypi
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

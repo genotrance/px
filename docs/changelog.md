@@ -18,6 +18,14 @@
   network drives). Replaced with `file.flush()` which pushes data to the OS
   page cache without blocking (#268).
 
+### Improvements
+- Px now automatically raises the open file descriptor soft limit
+  (`RLIMIT_NOFILE`) at startup on Linux and macOS.  macOS `launchd` defaults to
+  256 and Linux defaults to 1024, both too low for a proxy handling concurrent
+  CONNECT tunnels.  The limit is raised to `min(hard_limit, 65536)` with a
+  step-down fallback for macOS where `kern.maxfilesperproc` may reject high
+  values (#272).
+
 ---
 
 ## v0.11.0 — 2026-04-03

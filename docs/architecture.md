@@ -327,6 +327,29 @@ than the proxy itself.
   the asyncio event loop for seconds or indefinitely on slow or locked
   filesystems (see issue #268).
 
+## File descriptor limits (`raise_nofile_limit`)
+
+On Unix systems the OS enforces a per-process limit on open file descriptors
+(`RLIMIT_NOFILE`). Default soft limits are low — 256 on macOS when launched via
+`launchd`, 1024 on Linux — while a proxy server can easily exceed these under
+moderate load. Each CONNECT tunnel consumes up to 4 FDs (client socket, dup'd
+client FD for the relay, `socket.fromfd` dup of the upstream socket, and the
+original curl socket). Plain HTTP connections use 2 FDs each.
+
+`raise_nofile_limit()` in `main.py` raises the soft limit toward
+`min(hard_limit, 65536)` at startup, before the server accepts connections.
+Both the main process (`run_pool`) and each spawned worker (`start_worker`)
+call it independently since `spawn`-mode children do not inherit the parent's
+resource limits.
+
+On macOS, `kern.maxfilesperproc` may silently reject values above the kernel
+cap even when they are below the nominal hard limit. The function uses a
+step-down fallback sequence (8192, 4096, 2048, 1024) until one succeeds. If
+the final soft limit is below 1024, a warning is printed.
+
+This is not applicable on Windows — Windows handles are not subject to
+`RLIMIT_NOFILE`.
+
 ## Kerberos ticket management (`px.kerberos`)
 
 On Linux and macOS, upstream Kerberos (NEGOTIATE) authentication requires a

@@ -19,10 +19,64 @@ from .version import __version__
 
 if sys.platform == "win32":
     from . import windows
+else:
+    import resource
 
 import mcurl
 
 warnings.filterwarnings("ignore")
+
+# Target soft limit for RLIMIT_NOFILE on Unix systems
+_FD_LIMIT_TARGET = 65536
+
+# Step-down values for macOS where kern.maxfilesperproc may reject high limits
+_FD_LIMIT_FALLBACKS = (8192, 4096, 2048, 1024)
+
+# Warn if the final soft limit is below this threshold
+_FD_LIMIT_WARN = 1024
+
+
+def raise_nofile_limit():
+    """Raise the RLIMIT_NOFILE soft limit toward the hard limit (Unix only).
+
+    macOS launchd defaults the soft limit to 256 and Linux defaults to 1024,
+    both too low for a proxy server handling concurrent CONNECT tunnels (each
+    tunnel consumes up to 4 FDs). This function raises the soft limit to
+    min(hard, 65536) at startup with a step-down fallback for macOS where
+    kern.maxfilesperproc may silently cap setrlimit.
+    """
+    if sys.platform == "win32":
+        return
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = min(hard, _FD_LIMIT_TARGET)
+
+    if soft >= target:
+        dprint(f"FD limit already sufficient: soft={soft} hard={hard}")
+        return
+
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+        dprint(f"Raised FD limit: {soft} -> {target} (hard={hard})")
+        return
+    except (ValueError, OSError) as exc:
+        dprint(f"Failed to set FD limit to {target}: {exc}")
+
+    # Step-down fallback (needed on macOS)
+    for fallback in _FD_LIMIT_FALLBACKS:
+        if fallback <= soft:
+            break
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (fallback, hard))
+            dprint(f"Raised FD limit: {soft} -> {fallback} (hard={hard})")
+            return
+        except (ValueError, OSError) as exc:
+            dprint(f"Failed to set FD limit to {fallback}: {exc}")
+
+    new_soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if new_soft < _FD_LIMIT_WARN:
+        pprint(f"Warning: FD soft limit is {new_soft} - proxy may fail under load")
+
 
 ###
 # Server startup helpers
@@ -119,6 +173,8 @@ def start_worker():
     # CTRL-C should exit the process
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
+    raise_nofile_limit()
+
     STATE.parse_config()
 
     port = STATE.config.getint("proxy", "port")
@@ -137,6 +193,8 @@ def start_worker():
 def run_pool():
     # CTRL-C should exit the process
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+    raise_nofile_limit()
 
     port = STATE.config.getint("proxy", "port")
     workers = STATE.config.getint("settings", "workers")

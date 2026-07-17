@@ -58,20 +58,18 @@ def raise_nofile_limit():
     try:
         resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
         dprint(f"Raised FD limit: {soft} -> {target} (hard={hard})")
-        return
     except (ValueError, OSError) as exc:
         dprint(f"Failed to set FD limit to {target}: {exc}")
-
-    # Step-down fallback (needed on macOS)
-    for fallback in _FD_LIMIT_FALLBACKS:
-        if fallback <= soft:
-            break
-        try:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (fallback, hard))
-            dprint(f"Raised FD limit: {soft} -> {fallback} (hard={hard})")
-            return
-        except (ValueError, OSError) as exc:
-            dprint(f"Failed to set FD limit to {fallback}: {exc}")
+        # Step-down fallback (needed on macOS)
+        for fallback in _FD_LIMIT_FALLBACKS:
+            if fallback <= soft:
+                break
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (fallback, hard))
+                dprint(f"Raised FD limit: {soft} -> {fallback} (hard={hard})")
+                break
+            except (ValueError, OSError) as exc:
+                dprint(f"Failed to set FD limit to {fallback}: {exc}")
 
     new_soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
     if new_soft < _FD_LIMIT_WARN:

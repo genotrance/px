@@ -12,6 +12,11 @@
 - Enabled `--workers` on macOS — previously disabled because the old socket
   sharing approach was incompatible.  The new per-worker socket model uses
   `SO_REUSEPORT` on Linux and macOS and `SO_REUSEADDR` on Windows.
+- Fixed px randomly becoming unresponsive after running for days when using
+  `--debug` mode.  `os.fsync()` in the debug log write path could block the
+  asyncio event loop indefinitely on slow or locked filesystems (antivirus,
+  network drives). Replaced with `file.flush()` which pushes data to the OS
+  page cache without blocking (#268).
 
 ---
 

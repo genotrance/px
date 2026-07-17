@@ -2,7 +2,6 @@
 
 import contextlib
 import multiprocessing
-import os
 import sys
 import time
 
@@ -73,7 +72,6 @@ class Debug:
         "Flush data to debug file and stdout after write"
         if self.file is not None:
             self.file.flush()
-            os.fsync(self.file.fileno())
         if self.stdout is not None:
             self.stdout.flush()
 

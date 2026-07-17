@@ -320,9 +320,12 @@ than the proxy itself.
 - **Debug module** — `pprint()` and `dprint()` silently swallow exceptions to
   ensure logging never crashes the proxy. Bare excepts in `debug.py` are
   intentional. In `--verbose` mode (stdout), `dprint()` skips file I/O and
-  `os.fsync()`, and omits the process name when `--workers=1`, keeping
-  per-call overhead minimal. In `--debug` mode (file), full flush-after-write
-  with `os.fsync()` is retained for crash diagnostics.
+  omits the process name when `--workers=1`, keeping per-call overhead
+  minimal. In `--debug` mode (file), each write is followed by `file.flush()`
+  which pushes data to the OS page cache (survives process crashes but not
+  power loss). `os.fsync()` is intentionally not used because it can block
+  the asyncio event loop for seconds or indefinitely on slow or locked
+  filesystems (see issue #268).
 
 ## Kerberos ticket management (`px.kerberos`)
 

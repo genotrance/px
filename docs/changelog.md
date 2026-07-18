@@ -18,6 +18,16 @@
   network drives). Replaced with `file.flush()` which pushes data to the OS
   page cache without blocking (#268).
 
+### New features
+- PAC file encoding is now auto-detected using an extended browser-compatible
+  algorithm: HTTP Content-Type charset (for URL-loaded PACs), then BOM check,
+  then UTF-8, then Windows code page cascade (cp1252, cp1251), then Latin-1
+  fallback.  This handles enterprise environments where IIS or other Windows
+  servers serve PAC files in cp1252 or cp1251 without proper charset headers.
+  The `--pac_encoding` option remains available as an explicit override if
+  auto-detection does not work. PAC decode and load failures are now always
+  printed instead of being hidden behind `--debug` (#269).
+
 ### Improvements
 - Px now automatically raises the open file descriptor soft limit
   (`RLIMIT_NOFILE`) at startup on Linux and macOS.  macOS `launchd` defaults to

@@ -328,7 +328,7 @@ def quit_px(do_exit=True):
 DEFAULTS = {
     "server": "",
     "pac": "",
-    "pac_encoding": "utf-8",
+    "pac_encoding": "",
     "port": "3128",
     "listen": "127.0.0.1",
     "gateway": "0",

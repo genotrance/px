@@ -186,6 +186,31 @@ initialised with Mozilla PAC utility functions from `pacutils.py`
 safety — each call to `find_proxy_for_url()` is dispatched to a thread pool
 internally by `quickjs.Function`.
 
+### PAC encoding detection
+
+PAC file encoding is auto-detected by default using an algorithm that extends
+browser behavior (Chromium checks Content-Type charset, then BOM, then defaults
+to ISO-8859-1; Firefox tries UTF-8 first then Latin-1):
+
+1. **HTTP Content-Type charset** — when loading a PAC from a URL,
+   `get_content_type()` extracts the charset parameter (e.g.
+   `application/x-ns-proxy-autoconfig; charset=windows-1251`). This has the
+   highest priority, matching Chromium behavior.
+2. **BOM check** — UTF-32-BE, UTF-32-LE, UTF-16-BE, UTF-16-LE, UTF-8 BOMs are
+   detected using `codecs` constants from the standard library.
+3. **UTF-8 attempt** — if no BOM is found, the data is trial-decoded as UTF-8.
+   This covers both pure ASCII and UTF-8 encoded PAC files.
+4. **Windows code page cascade** — if UTF-8 fails, the data is trial-decoded
+   through common Windows code pages in order of global prevalence: cp1252
+   (Western European, the most common Windows default) then cp1251 (Cyrillic,
+   reported in issue #167 from an IIS-hosted PAC).
+5. **Latin-1 fallback** — if all code pages fail, Latin-1 (ISO-8859-1) is used.
+   Latin-1 never fails since every byte maps to a valid codepoint.
+
+If the user sets `--pac_encoding` explicitly, auto-detection is bypassed and
+the specified encoding is used directly. Decode failures are printed via
+`pprint()` so they are always visible, not hidden behind `--debug`.
+
 ## Proxy reload
 
 `STATE.reload_proxy()` is called on every request. It checks whether

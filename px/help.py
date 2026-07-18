@@ -67,8 +67,11 @@ Configuration:
     file. Relative paths will be relative to the Px script or binary
 
   --pac_encoding= | PX_PAC_ENCODING= | proxy:pac_encoding=
-  PAC file encoding
-    Specify in case default 'utf-8' encoding does not work
+  PAC file encoding - default: auto-detect
+    Encoding is auto-detected using Content-Type charset (for HTTP PACs),
+    then BOM, then UTF-8, then Windows code pages (cp1252, cp1251), then
+    Latin-1 fallback. Set this only if auto-detection does not work for
+    your PAC file
 
   --listen= | PX_LISTEN= | proxy:listen=
   Network interface(s) to listen on. Comma separated, default: 127.0.0.1

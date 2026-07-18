@@ -59,7 +59,7 @@ The `--save` flag writes the current configuration to `px.ini`:
 |------|---------|---------|---------|-------------|
 | `--proxy=HOST:PORT` | `PX_SERVER` | `proxy:server` | *(none)* | Upstream proxy server(s), comma-separated |
 | `--pac=URL` | `PX_PAC` | `proxy:pac` | *(none)* | PAC file URL or local path |
-| `--pac_encoding=ENC` | `PX_PAC_ENCODING` | `proxy:pac_encoding` | `utf-8` | PAC file encoding |
+| `--pac_encoding=ENC` | `PX_PAC_ENCODING` | `proxy:pac_encoding` | auto-detect | PAC file encoding (auto-detects via Content-Type charset/BOM/UTF-8/cp1252/cp1251/Latin-1; set only if needed) |
 | `--listen=IP` | `PX_LISTEN` | `proxy:listen` | `127.0.0.1` | Local interface(s) to bind, comma-separated |
 | `--port=NUM` | `PX_PORT` | `proxy:port` | `3128` | Listening port |
 | `--gateway=0\|1` | `PX_GATEWAY` | `proxy:gateway` | `0` | Allow remote clients; overrides `--listen` |

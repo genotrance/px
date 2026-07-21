@@ -97,7 +97,7 @@ install_upx() {
 # Install system build dependencies for Alpine
 install_alpine_deps() {
     apk add --no-cache curl python3 python3-dev py3-pip gcc musl-dev \
-        patchelf libffi-dev ccache upx
+        libffi-dev ccache upx
 }
 
 # Set up manylinux static libs
@@ -118,6 +118,7 @@ build_binary() {
             ensure_uv
             python3 -m venv .venv
             . .venv/bin/activate
+            pip install 'patchelf==0.17.2.4'
             uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
             uv pip install px-proxy --no-index -f "$WHEELS"
             python tools.py --nuitka

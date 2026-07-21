@@ -85,8 +85,11 @@ and called from the workflow steps.
   Linux glibc builds run inside manylinux2014 containers using
   `/opt/python/cp313-cp313/bin/python3`. Linux musl builds use Alpine
   containers with system Python and dev headers since Nuitka needs
-  `Python.h` which the musllinux containers lack. Aarch64 builds run on
-  native `ubuntu-24.04-arm` runners.
+  `Python.h` which the musllinux containers lack. Alpine's `patchelf`
+  package (0.18.0) is intentionally not used because Nuitka rejects it as a
+  known buggy release; instead `build.sh` installs `patchelf==0.17.2.4`
+  from PyPI into the build venv. Aarch64 builds run on native
+  `ubuntu-24.04-arm` runners.
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
   versions (3.10–3.14). Tests run inside musllinux and Ubuntu containers

@@ -90,6 +90,7 @@ and called from the workflow steps.
   known buggy release; instead `build.sh` installs `patchelf==0.17.2.4`
   from PyPI into the build venv. Aarch64 builds run on native
   `ubuntu-24.04-arm` runners.
+
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
   versions (3.10–3.14). Tests run inside musllinux and Ubuntu containers
@@ -97,7 +98,11 @@ and called from the workflow steps.
   native `ubuntu-24.04-arm` runners. Uses `extract_archives`
   and `test_binary` from `build.sh`. The `PXBIN` environment variable is
   set so the `binary` tox environment can test the Nuitka binary directly.
-  macOS excludes `test_network.py` via `PX_CI_MINIMAL`.
+  `build.sh` ensures the tox driver venv is created with a non-free-threaded
+  Python (`/opt/python/cp314-cp314/bin` is preferred when present) so the
+  `binary` environment does not default to a free-threaded ABI (`cp314t`) that
+  abi3 wheels like `psutil` cannot satisfy. macOS excludes `test_network.py`
+  via `PX_CI_MINIMAL`.
 - **release** — on `master` only: publishes the sdist and wheel to PyPI using
   trusted publishing, creates and pushes a version tag, creates a GitHub
   release with changelog notes extracted via `tools.py --history`, submits

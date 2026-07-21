@@ -217,6 +217,13 @@ test_binary() {
 
         ensure_uv
 
+        # Prefer non-free-threaded Python for the tox driver venv so the
+        # 'binary' tox environment does not default to a free-threaded ABI
+        # (cp314t) that abi3 wheels like psutil cannot satisfy.
+        if [ -d /opt/python/cp314-cp314/bin ]; then
+            export PATH=/opt/python/cp314-cp314/bin:$PATH
+        fi
+
         # Run tests with tox in a venv
         uv venv /tmp/tox-env
         . /tmp/tox-env/bin/activate
@@ -311,8 +318,6 @@ build_local() {
     echo "=== Testing binary in $TEST_IMAGE ==="
     docker run --rm --privileged -v "$(pwd)":/px -w /px \
         "$TEST_IMAGE" $TEST_SHELL -c "
-            # Prefer non-free-threaded Python if available
-            [ -d /opt/python/cp314-cp314/bin ] && export PATH=/opt/python/cp314-cp314/bin:\$PATH
             rm -rf .venv && . /px/build.sh && test_binary $NAME
             RC=\$?; $CHOWN .venv 2>/dev/null || true; exit \$RC
         "

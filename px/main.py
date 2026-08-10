@@ -24,7 +24,46 @@ else:
 
 import mcurl
 
+# Use libuv-based event loops when available: winloop on Windows replaces
+# ProactorEventLoop (avoids CPython #93821 accept loop bug), uvloop on
+# Linux/macOS replaces SelectorEventLoop.  Both give ~5x throughput improvement.
+_libuv_loop_factory = None
+if sys.platform == "win32":
+    try:
+        import winloop
+
+        _libuv_loop_factory = winloop.new_event_loop
+    except ImportError:
+        winloop = None  # type: ignore[assignment]
+else:
+    try:
+        import uvloop
+
+        _libuv_loop_factory = uvloop.new_event_loop
+    except ImportError:
+        uvloop = None  # type: ignore[assignment]
+
 warnings.filterwarnings("ignore")
+
+
+def _asyncio_run_kwargs():
+    """Return kwargs for asyncio.run() to use the libuv event loop if available.
+
+    Python 3.12+ supports loop_factory; older versions fall back to install().
+    """
+    if _libuv_loop_factory is None:
+        return {}
+
+    if sys.version_info >= (3, 12):
+        return {"loop_factory": _libuv_loop_factory}
+
+    # Python 3.10-3.11: use deprecated install() since loop_factory is unavailable
+    if sys.platform == "win32" and winloop is not None:
+        winloop.install()
+    elif sys.platform != "win32" and uvloop is not None:
+        uvloop.install()
+    return {}
+
 
 # Target soft limit for RLIMIT_NOFILE on Unix systems
 _FD_LIMIT_TARGET = 65536
@@ -185,7 +224,7 @@ def start_worker():
         socks.append(sock)
         print_banner(listen, port)
 
-    asyncio.run(run_async_servers(STATE.listen, port, socks=socks))
+    asyncio.run(run_async_servers(STATE.listen, port, socks=socks), **_asyncio_run_kwargs())
 
 
 def run_pool():
@@ -221,7 +260,7 @@ def run_pool():
         p.daemon = True
         p.start()
 
-    asyncio.run(run_async_servers(STATE.listen, port, socks=mainsocks))
+    asyncio.run(run_async_servers(STATE.listen, port, socks=mainsocks), **_asyncio_run_kwargs())
 
 
 ###

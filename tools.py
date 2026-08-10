@@ -231,6 +231,9 @@ def nuitka():
     if sys.platform == "win32":
         # keyring dependency
         flags = "--include-package=win32ctypes"
+    else:
+        # uvloop is imported inside try/except so Nuitka may not detect it
+        flags = "--include-package=uvloop"
     ret = os.system(
         sys.executable + f" -m nuitka --standalone {flags} --prefer-source-code --output-dir={outdir} px.py"
     )

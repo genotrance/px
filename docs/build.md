@@ -138,6 +138,8 @@ Local build helper used by both developers and the GitHub Actions workflows:
 
 - `--wheel` — builds sdist and wheel into `wheel/`.
 - `--nuitka` — builds a standalone Nuitka binary for the current platform.
+  On Linux/macOS, adds `--include-package=uvloop` since the `try/except` import
+  may not be detected automatically by Nuitka.
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
   and packages `px.exe` (Windows only).
 - `--deps` — builds dependency wheels for the current Python version.

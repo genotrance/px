@@ -2,6 +2,32 @@
 
 ---
 
+## v0.13.0
+
+### Bug fixes
+- Fixed px randomly becoming unresponsive on Windows after network disruptions
+  (WiFi disconnect, VPN reconnect). CPython's ProactorEventLoop has an unfixed
+  bug (#93821) where `AcceptEx` errors permanently close the listening socket.
+  Px now uses `winloop` (a libuv-based event loop) on Windows, which avoids this
+  bug entirely by replacing the ProactorEventLoop with libuv's own IOCP
+  implementation (#268).
+
+### Improvements
+- Added libuv-based event loops as dependencies: `winloop` on Windows and
+  `uvloop` on Linux/macOS. These replace Python's default asyncio event loop
+  with libuv, providing roughly 5x throughput improvement on all platforms.
+  On Python 3.12+ the modern `loop_factory` parameter is used; on 3.10-3.11
+  the deprecated `install()` API is used as a fallback. If the libuv library
+  is not available, Px falls back to the default asyncio event loop gracefully.
+
+### Internal
+- Added `--include-package=uvloop` to the Linux/macOS Nuitka build flags so
+  the `try/except` import is included in standalone binaries.
+- Added `test_event_loop.py` with tests for libuv event loop import, loop
+  factory, basic server operation, and `_asyncio_run_kwargs` version branching.
+
+---
+
 ## v0.12.0 — 2026-07-21
 
 ### New features

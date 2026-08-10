@@ -12,6 +12,7 @@ Tests live in `tests/`.
 | `fixtures.py` | Shared test fixtures — port allocation, Px server instances (launched with `--verbose`), auth parametrisation |
 | `helpers.py` | Utility functions — subprocess management (`run_px` launches Px with `--verbose`), port checks, keyring setup |
 | `test_benchmark.py` | Concurrency benchmarks — HTTP/CONNECT throughput, thread count, memory at various concurrency levels (marked `benchmark`, run via `make benchmark`) |
+| `test_event_loop.py` | libuv event loop integration — verifies uvloop/winloop import, loop factory, `_asyncio_run_kwargs`, and basic server operation under the libuv loop |
 | `test_config.py` | Configuration utility tests — `get_logfile`, `get_config_dir`, `get_host_ips`, defaults, save, install |
 | `test_large_data.py` | Large data transfer reliability — concurrent multi-MB GET/POST over HTTP and HTTPS with SHA-256 integrity verification (marked `largedata`, run via `make test-large-data`) |
 | `test_debug.py` | Debug module tests — `Debug` singleton, `pprint`, `dprint` |

@@ -13,9 +13,12 @@ scaling via `--workers`):
 
 1. **Process** (`main.py`) — parses config, runs an `asyncio` event loop with
    `asyncio.start_server` bound to the configured listen address and port.
-   Additional worker processes can be spawned with `--workers` on all platforms
-   but the default is 1 since the async event loop handles concurrency
-   efficiently.
+   The event loop uses libuv via `winloop` on Windows and `uvloop` on
+   Linux/macOS for improved throughput and to avoid a CPython ProactorEventLoop
+   bug on Windows (#93821).  Falls back to the default asyncio event loop if
+   the libuv library is not available.  Additional worker processes can be
+   spawned with `--workers` on all platforms but the default is 1 since the
+   async event loop handles concurrency efficiently.
 2. **Thread pool** (`--threads`, default 32) — blocking `mcurl.do()` calls are
    dispatched to a `ThreadPoolExecutor` via `asyncio.to_thread()`. Threads are
    held only for the duration of the upstream request, not the full connection

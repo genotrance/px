@@ -146,6 +146,29 @@ jobs:
         timeout-minutes: 15
         run: uv run python -m pytest tests/test_large_data.py -m largedata -v -s
 
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    name: benchmark ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Run benchmarks
+        timeout-minutes: 15
+        run: uv run python -m pytest tests/test_benchmark.py -m benchmark -v -s
+
   kerberos:
     runs-on: ubuntu-latest
     steps:

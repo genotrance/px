@@ -36,34 +36,37 @@ def test_libuv_loop_factory():
 
 
 def test_px_imports_libuv():
-    """Verify px.main imports the correct libuv module and sets loop factory."""
+    """Verify px.main imports the correct libuv module."""
     from px import main
 
-    if sys.platform == "win32":
-        assert main.winloop is not None, "winloop should be imported on Windows"
-    else:
-        assert main.uvloop is not None, "uvloop should be imported on non-Windows"
-
-    assert main._libuv_loop_factory is not None, "loop factory should be set"
+    assert main._libuv is not None, "libuv module should be imported"
+    assert hasattr(main._libuv, "new_event_loop")
 
 
-def test_asyncio_run_kwargs():
-    """Verify _asyncio_run_kwargs returns correct kwargs for this Python version."""
-    from px.main import _asyncio_run_kwargs
+def test_run_async():
+    """Verify _run_async runs a coroutine with the libuv event loop."""
+    from px.main import _run_async
 
-    kwargs = _asyncio_run_kwargs()
+    result = []
 
+    async def coro():
+        loop = asyncio.get_running_loop()
+        result.append(type(loop).__module__)
+
+    _run_async(coro())
+
+    assert len(result) == 1
+    # On 3.12+ with loop_factory, the loop module should be uvloop/winloop
     if sys.version_info >= (3, 12):
-        assert "loop_factory" in kwargs
-        assert callable(kwargs["loop_factory"])
-    else:
-        # On 3.10-3.11, install() is called as a side effect and empty dict returned
-        assert kwargs == {}
+        if sys.platform == "win32":
+            assert result[0].startswith("winloop")
+        else:
+            assert result[0].startswith("uvloop")
 
 
 def test_libuv_basic_server():
     """Verify a basic asyncio server works under the libuv event loop."""
-    from px.main import _asyncio_run_kwargs
+    from px.main import _run_async
 
     async def _run():
         async def handler(reader, writer):
@@ -85,7 +88,7 @@ def test_libuv_basic_server():
         server.close()
         await server.wait_closed()
 
-    asyncio.run(_run(), **_asyncio_run_kwargs())
+    _run_async(_run())
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="winloop is Windows-only")

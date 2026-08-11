@@ -24,45 +24,30 @@ else:
 
 import mcurl
 
-# Use libuv-based event loops when available: winloop on Windows replaces
-# ProactorEventLoop (avoids CPython #93821 accept loop bug), uvloop on
-# Linux/macOS replaces SelectorEventLoop.  Both give ~5x throughput improvement.
-_libuv_loop_factory = None
-if sys.platform == "win32":
-    try:
-        import winloop
-
-        _libuv_loop_factory = winloop.new_event_loop
-    except ImportError:
-        winloop = None  # type: ignore[assignment]
-else:
-    try:
-        import uvloop
-
-        _libuv_loop_factory = uvloop.new_event_loop
-    except ImportError:
-        uvloop = None  # type: ignore[assignment]
+# Use libuv event loops when available: winloop on Windows (avoids CPython bug
+# #93821), uvloop on Linux/macOS. Both provide significant throughput improvement.
+try:
+    if sys.platform == "win32":
+        import winloop as _libuv
+    else:
+        import uvloop as _libuv
+except ImportError:
+    _libuv = None  # type: ignore[assignment]
 
 warnings.filterwarnings("ignore")
 
+# On Python 3.10-3.11, set the global event loop policy at import time.
+# This applies to both main and child processes (children re-import via spawn).
+if _libuv is not None and sys.version_info < (3, 12):
+    _libuv.install()
 
-def _asyncio_run_kwargs():
-    """Return kwargs for asyncio.run() to use the libuv event loop if available.
 
-    Python 3.12+ supports loop_factory; older versions fall back to install().
-    """
-    if _libuv_loop_factory is None:
-        return {}
-
-    if sys.version_info >= (3, 12):
-        return {"loop_factory": _libuv_loop_factory}
-
-    # Python 3.10-3.11: use deprecated install() since loop_factory is unavailable
-    if sys.platform == "win32" and winloop is not None:
-        winloop.install()
-    elif sys.platform != "win32" and uvloop is not None:
-        uvloop.install()
-    return {}
+def _run_async(coro):
+    """Run a coroutine with the libuv event loop if available."""
+    if _libuv is not None and sys.version_info >= (3, 12):
+        asyncio.run(coro, loop_factory=_libuv.new_event_loop)
+    else:
+        asyncio.run(coro)
 
 
 # Target soft limit for RLIMIT_NOFILE on Unix systems
@@ -224,7 +209,7 @@ def start_worker():
         socks.append(sock)
         print_banner(listen, port)
 
-    asyncio.run(run_async_servers(STATE.listen, port, socks=socks), **_asyncio_run_kwargs())
+    _run_async(run_async_servers(STATE.listen, port, socks=socks))
 
 
 def run_pool():
@@ -260,7 +245,7 @@ def run_pool():
         p.daemon = True
         p.start()
 
-    asyncio.run(run_async_servers(STATE.listen, port, socks=mainsocks), **_asyncio_run_kwargs())
+    _run_async(run_async_servers(STATE.listen, port, socks=mainsocks))
 
 
 ###

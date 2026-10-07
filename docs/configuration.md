@@ -76,12 +76,23 @@ The `--save` flag writes the current configuration to `px.ini`:
 |------|---------|---------|---------|-------------|
 | `--username=DOMAIN\user` | `PX_USERNAME` | `proxy:username` | *(none)* | Username for upstream proxy auth |
 | `--auth=TYPE` | `PX_AUTH` | `proxy:auth` | `ANY` | Upstream proxy auth type |
+| `--authretry=N` | `PX_AUTHRETRY` | `proxy:authretry` | `0` | Seconds before retrying a proxy blocked after auth failures (0 = never) |
 | `--kerberos=0\|1` | `PX_KERBEROS` | `proxy:kerberos` | `0` | Enable Kerberos ticket management (Linux/macOS only) |
 
 When `--kerberos` is enabled, Px acquires and renews Kerberos tickets
 automatically using `--username` as the Kerberos principal and the password from
 `PX_PASSWORD` or keyring. Requires `--username` and libcurl with GSS-API support.
 See [usage.md](usage.md#kerberos-authentication) for details.
+
+After 3 consecutive upstream authentication failures, Px stops contacting that
+proxy so that a wrong password does not lock out the account, and returns 401
+until restarted. A transient upstream failure (for example the proxy or its
+authentication backend restarting) therefore leaves Px failing even after the
+upstream recovers. `--authretry=N` lets Px send one request to the blocked proxy
+once N seconds have passed since the last request sent through it; success
+unblocks the proxy and another failure blocks it again, so at most one extra
+authentication attempt is made per interval. Pick N so that the attempts stay
+below the account lockout threshold of the upstream directory.
 
 ### Auth type values
 

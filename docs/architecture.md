@@ -143,6 +143,23 @@ Px can authenticate to the upstream proxy using:
   mode, `curl.is_easy = True` to use the easy interface for persistent
   connections needed by NTLM.
 
+### Blocked proxies and `--authretry`
+
+mcurl counts consecutive 407 responses per upstream proxy in `MCURL.failed`.
+Once the count reaches `failure_threshold` (3), `Curl.set_proxy()` returns
+False and the handler answers 401 without contacting the proxy. The count is
+only reset by a non-407 response, which can no longer arrive, so the block lasts
+until Px restarts (or until a fresh Kerberos ticket clears `MCURL.failed`).
+
+`State.retry_auth_failure()` adds an opt-in way out. The handler records the
+time of every request sent through a proxy (`State.note_proxy_attempt()`).
+When `set_proxy()` refuses a proxy and `--authretry` seconds have passed since
+the last request sent through it, the count is set to `failure_threshold - 1`
+and `set_proxy()` is called again, so exactly one request is attempted: success
+resets the count in mcurl, failure blocks the proxy for another interval.
+Measuring from the last request (rather than from when the block was noticed)
+means the first request after a long idle period is retried immediately.
+
 Downstream client authentication (gateway mode) is optional and supports
 `NEGOTIATE`, `NTLM`, `DIGEST`, and `BASIC`. Credentials are retrieved from the
 keyring under the realm `PxClient` or from `PX_CLIENT_PASSWORD` /

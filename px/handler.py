@@ -851,6 +851,11 @@ class ConnectionHandler:
             port = self.proxy_servers[0][1]
             noproxy_hosts = STATE.wproxy.noproxy_hosts_str
             ret = self.curl.set_proxy(proxy=server, port=port, noproxy=noproxy_hosts)
+            if ret:
+                STATE.note_proxy_attempt(server)
+            elif STATE.retry_auth_failure(server):
+                dprint(self.curl.easyhash + f": Retrying proxy blocked after auth failures: {server}:{port}")
+                ret = self.curl.set_proxy(proxy=server, port=port, noproxy=noproxy_hosts)
             if not ret:
                 self._send_error(401, f"Proxy server authentication failed: {server}:{port}")
                 STATE.mcurl.remove(self.curl)

@@ -133,6 +133,14 @@ Configuration:
       Client -> Auth Px -> no-Auth Px -> Upstream proxy
         'Auth Px' cannot directly access upstream proxy but 'no-Auth Px' can
 
+  --authretry= | PX_AUTHRETRY= | proxy:authretry=
+  Seconds before retrying a proxy blocked after auth failures. Valid integer, default: 0
+    After 3 consecutive authentication failures, Px stops contacting the upstream
+    proxy to avoid locking out the account, and keeps failing until restarted.
+    When set, Px sends one request to the blocked proxy once this many seconds
+    have passed since the last request sent through it. Success unblocks the
+    proxy, another failure blocks it again. 0 disables retrying.
+
   --kerberos= | PX_KERBEROS= | proxy:kerberos=
   Enable Kerberos ticket management. 0 or 1, default: 0
     Px will acquire and renew Kerberos tickets automatically using the

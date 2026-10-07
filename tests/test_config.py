@@ -358,3 +358,61 @@ def test_install(px_bin, pxini_location, monkeypatch, tmp_path_factory, tmp_path
 
     for variant in [px_bin, _px_w_variant(px_bin)]:
         _test_install(variant, pxini_location, monkeypatch, tmp_path_factory, tmp_path)
+
+
+# -------------------------------------------------------------------
+# Retrying proxies blocked after auth failures (--authretry)
+# -------------------------------------------------------------------
+
+
+class TestAuthRetry:
+    @pytest.fixture
+    def state(self, monkeypatch):
+        # State is a singleton - patch attributes so they are restored afterwards
+        state = config.State()
+        mcurl = unittest.mock.Mock()
+        mcurl.failure_threshold = 3
+        mcurl.failed = {"proxy": 3}
+        monkeypatch.setattr(state, "mcurl", mcurl)
+        monkeypatch.setattr(state, "authretry", 300)
+        monkeypatch.setattr(state, "proxy_last_attempt", {})
+        return state
+
+    def test_default_disabled(self):
+        assert config.DEFAULTS["authretry"] == "0"
+
+    def test_disabled_never_retries(self, state):
+        state.authretry = 0
+        state.note_proxy_attempt("proxy", now=1_000)
+        assert not state.retry_auth_failure("proxy", now=10_000)
+        assert state.mcurl.failed == {"proxy": 3}
+
+    def test_no_retry_within_interval_of_last_attempt(self, state):
+        state.note_proxy_attempt("proxy", now=1_000)
+        assert not state.retry_auth_failure("proxy", now=1_299)
+        assert state.mcurl.failed == {"proxy": 3}
+
+    def test_retries_immediately_after_long_idle(self, state):
+        state.note_proxy_attempt("proxy", now=1_000)
+        assert state.retry_auth_failure("proxy", now=1_000 + 3_600)
+        # One more failure brings the proxy straight back to the threshold
+        assert state.mcurl.failed == {"proxy": 2}
+
+    def test_retry_counts_as_attempt(self, state):
+        state.note_proxy_attempt("proxy", now=1_000)
+        assert state.retry_auth_failure("proxy", now=1_300)
+        state.mcurl.failed["proxy"] = 3  # the retry failed
+        assert not state.retry_auth_failure("proxy", now=1_400)
+        assert state.retry_auth_failure("proxy", now=1_600)
+
+    def test_unknown_proxy_starts_interval_now(self, state):
+        assert not state.retry_auth_failure("proxy", now=1_000)
+        assert state.retry_auth_failure("proxy", now=1_300)
+
+    def test_cfg_init_sets_authretry(self, state, monkeypatch):
+        cfg = configparser.ConfigParser()
+        cfg.add_section("proxy")
+        monkeypatch.setattr(state, "config", cfg)
+        state.cfg_init("authretry", "600", override=True)
+        assert state.authretry == 600
+        assert state.config.get("proxy", "authretry") == "600"

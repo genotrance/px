@@ -338,6 +338,7 @@ DEFAULTS = {
     "useragent": "",
     "username": "",
     "auth": "",
+    "authretry": "0",
     "kerberos": "0",
     "workers": "1",
     "threads": "32",
@@ -372,6 +373,7 @@ class State:
 
     # Auth
     auth = "ANY"
+    authretry = 0
     kerberos = False
     username = ""
 
@@ -392,6 +394,7 @@ class State:
 
     # Tracking
     proxy_last_reload = 0.0
+    proxy_last_attempt: dict = {}  # noqa: RUF012 - proxy -> time of last request sent through it
 
     # Lock for thread synchronization of State object
     # multiprocess sync isn't neccessary because State object is only shared by
@@ -420,6 +423,7 @@ class State:
             "useragent": self.set_useragent,
             "username": self.set_username,
             "auth": self.set_auth,
+            "authretry": self.set_authretry,
             "kerberos": self.set_kerberos,
             "client_username": self.set_client_username,
             "client_auth": self.set_client_auth,
@@ -518,6 +522,9 @@ class State:
         _ = mcurl.getauth(auth)
 
         self.auth = auth
+
+    def set_authretry(self, authretry):
+        self.authretry = authretry
 
     def set_kerberos(self, kerberos):
         "Set kerberos ticket management"
@@ -650,7 +657,7 @@ class State:
         # [proxy]
         if name in ["server", "pac", "pac_encoding", "listen", "allow", "noproxy", "useragent", "username", "auth"]:
             self.cfg_str_init("proxy", name, val, callback, override)
-        elif name in ["port", "gateway", "hostonly", "kerberos"]:
+        elif name in ["port", "gateway", "hostonly", "authretry", "kerberos"]:
             self.cfg_int_init("proxy", name, val, callback, override)
 
         # [client]
@@ -951,6 +958,30 @@ class State:
             # Fresh ticket acquired — clear auth failure cache so
             # previously-blocked proxies are retried
             self.mcurl.failed.clear()
+
+    def note_proxy_attempt(self, proxy, now=None):
+        "Record that a request is being sent through proxy"
+        self.proxy_last_attempt[proxy] = time.time() if now is None else now
+
+    def retry_auth_failure(self, proxy, now=None):
+        """Allow one more attempt with a proxy blocked after auth failures.
+
+        mcurl stops contacting a proxy once its auth failure count reaches
+        the threshold and only resets the count on a non-407 response, so a
+        transient upstream failure blocks the proxy until Px restarts. With
+        authretry > 0, a blocked proxy gets one attempt once authretry
+        seconds have passed since the last request sent through it: success
+        resets the count in mcurl, another failure blocks it again. Returns
+        True if the proxy was unblocked."""
+        if self.authretry <= 0:
+            return False
+        now = time.time() if now is None else now
+        last_attempt = self.proxy_last_attempt.setdefault(proxy, now)
+        if now - last_attempt < self.authretry:
+            return False
+        self.note_proxy_attempt(proxy, now)
+        self.mcurl.failed[proxy] = self.mcurl.failure_threshold - 1
+        return True
 
     def cleanup_kerberos(self):
         """Explicitly clean up Kerberos credential cache."""

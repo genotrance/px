@@ -70,7 +70,9 @@ def px_chain(px_port, tmp_path_factory):
 
     # Run px in the background
     name = "Chain"
-    flags = f" --auth=NONE --proxy=127.0.0.1:{px_port + 1} --workers=1"
+    # Keep the chain directed at its upstream even if a developer's dotenv
+    # config supplies PX_NOPROXY for local addresses.
+    flags = f" --auth=NONE --proxy=127.0.0.1:{px_port + 1} --noproxy= --workers=1"
     subp, cmd, buffer = run_px(name, port, tmp_path_factory, flags)
 
     # Let tests run
@@ -253,7 +255,9 @@ def px_basic_cli(px_bin, px_debug_none, px_port, httpbin_both):
     # unique port for this worker = 1
     # with http and https testing = 2
     # 6 combinations
-    cmd = f"{px_bin} {px_debug_none} --port={px_port}" + f" --test=all:{httpbin_both.url}"
+    # Chain tests require requests to reach their configured proxy rather than
+    # inheriting a local PX_NOPROXY entry through px's dotenv support.
+    cmd = f"{px_bin} {px_debug_none} --port={px_port} --noproxy=" + f" --test=all:{httpbin_both.url}"
     return cmd
 
 

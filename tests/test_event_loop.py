@@ -2,8 +2,19 @@
 
 import asyncio
 import sys
+import types
+import unittest.mock
 
 import pytest
+
+
+def _configure_px_event_loop(px_event_loop):
+    """Configure the imported module without parsing configuration in tests."""
+    from px import main
+
+    main.STATE.event_loop = px_event_loop
+    main._configure_event_loop()
+    return main
 
 
 def test_libuv_import(px_event_loop):
@@ -39,9 +50,9 @@ def test_libuv_loop_factory(px_event_loop):
     loop.close()
 
 
-def test_px_imports_selected_event_loop(px_event_loop):
-    """Verify px.main honours the selected event loop."""
-    from px import main
+def test_px_configures_selected_event_loop(px_event_loop):
+    """Verify px.main configures the event loop after configuration is available."""
+    main = _configure_px_event_loop(px_event_loop)
 
     if px_event_loop == "asyncio":
         assert main._libuv is None
@@ -51,9 +62,26 @@ def test_px_imports_selected_event_loop(px_event_loop):
     assert hasattr(main._libuv, "new_event_loop")
 
 
+def test_configure_event_loop_installs_libuv_on_python_311(monkeypatch):
+    """Python 3.10-3.11 need the libuv policy installed after configuration."""
+    from px import main
+
+    libuv = types.SimpleNamespace(install=unittest.mock.Mock())
+    module_name = "winloop" if sys.platform == "win32" else "uvloop"
+    monkeypatch.setitem(sys.modules, module_name, libuv)
+    monkeypatch.setattr(sys, "version_info", (3, 11))
+    monkeypatch.setattr(main, "_libuv", None)
+    monkeypatch.setattr(main.STATE, "event_loop", "auto")
+
+    main._configure_event_loop()
+
+    assert main._libuv is libuv
+    libuv.install.assert_called_once_with()
+
+
 def test_run_async(px_event_loop):
     """Verify _run_async runs a coroutine with the selected event loop."""
-    from px.main import _run_async
+    _run_async = _configure_px_event_loop(px_event_loop)._run_async
 
     result = []
 

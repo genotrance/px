@@ -24,12 +24,19 @@ else:
 
 import mcurl
 
-# Use libuv event loops when available: winloop on Windows (avoids CPython bug
-# #93821), uvloop on Linux/macOS. Both provide significant throughput improvement.
-# Resolve this before installation because Python 3.10-3.11 uses a global policy.
-if config.get_event_loop() == "asyncio":
-    _libuv = None
-else:
+# Set after configuration is parsed. Keeping this unset at import time prevents
+# importing px.main from loading dotenv files or inspecting command-line flags.
+_libuv = None
+
+
+def _configure_event_loop():
+    """Select and initialize the configured libuv event loop implementation."""
+    global _libuv
+
+    if STATE.event_loop == "asyncio":
+        _libuv = None
+        return
+
     try:
         if sys.platform == "win32":
             import winloop as _libuv
@@ -38,13 +45,12 @@ else:
     except ImportError:
         _libuv = None  # type: ignore[assignment]
 
+    # Python 3.10-3.11 require a global policy. This occurs after each process
+    # has parsed its configuration, including spawned workers.
+    if _libuv is not None and sys.version_info < (3, 12):
+        _libuv.install()
+
 warnings.filterwarnings("ignore")
-
-# On Python 3.10-3.11, set the global event loop policy at import time.
-# This applies to both main and child processes (children re-import via spawn).
-if _libuv is not None and sys.version_info < (3, 12):
-    _libuv.install()
-
 
 def _run_async(coro):
     """Run a coroutine with the configured event loop."""
@@ -205,6 +211,7 @@ def start_worker():
     raise_nofile_limit()
 
     STATE.parse_config()
+    _configure_event_loop()
 
     port = STATE.config.getint("proxy", "port")
     socks = []
@@ -412,6 +419,7 @@ def main():
     sys.excepthook = handle_exceptions
 
     STATE.parse_config()
+    _configure_event_loop()
 
     if STATE.test is not None:
         test(STATE.test)

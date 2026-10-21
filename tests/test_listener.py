@@ -11,6 +11,9 @@ from px import main as px_main
 
 def _libuv_factory():
     if px_main._libuv is None:
+        px_main.STATE.event_loop = "auto"
+        px_main._configure_event_loop()
+    if px_main._libuv is None:
         pytest.skip("libuv event loop not available")
     return px_main._libuv.new_event_loop
 

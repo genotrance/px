@@ -141,13 +141,17 @@ class TestEventLoopSelection:
 
         assert config.get_event_loop() == "asyncio"
 
-    def test_ini_forces_asyncio(self, tmp_path):
+    def test_ini_configures_asyncio_at_runtime(self, tmp_path):
         (tmp_path / "px.ini").write_text("[settings]\nevent_loop = asyncio\n")
-        env = copy.deepcopy(os.environ)
-        env.pop("PX_EVENT_LOOP", None)
+        env = {key: value for key, value in os.environ.items() if not key.startswith("PX_")}
 
         result = subprocess.run(
-            [sys.executable, "-c", "from px import main; assert main._libuv is None"],
+            [
+                sys.executable,
+                "-c",
+                "from px import main; main.STATE.parse_config(); "
+                "main._configure_event_loop(); assert main._libuv is None",
+            ],
             cwd=tmp_path,
             env=env,
         )
@@ -167,6 +171,60 @@ class TestEventLoopSelection:
         monkeypatch.setenv("PX_EVENT_LOOP", "asyncio")
 
         assert config.get_event_loop() == "auto"
+
+    def test_import_does_not_load_dotenv(self, tmp_path):
+        """Importing px.main must not let a CWD dotenv file alter the process."""
+        (tmp_path / ".env").write_text("PX_IMPORT_TEST_SENTINEL=from-dotenv\n")
+        env = copy.deepcopy(os.environ)
+        env.pop("PX_IMPORT_TEST_SENTINEL", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os; from px import main; "
+                "assert 'PX_IMPORT_TEST_SENTINEL' not in os.environ",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        ("ini_event_loop", "env_event_loop", "cli_event_loop", "expected"),
+        [
+            ("asyncio", None, None, "asyncio"),
+            ("asyncio", "auto", None, "auto"),
+            ("asyncio", "asyncio", "auto", "auto"),
+        ],
+    )
+    def test_configures_event_loop_with_documented_precedence(
+        self, tmp_path, ini_event_loop, env_event_loop, cli_event_loop, expected
+    ):
+        (tmp_path / "px.ini").write_text(f"[settings]\nevent_loop = {ini_event_loop}\n")
+        env = {key: value for key, value in os.environ.items() if not key.startswith("PX_")}
+        if env_event_loop is not None:
+            env["PX_EVENT_LOOP"] = env_event_loop
+        args = [sys.executable, "-c"]
+        code = (
+            "from px import main; "
+            "main.STATE.parse_config(); "
+            "main._configure_event_loop(); "
+            f"assert main.STATE.event_loop == {expected!r}; "
+            f"assert (main._libuv is None) is {expected == 'asyncio'!r}"
+        )
+        args.extend([code, "px"])
+        if cli_event_loop is not None:
+            args.append(f"--event-loop={cli_event_loop}")
+
+        result = subprocess.run(  # noqa: S603
+            args, cwd=tmp_path, env=env, capture_output=True, text=True
+        )
+
+        assert result.returncode == 0, result.stderr
 
 
 # -------------------------------------------------------------------

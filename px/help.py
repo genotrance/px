@@ -166,7 +166,8 @@ Configuration:
   Thread pool size for upstream proxy connections. Valid integer, default: 32
 
   --idle= | PX_IDLE= | settings:idle=
-  Idle timeout in seconds for HTTP connect sessions. Valid integer, default: 30
+  Inactivity timeout in seconds for HTTP CONNECT tunnels and plain HTTP
+  transfers (plain HTTP needs pymcurl with set_low_speed). Valid integer, default: 30
 
   --socktimeout= | PX_SOCKTIMEOUT= | settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid float, default: 20

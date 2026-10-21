@@ -112,7 +112,7 @@ for the full list of supported types.
 |------|---------|---------|---------|-------------|
 | `--workers=N` | `PX_WORKERS` | `settings:workers` | `1` | Number of worker processes |
 | `--threads=N` | `PX_THREADS` | `settings:threads` | `32` | Thread pool size for upstream connections |
-| `--idle=N` | `PX_IDLE` | `settings:idle` | `30` | Idle timeout for CONNECT sessions (seconds) |
+| `--idle=N` | `PX_IDLE` | `settings:idle` | `30` | Inactivity timeout for CONNECT tunnels and plain-HTTP transfers (seconds); plain HTTP needs pymcurl with `set_low_speed` |
 | `--socktimeout=N` | `PX_SOCKTIMEOUT` | `settings:socktimeout` | `20` | Connection timeout (seconds) |
 | `--proxyreload=N` | `PX_PROXYRELOAD` | `settings:proxyreload` | `60` | Proxy info refresh interval (seconds) |
 | `--event-loop=MODE` | `PX_EVENT_LOOP` | `settings:event_loop` | `auto` | `auto` uses winloop/uvloop when available; `asyncio` forces Python's standard loop |

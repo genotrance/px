@@ -231,6 +231,11 @@ establishes the upstream connection (and performs proxy authentication if
 needed), the proxy must relay raw bytes bidirectionally between the client
 socket and the upstream socket until one side closes or an idle timeout fires.
 
+Plain-HTTP requests use the same `--idle` value as a transfer inactivity
+timeout: when the installed mcurl provides `Curl.set_low_speed`, the handler
+calls `set_low_speed(1, STATE.idle)` on non-CONNECT handles so a stalled
+response is aborted by libcurl instead of blocking a worker thread.
+
 ### Design goals
 
 - **Zero additional threads** — tunnels must not consume thread pool slots.

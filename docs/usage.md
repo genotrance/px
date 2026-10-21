@@ -292,6 +292,14 @@ export http_proxy="http://$(tail -1 /etc/resolv.conf | cut -d' ' -f2):3128"
 export https_proxy="http://$(tail -1 /etc/resolv.conf | cut -d' ' -f2):3128"
 ```
 
+### Idle timeout
+
+`--idle` is the inactivity timeout for both CONNECT tunnels and plain-HTTP
+transfers. A plain-HTTP response that sends no data for that long (for example
+a long-poll or server-sent events stream over plain HTTP) is closed. The
+plain-HTTP part needs a pymcurl that provides `Curl.set_low_speed`; with older
+versions only CONNECT tunnels honour `--idle`.
+
 ### MQTT over websockets
 
 Increase the idle timeout to 120 seconds (`--idle=120`) since the default MQTT

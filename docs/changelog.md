@@ -16,6 +16,8 @@
   `winloop`/`uvloop`.
 
 ### Bug fixes
+- `--idle` now also applies to plain-HTTP transfers: a response that sends no
+  data for that long is aborted (needs pymcurl with `Curl.set_low_speed`).
 - Listen backlog raised from 128 to 2048, avoiding ~1 second SYN-retransmit
   stalls at 200+ concurrent connections.
 - `TCP_NODELAY` is now set on accepted client connections on the plain asyncio

@@ -11,6 +11,9 @@
   px randomly becoming unresponsive on Windows after network disruptions
   (CPython bug #93821). Falls back to the default event loop gracefully if
   the libuv library is not available (#268).
+- New `--event-loop=auto|asyncio` option (`PX_EVENT_LOOP`, `event_loop` in
+  `px.ini`) to run on Python's default asyncio event loop instead of
+  `winloop`/`uvloop`.
 
 ### Bug fixes
 - Listen backlog raised from 128 to 2048, avoiding ~1 second SYN-retransmit

@@ -115,8 +115,13 @@ for the full list of supported types.
 | `--idle=N` | `PX_IDLE` | `settings:idle` | `30` | Idle timeout for CONNECT sessions (seconds) |
 | `--socktimeout=N` | `PX_SOCKTIMEOUT` | `settings:socktimeout` | `20` | Connection timeout (seconds) |
 | `--proxyreload=N` | `PX_PROXYRELOAD` | `settings:proxyreload` | `60` | Proxy info refresh interval (seconds) |
+| `--event-loop=MODE` | `PX_EVENT_LOOP` | `settings:event_loop` | `auto` | `auto` uses winloop/uvloop when available; `asyncio` forces Python's standard loop |
 | `--foreground=0\|1` | `PX_FOREGROUND` | `settings:foreground` | `0` | Run in foreground when compiled/frozen |
 | `--log=LEVEL` | `PX_LOG` | `settings:log` | `0` | Logging: 0=off, 1=script dir, 2=working dir, 3=unique file, 4=stdout |
+
+Set `--event-loop=asyncio` if the platform loop causes a compatibility issue.
+The choice is applied before Px starts workers, so it also applies to every
+child process.
 
 ### Other flags
 

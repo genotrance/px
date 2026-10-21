@@ -175,6 +175,10 @@ Configuration:
   Time interval in seconds before refreshing proxy info. Valid int, default: 60
     Proxy info reloaded from Internet Options or --pac URL
 
+  --event-loop= | PX_EVENT_LOOP= | settings:event_loop=
+  Event loop implementation. auto (default) uses winloop on Windows or uvloop
+    elsewhere when installed; asyncio always uses Python's standard event loop.
+
   --foreground | PX_FOREGROUND= | settings:foreground=
   Run in foreground when compiled or frozen. 0 or 1, default: 0
     Px will attach to the console and write to it even though the prompt is

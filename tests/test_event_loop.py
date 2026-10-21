@@ -1,4 +1,4 @@
-"""Tests for libuv-based event loop integration (uvloop/winloop)."""
+"""Tests for the configured asyncio or libuv event loop."""
 
 import asyncio
 import sys
@@ -6,8 +6,10 @@ import sys
 import pytest
 
 
-def test_libuv_import():
+def test_libuv_import(px_event_loop):
     """Verify the correct libuv event loop library is importable on this platform."""
+    if px_event_loop == "asyncio":
+        pytest.skip("plain asyncio selected")
     if sys.platform == "win32":
         import winloop
 
@@ -20,8 +22,10 @@ def test_libuv_import():
         assert hasattr(uvloop, "new_event_loop")
 
 
-def test_libuv_loop_factory():
+def test_libuv_loop_factory(px_event_loop):
     """Verify new_event_loop() creates a libuv-backed event loop."""
+    if px_event_loop == "asyncio":
+        pytest.skip("plain asyncio selected")
     if sys.platform == "win32":
         import winloop
 
@@ -35,16 +39,20 @@ def test_libuv_loop_factory():
     loop.close()
 
 
-def test_px_imports_libuv():
-    """Verify px.main imports the correct libuv module."""
+def test_px_imports_selected_event_loop(px_event_loop):
+    """Verify px.main honours the selected event loop."""
     from px import main
+
+    if px_event_loop == "asyncio":
+        assert main._libuv is None
+        return
 
     assert main._libuv is not None, "libuv module should be imported"
     assert hasattr(main._libuv, "new_event_loop")
 
 
-def test_run_async():
-    """Verify _run_async runs a coroutine with the libuv event loop."""
+def test_run_async(px_event_loop):
+    """Verify _run_async runs a coroutine with the selected event loop."""
     from px.main import _run_async
 
     result = []
@@ -56,16 +64,16 @@ def test_run_async():
     _run_async(coro())
 
     assert len(result) == 1
-    # On 3.12+ with loop_factory, the loop module should be uvloop/winloop
-    if sys.version_info >= (3, 12):
-        if sys.platform == "win32":
-            assert result[0].startswith("winloop")
-        else:
-            assert result[0].startswith("uvloop")
+    if px_event_loop == "asyncio":
+        assert result[0].startswith("asyncio")
+    elif sys.platform == "win32":
+        assert result[0].startswith("winloop")
+    else:
+        assert result[0].startswith("uvloop")
 
 
-def test_libuv_basic_server():
-    """Verify a basic asyncio server works under the libuv event loop."""
+def test_event_loop_basic_server():
+    """Verify a basic asyncio server works under the selected event loop."""
     from px.main import _run_async
 
     async def _run():

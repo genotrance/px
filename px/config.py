@@ -132,6 +132,39 @@ def get_config_dir():
     return os.path.join(config_dir, "px")
 
 
+def get_ini_path(flags, env):
+    """Find the configuration file selected by command line and environment."""
+    is_save = "save" in flags or "save" in env
+    if "config" in flags:
+        return get_norm_path(flags["config"])
+    if "config" in env:
+        return get_norm_path(env["config"])
+
+    cwd_ini = os.path.join(os.getcwd(), "px.ini")
+    cfg_ini = os.path.join(get_config_dir(), "px.ini")
+    script_ini = os.path.join(get_script_dir(), "px.ini")
+    cwd_exists = os.path.exists(cwd_ini)
+    cfg_exists = os.path.exists(cfg_ini)
+    script_exists = os.path.exists(script_ini)
+
+    if is_save:
+        if cwd_exists and os.access(cwd_ini, os.W_OK):
+            return cwd_ini
+        if cfg_exists:
+            return cfg_ini
+        if script_exists and os.access(script_ini, os.W_OK):
+            return script_ini
+        return cfg_ini
+
+    if cwd_exists:
+        return cwd_ini
+    if cfg_exists:
+        return cfg_ini
+    if script_exists:
+        return script_ini
+    return ""
+
+
 def get_logfile(location):
     "Get file path for debug output"
     name = multiprocessing.current_process().name
@@ -346,6 +379,7 @@ DEFAULTS = {
     "proxyreload": "60",
     "foreground": "0",
     "log": "0",
+    "event_loop": "auto",
     "test": None,
 }
 
@@ -384,6 +418,7 @@ class State:
     config = None
     curl_features: list = []  # noqa: RUF012
     debug = None
+    event_loop = "auto"
     krb_manager = None
     location = LOG_NONE
     mcurl = None
@@ -428,6 +463,7 @@ class State:
             "idle": self.set_idle,
             "socktimeout": self.set_socktimeout,
             "proxyreload": self.set_proxyreload,
+            "event_loop": self.set_event_loop,
             "test": self.set_test,
         }
 
@@ -595,6 +631,14 @@ class State:
     def set_proxyreload(self, proxyreload):
         self.proxyreload = proxyreload
 
+    def set_event_loop(self, event_loop):
+        event_loop = event_loop.lower()
+        if event_loop not in ["auto", "asyncio"]:
+            pprint("Invalid event loop value - using auto")
+            event_loop = "auto"
+            self.config.set("settings", "event_loop", event_loop)
+        self.event_loop = event_loop
+
     def set_test(self, test):
         self.test = test
 
@@ -664,6 +708,8 @@ class State:
             self.cfg_int_init("settings", name, val, callback, override)
         elif name in ["socktimeout"]:
             self.cfg_float_init("settings", name, val, callback, override)
+        elif name in ["event_loop"]:
+            self.cfg_str_init("settings", name, val, callback, override)
 
         # Non-config
         elif name in ["test"] and callback is not None:
@@ -753,53 +799,13 @@ class State:
         flags = self.parse_cli()
         env = self.parse_env()
 
-        # Check if config file specified in CLI flags or environment
+        # Select the configuration file before reading its values.
+        self.ini = get_ini_path(flags, env)
         is_save = "save" in flags or "save" in env
-        if "config" in flags:
-            # From CLI
-            self.ini = get_norm_path(flags["config"])
-        elif "config" in env:
-            # From environment
-            self.ini = get_norm_path(env["config"])
-
-        if len(self.ini) != 0:
-            if not (os.path.exists(self.ini) or is_save):
-                # Specified file doesn't exist and not --save
-                pprint(f"Could not find config file: {self.ini}")
-                sys.exit(ERROR_CONFIG)
-        else:
-            # CWD/px.ini - instance
-            cwd_ini = os.path.join(os.getcwd(), "px.ini")
-            cw_exists = os.path.exists(cwd_ini)
-
-            # config/px.ini - user
-            cfg_ini = os.path.join(get_config_dir(), "px.ini")
-            co_exists = os.path.exists(cfg_ini)
-
-            # script_dir/px.ini - site
-            script_ini = os.path.join(get_script_dir(), "px.ini")
-            sp_exists = os.path.exists(script_ini)
-
-            if is_save:
-                # Find existing config to overwrite
-                cw_writable = os.access(cwd_ini, os.W_OK)
-                sp_writable = os.access(script_ini, os.W_OK)
-
-                if cw_exists and cw_writable:  # CWD/px.ini
-                    self.ini = cwd_ini
-                elif co_exists:  # config/px.ini
-                    self.ini = cfg_ini
-                elif sp_exists and sp_writable:  # script_dir/px.ini
-                    self.ini = script_ini
-                else:  # Default config/px.ini
-                    self.ini = cfg_ini
-            else:
-                if cw_exists:  # CWD/px.ini
-                    self.ini = cwd_ini
-                elif co_exists:  # config/px.ini
-                    self.ini = cfg_ini
-                elif sp_exists:  # script_dir/px.ini
-                    self.ini = script_ini
+        if len(self.ini) != 0 and not (os.path.exists(self.ini) or is_save):
+            # Specified file doesn't exist and not --save
+            pprint(f"Could not find config file: {self.ini}")
+            sys.exit(ERROR_CONFIG)
 
         # Load configuration file
         self.config = configparser.ConfigParser()
@@ -1005,3 +1011,19 @@ class State:
 
 # Create instance of State object
 STATE = State()
+
+
+def get_event_loop():
+    """Return the event loop selected before full configuration initialization."""
+    flags = STATE.parse_cli()
+    env = STATE.parse_env()
+    ini_path = get_ini_path(flags, env)
+    ini = configparser.ConfigParser()
+    if ini_path and os.path.exists(ini_path):
+        ini.read(ini_path)
+
+    event_loop = ini.get("settings", "event_loop", fallback=DEFAULTS["event_loop"])
+    event_loop = env.get("event_loop", event_loop)
+    event_loop = flags.get("event_loop", event_loop)
+    event_loop = event_loop.strip().lower()
+    return event_loop if event_loop in ["auto", "asyncio"] else "auto"

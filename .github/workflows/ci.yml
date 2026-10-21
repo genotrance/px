@@ -42,6 +42,9 @@ jobs:
             python-version: "3.13"
           - os: ubuntu-latest
             python-version: "3.14"
+          - os: ubuntu-latest
+            python-version: "3.14"
+            event-loop: asyncio
           - os: ubuntu-24.04-arm
             python-version: "3.10"
           - os: ubuntu-24.04-arm
@@ -54,11 +57,14 @@ jobs:
             python-version: "3.10"
           - os: windows-latest
             python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.14"
+            event-loop: asyncio
       fail-fast: false
     defaults:
       run:
         shell: bash
-    name: test ${{ matrix.os }} py${{ matrix.python-version }}
+    name: test ${{ matrix.os }} py${{ matrix.python-version }} ${{ matrix.event-loop || 'auto' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -71,6 +77,9 @@ jobs:
       - name: Run tests
         timeout-minutes: 60
         run: |
+          if [ "${{ matrix.event-loop }}" == "asyncio" ]; then
+            export PX_EVENT_LOOP=asyncio
+          fi
           if [ "${{ matrix.os }}" == "macos-latest" ]; then
             PX_CI_MINIMAL=1 uv run python -m pytest tests -n auto --tb=short -q --ignore=tests/test_network.py
           else

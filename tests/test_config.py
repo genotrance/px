@@ -101,6 +101,7 @@ class TestDefaults:
             "proxyreload",
             "foreground",
             "log",
+            "event_loop",
         ]
         for key in required_keys:
             assert key in config.DEFAULTS, f"Missing default for {key}"
@@ -131,6 +132,43 @@ class TestGetScriptCmd:
         assert len(cmd) > 0
 
 
+class TestEventLoopSelection:
+    def test_reads_ini(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["px"])
+        monkeypatch.delenv("PX_EVENT_LOOP", raising=False)
+        (tmp_path / "px.ini").write_text("[settings]\nevent_loop = asyncio\n")
+
+        assert config.get_event_loop() == "asyncio"
+
+    def test_ini_forces_asyncio(self, tmp_path):
+        (tmp_path / "px.ini").write_text("[settings]\nevent_loop = asyncio\n")
+        env = copy.deepcopy(os.environ)
+        env.pop("PX_EVENT_LOOP", None)
+
+        result = subprocess.run(
+            [sys.executable, "-c", "from px import main; assert main._libuv is None"],
+            cwd=tmp_path,
+            env=env,
+        )
+
+        assert result.returncode == 0
+
+    def test_environment_overrides_ini(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["px"])
+        monkeypatch.setenv("PX_EVENT_LOOP", "asyncio")
+        (tmp_path / "px.ini").write_text("[settings]\nevent_loop = auto\n")
+
+        assert config.get_event_loop() == "asyncio"
+
+    def test_command_line_overrides_environment(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["px", "--event-loop=auto"])
+        monkeypatch.setenv("PX_EVENT_LOOP", "asyncio")
+
+        assert config.get_event_loop() == "auto"
+
+
 # -------------------------------------------------------------------
 # Legacy parametrized test (kept as-is)
 # -------------------------------------------------------------------
@@ -144,6 +182,7 @@ def generate_config():
         "client_auth",
         "client_nosspi",
         "client_username",
+        "event_loop",
         "foreground",
         "gateway",
         "hostonly",
@@ -189,6 +228,8 @@ def generate_config():
             value = 35.5
         elif key == "log":
             value = 4
+        elif key == "event_loop":
+            value = "asyncio"
         else:
             raise ValueError(f"Unknown key: {key}")
         values.append((key, value))
@@ -265,7 +306,7 @@ def _test_save(px_bin, pxini_location, monkeypatch, tmp_path):
 
     # Add all config CLI flags and run
     for name, value in values:
-        cmd += f" --{name}={value}"
+        cmd += f" --{name.replace('_', '-')}={value}"
     with change_dir(tmp_path):
         p = subprocess.run(cmd, shell=True, stdout=None, env=env)
         ret = p.returncode

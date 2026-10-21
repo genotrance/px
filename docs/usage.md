@@ -48,6 +48,20 @@ Remove with `--uninstall`. Use `--force` to overwrite an existing entry. If
 Command line parameters passed with `--install` are not saved for use on
 startup. Use `--save` or edit `px.ini` manually.
 
+### Event loop fallback
+
+Px normally uses winloop on Windows and uvloop on Linux and macOS when those
+libraries are installed. To use Python's standard asyncio event loop instead,
+for example to work around a platform-loop compatibility issue, run:
+
+```bash
+px --event-loop=asyncio
+```
+
+The same setting is available as `PX_EVENT_LOOP=asyncio` or
+`settings:event_loop=asyncio` in `px.ini`. Set it to `auto` (the default) to
+restore automatic winloop or uvloop selection.
+
 ## Credentials
 
 If SSPI is not available or not preferred, providing `--username` in

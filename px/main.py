@@ -26,13 +26,17 @@ import mcurl
 
 # Use libuv event loops when available: winloop on Windows (avoids CPython bug
 # #93821), uvloop on Linux/macOS. Both provide significant throughput improvement.
-try:
-    if sys.platform == "win32":
-        import winloop as _libuv
-    else:
-        import uvloop as _libuv
-except ImportError:
-    _libuv = None  # type: ignore[assignment]
+# Resolve this before installation because Python 3.10-3.11 uses a global policy.
+if config.get_event_loop() == "asyncio":
+    _libuv = None
+else:
+    try:
+        if sys.platform == "win32":
+            import winloop as _libuv
+        else:
+            import uvloop as _libuv
+    except ImportError:
+        _libuv = None  # type: ignore[assignment]
 
 warnings.filterwarnings("ignore")
 
@@ -43,7 +47,7 @@ if _libuv is not None and sys.version_info < (3, 12):
 
 
 def _run_async(coro):
-    """Run a coroutine with the libuv event loop if available."""
+    """Run a coroutine with the configured event loop."""
     if _libuv is not None and sys.version_info >= (3, 12):
         asyncio.run(coro, loop_factory=_libuv.new_event_loop)
     else:

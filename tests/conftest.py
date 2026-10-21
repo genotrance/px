@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 # Add tests directory to path so helpers module can be imported
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -15,6 +17,12 @@ import keyrings.alt.file
 
 # Use plaintext keyring for tests on all OS
 keyring.set_keyring(keyrings.alt.file.PlaintextKeyring())
+
+
+@pytest.fixture(scope="session")
+def px_event_loop():
+    """Event loop selection inherited by Px subprocesses."""
+    return os.environ.get("PX_EVENT_LOOP", "auto").lower()
 
 
 def pytest_xdist_auto_num_workers():

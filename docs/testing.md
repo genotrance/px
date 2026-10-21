@@ -8,11 +8,11 @@ Tests live in `tests/`.
 
 | File | Scope |
 |------|-------|
-| `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, xdist auto-parallelism hook |
+| `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, event-loop selection, xdist auto-parallelism hook |
 | `fixtures.py` | Shared test fixtures — port allocation, Px server instances (launched with `--verbose`), auth parametrisation |
 | `helpers.py` | Utility functions — subprocess management (`run_px` launches Px with `--verbose`), port checks, keyring setup |
 | `test_benchmark.py` | Concurrency benchmarks — HTTP/CONNECT throughput, thread count, memory at various concurrency levels (marked `benchmark`, run via `make benchmark`) |
-| `test_event_loop.py` | libuv event loop integration — verifies uvloop/winloop import, loop factory, `_asyncio_run_kwargs`, and basic server operation under the libuv loop |
+| `test_event_loop.py` | Event loop integration — verifies the selected asyncio or uvloop/winloop loop and basic server operation |
 | `test_config.py` | Configuration utility tests — `get_logfile`, `get_config_dir`, `get_host_ips`, defaults, save, install |
 | `test_large_data.py` | Large data transfer reliability — concurrent multi-MB GET/POST over HTTP and HTTPS with SHA-256 integrity verification (marked `largedata`, run via `make test-large-data`) |
 | `test_debug.py` | Debug module tests — `Debug` singleton, `pprint`, `dprint` |
@@ -53,6 +53,9 @@ uv run python -m pytest tests --cov --cov-config=pyproject.toml --cov-report=xml
 
 # Run with parallel execution (auto-scales to hardware)
 uv run python -m pytest tests -n auto
+
+# Run the suite with Python's standard asyncio event loop
+PX_EVENT_LOOP=asyncio uv run python -m pytest tests -n auto
 ```
 
 ### Windows testing via WSL2
@@ -140,10 +143,13 @@ To override the auto-computed value, either pass an explicit `-n N` or set the
 ## CI testing
 
 GitHub Actions runs the full test suite on every push to the `devel` branch and
-on pull requests via `.github/workflows/ci.yml`. The test matrix covers 11
-configurations: Ubuntu x86_64 on Python 3.10–3.14, Ubuntu ARM64
+on pull requests via `.github/workflows/ci.yml`. The test matrix covers 13
+configurations: Ubuntu x86_64 on Python 3.10–3.14 plus asyncio on Python 3.14,
+Ubuntu ARM64
 (`ubuntu-24.04-arm`) on 3.10 and 3.14, macOS on 3.10 and 3.14, and Windows on
-3.10 and 3.14. An additional `tests-musl` job runs the test suite inside
+3.10 and 3.14 plus asyncio on 3.14. The asyncio jobs set `PX_EVENT_LOOP=asyncio`
+to cover the standard-library fallback; all other jobs cover automatic
+winloop/uvloop selection. An additional `tests-musl` job runs the test suite inside
 musllinux Docker containers on both x86_64 and aarch64 with Python 3.10 and
 3.14 (4 jobs). All Python versions (3.10–3.14) are additionally tested via tox
 in the build workflow's `test-binary` job.

@@ -57,26 +57,68 @@ def test_start_server_passes_backlog():
 async def _accepted_nodelay(use_sock):
     seen = []
 
-    async def handler(reader, writer):
-        s = writer.get_extra_info("socket")
-        seen.append(s.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY))
-        writer.close()
+    class Recorder:
+        def __init__(self, reader, writer):
+            self.writer = writer
 
-    if use_sock:
-        sock = px_main.create_listen_socket("127.0.0.1", 0)
-        server = await asyncio.start_server(handler, sock=sock, backlog=px_main.LISTEN_BACKLOG)
-    else:
-        server = await asyncio.start_server(handler, "127.0.0.1", 0, backlog=px_main.LISTEN_BACKLOG)
-    port = server.sockets[0].getsockname()[1]
-    _, w = await asyncio.open_connection("127.0.0.1", port)
-    for _ in range(100):
-        if seen:
-            break
-        await asyncio.sleep(0.02)
-    w.close()
-    server.close()
-    await server.wait_closed()
+        async def handle(self):
+            s = self.writer.get_extra_info("socket")
+            seen.append(s.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY))
+            self.writer.close()
+
+    with (
+        unittest.mock.patch.object(px_main.handler, "ConnectionHandler", Recorder),
+        unittest.mock.patch.object(px_main, "verify_client", return_value=True),
+    ):
+        if use_sock:
+            sock = px_main.create_listen_socket("127.0.0.1", 0)
+            server = await px_main.start_server("127.0.0.1", 0, sock=sock)
+        else:
+            server = await px_main.start_server("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        _, w = await asyncio.open_connection("127.0.0.1", port)
+        for _ in range(100):
+            if seen:
+                break
+            await asyncio.sleep(0.02)
+        w.close()
+        server.close()
+        await server.wait_closed()
     return seen
+
+
+class _NoSocketWriter:
+    def __init__(self, sock):
+        self.sock = sock
+
+    def get_extra_info(self, name):
+        return self.sock if name == "socket" else None
+
+
+class _FailingSocket:
+    type = socket.SOCK_STREAM
+
+    def setsockopt(self, *args):
+        raise OSError("unsupported")
+
+
+def test_handle_connection_tolerates_missing_or_failing_socket():
+    async def run():
+        handled = []
+
+        class Recorder:
+            def __init__(self, reader, writer):
+                handled.append(writer)
+
+            async def handle(self):
+                pass
+
+        with unittest.mock.patch.object(px_main.handler, "ConnectionHandler", Recorder):
+            await px_main.handle_connection(None, _NoSocketWriter(None))
+            await px_main.handle_connection(None, _NoSocketWriter(_FailingSocket()))
+        return handled
+
+    assert len(asyncio.run(run())) == 2
 
 
 @pytest.mark.parametrize("use_sock", [True, False])

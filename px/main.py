@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import contextlib
 import multiprocessing
 import os
 import signal
@@ -165,6 +166,13 @@ def verify_client(client_address):
 
 async def handle_connection(reader, writer):
     "Handle a new client connection"
+    # asyncio only sets TCP_NODELAY when the accepted socket reports IPPROTO_TCP, which
+    # Windows accept() sockets do not, so set it here for every event loop
+    sock = writer.get_extra_info("socket")
+    if sock is not None and sock.type == socket.SOCK_STREAM:
+        with contextlib.suppress(OSError):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
     peername = writer.get_extra_info("peername")
     if peername and not verify_client(peername[0]):
         writer.close()

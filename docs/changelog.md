@@ -12,6 +12,12 @@
   (CPython bug #93821). Falls back to the default event loop gracefully if
   the libuv library is not available (#268).
 
+### Bug fixes
+- Listen backlog raised from 128 to 2048, avoiding ~1 second SYN-retransmit
+  stalls at 200+ concurrent connections.
+- `TCP_NODELAY` is now set on accepted client connections on the plain asyncio
+  loop, removing ~40 ms per round trip on CONNECT tunnels.
+
 ---
 
 ## v0.12.0 — 2026-07-21

@@ -12,7 +12,9 @@ Px uses an async, single-process architecture (with optional multi-process
 scaling via `--workers`):
 
 1. **Process** (`main.py`) — parses config, runs an `asyncio` event loop with
-   `asyncio.start_server` bound to the configured listen address and port.
+   `asyncio.start_server` bound to the configured listen address and port (listen backlog 2048, set
+   once as `LISTEN_BACKLOG`; listening sockets are created with
+   `IPPROTO_TCP` so plain asyncio sets `TCP_NODELAY` on accepted connections).
    The event loop uses libuv via `winloop` on Windows and `uvloop` on
    Linux/macOS for improved throughput and to avoid a CPython ProactorEventLoop
    bug on Windows (#93821).  Falls back to the default asyncio event loop if

@@ -59,6 +59,9 @@ _FD_LIMIT_FALLBACKS = (8192, 4096, 2048, 1024)
 # Warn if the final soft limit is below this threshold
 _FD_LIMIT_WARN = 1024
 
+# Listen backlog; 128 saturates at 200+ concurrent connects (SYN retransmit stalls)
+LISTEN_BACKLOG = 2048
+
 
 def raise_nofile_limit():
     """Raise the RLIMIT_NOFILE soft limit toward the hard limit (Unix only).
@@ -106,7 +109,7 @@ def raise_nofile_limit():
 
 def create_listen_socket(listen, port):
     "Create a bound, listening TCP socket for the given address and port"
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -115,7 +118,7 @@ def create_listen_socket(listen, port):
     except OSError:
         sock.close()
         raise
-    sock.listen(128)
+    sock.listen(LISTEN_BACKLOG)
     sock.setblocking(False)
     return sock
 
@@ -162,9 +165,9 @@ async def handle_connection(reader, writer):
 async def start_server(listen, port, sock=None):
     "Start an async proxy server"
     if sock is not None:
-        server = await asyncio.start_server(handle_connection, sock=sock, backlog=128)
+        server = await asyncio.start_server(handle_connection, sock=sock, backlog=LISTEN_BACKLOG)
     else:
-        server = await asyncio.start_server(handle_connection, listen, port, backlog=128, reuse_address=True)
+        server = await asyncio.start_server(handle_connection, listen, port, backlog=LISTEN_BACKLOG, reuse_address=True)
     return server
 
 

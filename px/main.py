@@ -43,7 +43,7 @@ def _configure_event_loop():
         else:
             import uvloop as _libuv
     except ImportError:
-        _libuv = None  # type: ignore[assignment]
+        _libuv = None
 
     # Python 3.10-3.11 require a global policy. This occurs after each process
     # has parsed its configuration, including spawned workers.

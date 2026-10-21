@@ -1011,19 +1011,3 @@ class State:
 
 # Create instance of State object
 STATE = State()
-
-
-def get_event_loop():
-    """Return the event loop selected before full configuration initialization."""
-    flags = STATE.parse_cli()
-    env = STATE.parse_env()
-    ini_path = get_ini_path(flags, env)
-    ini = configparser.ConfigParser()
-    if ini_path and os.path.exists(ini_path):
-        ini.read(ini_path)
-
-    event_loop = ini.get("settings", "event_loop", fallback=DEFAULTS["event_loop"])
-    event_loop = env.get("event_loop", event_loop)
-    event_loop = flags.get("event_loop", event_loop)
-    event_loop = event_loop.strip().lower()
-    return event_loop if event_loop in ["auto", "asyncio"] else "auto"

@@ -139,7 +139,8 @@ class TestEventLoopSelection:
         monkeypatch.delenv("PX_EVENT_LOOP", raising=False)
         (tmp_path / "px.ini").write_text("[settings]\nevent_loop = asyncio\n")
 
-        assert config.get_event_loop() == "asyncio"
+        config.STATE.parse_config()
+        assert config.STATE.event_loop == "asyncio"
 
     def test_ini_configures_asyncio_at_runtime(self, tmp_path):
         (tmp_path / "px.ini").write_text("[settings]\nevent_loop = asyncio\n")
@@ -164,13 +165,15 @@ class TestEventLoopSelection:
         monkeypatch.setenv("PX_EVENT_LOOP", "asyncio")
         (tmp_path / "px.ini").write_text("[settings]\nevent_loop = auto\n")
 
-        assert config.get_event_loop() == "asyncio"
+        config.STATE.parse_config()
+        assert config.STATE.event_loop == "asyncio"
 
     def test_command_line_overrides_environment(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["px", "--event-loop=auto"])
         monkeypatch.setenv("PX_EVENT_LOOP", "asyncio")
 
-        assert config.get_event_loop() == "auto"
+        config.STATE.parse_config()
+        assert config.STATE.event_loop == "auto"
 
     def test_import_does_not_load_dotenv(self, tmp_path):
         """Importing px.main must not let a CWD dotenv file alter the process."""
@@ -182,8 +185,7 @@ class TestEventLoopSelection:
             [
                 sys.executable,
                 "-c",
-                "import os; from px import main; "
-                "assert 'PX_IMPORT_TEST_SENTINEL' not in os.environ",
+                "import os; from px import main; assert 'PX_IMPORT_TEST_SENTINEL' not in os.environ",
             ],
             cwd=tmp_path,
             env=env,

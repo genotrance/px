@@ -50,7 +50,9 @@ def _configure_event_loop():
     if _libuv is not None and sys.version_info < (3, 12):
         _libuv.install()
 
+
 warnings.filterwarnings("ignore")
+
 
 def _run_async(coro):
     """Run a coroutine with the configured event loop."""

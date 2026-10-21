@@ -28,6 +28,17 @@ Each platform produces two archives (`.tar.gz` on Linux/Mac, `.zip` on Windows):
 - `px-vX.Y.Z-<os>-<abi>-<arch>-wheels` — prebuilt dependency wheels for
   offline `pip install` across Python 3.10–3.14.
 
+The wheel archives include the platform's default event loop: `uvloop` for
+Linux (glibc and musl) and macOS, or `winloop` for Windows. They cannot omit
+`uvloop` while it remains a declared `px-proxy` dependency: offline `pip
+install --no-index` needs the wheel to resolve the package. The musl wheel
+archive is also the input to the CI Docker build.
+
+Linux and macOS Nuitka builds explicitly include `uvloop`, since its guarded
+import is not reliably discovered by Nuitka. Windows uses Python Embedded,
+which installs `winloop` from the matching wheel archive. Px falls back to
+`asyncio` when either loop cannot be imported at runtime.
+
 ## `pyproject.toml`
 
 Package metadata, dependencies, and all tool configuration (ruff, mypy, pytest,
@@ -169,6 +180,9 @@ credentials are stored as repository secrets (`DOCKERHUB_USERNAME` and
 `docker/Dockerfile` supports both CI and local builds via a `BUILDER` arg.
 CI uses the default (`ci`) which installs from pre-built wheel archives. Local
 builds use `BUILDER=local` which copies the source tree and runs `pip install`.
+The CI image uses the Linux musl wheel archive, including its `uvloop` wheel;
+local source installs resolve the same dependency. Thus both image variants use
+the Linux default event loop, with Px retaining its runtime `asyncio` fallback.
 Run `make docker` to build both images locally.
 
 Three additional Dockerfiles support the Kerberos integration test

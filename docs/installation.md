@@ -17,6 +17,10 @@ Or using [pipx](https://pipx.pypa.io/):
 
     pipx install px-proxy
 
+These installs select the platform event loop automatically: `uvloop` on Linux
+and macOS, and `winloop` on Windows. Px falls back to Python's built-in
+`asyncio` event loop if that optional import is unavailable.
+
 On Windows, [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
 and [Scoop](https://scoop.sh) can also be used:
 
@@ -35,12 +39,20 @@ which is why Px offers prebuilt wheels:
 
        python -m pip install px-proxy --no-index -f /path/to/wheels
 
+The matching platform archive includes Px's default event-loop dependency
+(`uvloop` for Linux and macOS, or `winloop` for Windows). It must remain in the
+archive because it is a declared dependency of `px-proxy`, even though Px can
+fall back to `asyncio` when the loop cannot be imported at runtime.
+
 ## Standalone binary
 
 If Python is not available, download the latest compiled binary from the
 [releases](https://github.com/genotrance/px/releases) page. The Windows binary
 is built using Python Embedded and the Mac and Linux binaries are compiled with
 [Nuitka](https://nuitka.net) and contain everything needed to run standalone.
+Linux and macOS Nuitka binaries bundle `uvloop`; the Windows Embedded binary
+installs `winloop` from its matching wheel archive. This includes both glibc and
+musl Linux binaries.
 
 ## Running Px
 

@@ -31,7 +31,9 @@ def px_port(request):
         # Not using pytest-xdist
         pass
 
-    assert is_port_free(port), f"Port {port} in use"
+    # Other test runs may share this host, so use the first free block of 3 ports
+    port = find_free_port_block(port)
+    assert port, "No free port block for Px tests"
     return port
 
 

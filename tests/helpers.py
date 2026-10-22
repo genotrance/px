@@ -1,12 +1,25 @@
+import atexit
 import contextlib
 import os
 import platform
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 import keyring
+
+_port_reservations = set()
+
+
+def _release_port_reservations():
+    for path in _port_reservations:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+
+
+atexit.register(_release_port_reservations)
 
 
 @contextlib.contextmanager
@@ -55,6 +68,39 @@ def find_free_port(start=4000):
         if is_port_free(port):
             return port
         port += 1
+    return None
+
+
+def find_free_port_block(start=3148, count=3):
+    """Find the first port from start where count consecutive ports are free."""
+    for port in range(start, start + 200, count):
+        if not all(is_port_free(port + i) for i in range(count)):
+            continue
+
+        # Reserve the block so concurrent pytest processes do not choose it too.
+        path = os.path.join(tempfile.gettempdir(), f"px-test-ports-{port}-{count}")
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                with open(path) as reservation:
+                    pid = int(reservation.read())
+                os.kill(pid, 0)
+            except (FileNotFoundError, ValueError):
+                # The owner may still be writing its PID.
+                continue
+            except ProcessLookupError:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(path)
+                continue
+            except OSError:
+                continue
+            continue
+
+        with os.fdopen(fd, "w") as reservation:
+            reservation.write(str(os.getpid()))
+        _port_reservations.add(path)
+        return port
     return None
 
 

@@ -146,7 +146,7 @@ class TestEventLoopSelection:
         (tmp_path / "px.ini").write_text("[settings]\nevent_loop = asyncio\n")
         env = {key: value for key, value in os.environ.items() if not key.startswith("PX_")}
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 "-c",
@@ -181,7 +181,7 @@ class TestEventLoopSelection:
         env = copy.deepcopy(os.environ)
         env.pop("PX_IMPORT_TEST_SENTINEL", None)
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 "-c",

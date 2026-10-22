@@ -34,10 +34,11 @@ Linux (glibc and musl) and macOS, or `winloop` for Windows. They cannot omit
 install --no-index` needs the wheel to resolve the package. The musl wheel
 archive is also the input to the CI Docker build.
 
-Linux and macOS Nuitka builds explicitly include `uvloop`, since its guarded
-import is not reliably discovered by Nuitka. Windows uses Python Embedded,
-which installs `winloop` from the matching wheel archive. Px falls back to
-`asyncio` when either loop cannot be imported at runtime.
+Linux and macOS Nuitka builds explicitly include `uvloop`, and Windows Nuitka
+builds explicitly include `winloop`, since their guarded imports are not
+reliably discovered by Nuitka. The Windows Python Embedded build installs
+`winloop` from the matching wheel archive when it installs `px-proxy`. Px falls
+back to `asyncio` when either loop cannot be imported at runtime.
 
 ## `pyproject.toml`
 
@@ -149,10 +150,12 @@ Local build helper used by both developers and the GitHub Actions workflows:
 
 - `--wheel` — builds sdist and wheel into `wheel/`.
 - `--nuitka` — builds a standalone Nuitka binary for the current platform.
-  On Linux/macOS, adds `--include-package=uvloop` since the `try/except` import
-  may not be detected automatically by Nuitka.
+  On Linux/macOS, adds `--include-package=uvloop`; on Windows, adds
+  `--include-package=winloop` alongside the keyring package. The guarded loop
+  imports may not be detected automatically by Nuitka.
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
-  and packages `px.exe` (Windows only).
+  and packages `px.exe` (Windows only). The install uses the matching Windows
+  wheel archive, so the platform dependency metadata installs `winloop`.
 - `--deps` — builds dependency wheels for the current Python version.
 - `--depspkg` — packages all dependency wheels into a release archive with
   sha256 checksums.

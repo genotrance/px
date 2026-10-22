@@ -229,8 +229,8 @@ def nuitka():
     # Build
     flags = ""
     if sys.platform == "win32":
-        # keyring dependency
-        flags = "--include-package=win32ctypes"
+        # keyring and winloop dependencies
+        flags = "--include-package=win32ctypes --include-package=winloop"
     else:
         # uvloop is imported inside try/except so Nuitka may not detect it
         flags = "--include-package=uvloop"

@@ -312,6 +312,21 @@ versions only CONNECT tunnels honour `--idle`.
 Increase the idle timeout to 120 seconds (`--idle=120`) since the default MQTT
 keepalive period is 60 seconds.
 
+### Retrying an upstream proxy after repeated authentication failures
+
+By default, once an upstream proxy has rejected three requests in a row with
+407 (Proxy Authentication Required), Px stops sending it further requests
+until the next Kerberos ticket renewal (or restart) resets that state - a
+temporary credential or proxy issue otherwise has no other way to recover.
+
+`--authretry=<seconds>` lets Px probe a blocked proxy again on its own: once
+that many seconds have passed since it was blocked, Px lets exactly one
+request through as a probe (other requests keep being refused while the probe
+is outstanding, even under concurrent load). A successful probe response
+unblocks the proxy immediately; another 407 blocks it for another interval.
+This needs a pymcurl that provides `MCurl.set_auth_retry`; with older versions
+`--authretry` has no effect and Px logs a warning.
+
 ## Dependencies
 
 Px depends on the following Python packages:

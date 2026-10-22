@@ -22,13 +22,12 @@ import statistics
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SITECUSTOMIZE = '''
+SITECUSTOMIZE = """
 import os, socket, sys, time
 
 _mode = os.environ.get("PX_BENCH_DNS_MODE", "normal")
@@ -72,7 +71,7 @@ def gethostbyname(host):
 _real_ghn = socket.gethostname
 socket.getaddrinfo = getaddrinfo
 socket.gethostbyname = gethostbyname
-'''
+"""
 
 PAC = """
 function FindProxyForURL(url, host) {
@@ -99,9 +98,7 @@ async def _upstream_main(port, ready):
         try:
             while (await reader.readline()) not in (b"\r\n", b"\n", b""):
                 pass
-            writer.write(
-                b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(BODY) + BODY
-            )
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(BODY) + BODY)
             await writer.drain()
         except Exception:
             pass
@@ -131,7 +128,7 @@ def start_px(scenario, mode, workdir, up_port):
     os.makedirs(hook, exist_ok=True)
     with open(os.path.join(hook, "sitecustomize.py"), "w") as f:
         f.write(SITECUSTOMIZE)
-    args = [sys.executable, "-m", "px", "--port=%d" % port, "--hostonly"]
+    args = [sys.executable, "-m", "px", f"--port={port}", "--hostonly"]
     if scenario == "pac":
         pac = os.path.join(workdir, "bench.pac")
         with open(pac, "w") as f:
@@ -194,7 +191,7 @@ def run_level(px_port, up_port, conc, timeout):
     ok = sum(1 for x in res if x[1])
 
     def pct(p):
-        return lat[min(len(lat) - 1, int(round(p * (len(lat) - 1))))]
+        return lat[min(len(lat) - 1, round(p * (len(lat) - 1)))]
 
     return {
         "concurrency": conc,

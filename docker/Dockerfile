@@ -17,14 +17,16 @@ COPY ${WHEELS_DIR}/px-v${VERSION}-linux-musl-x86_64-wheels.tar.gz /tmp/wheels.ta
 RUN tar -xzf /tmp/wheels.tar.gz -C /tmp
 
 # Install px
-RUN python -m pip install --user px-proxy --no-index -f /tmp --no-cache-dir
+RUN python -m pip install --user px-proxy --no-index -f /tmp --no-cache-dir && \
+    python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
 
 ###
 # Local builder — installs from source tree
 FROM base AS builder-local
 
 COPY . /src
-RUN pip install --user /src
+RUN pip install --upgrade --user /src && \
+    python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
 
 ###
 # Select builder based on BUILDER arg

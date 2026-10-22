@@ -82,6 +82,14 @@ scaffolding (environment setup, wheel building, binary building, archive
 extraction, and test execution) is implemented as shell functions in `build.sh`
 and called from the workflow steps.
 
+The setup action refreshes `quickjs-ng` from PyPI on every run, subject only to
+the minimum version declared in `pyproject.toml`, and prints the resolved
+version. `build_wheels` does the same before creating dependency archives, so
+the Linux, macOS, and Windows binary jobs consume the newly resolved wheel.
+The Docker builders also print the installed version; CI Docker images install
+from that generated wheel archive while local images resolve the newest release
+from PyPI.
+
 - **setup** — extracts the version from `pyproject.toml` and makes it available
   to downstream jobs.
 - **sdist** — builds the sdist and pure-Python wheel using `tools.py --wheel`.

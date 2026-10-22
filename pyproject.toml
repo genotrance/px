@@ -38,7 +38,7 @@ dependencies = [
     "pymcurl",
     "pyspnego",
     "python-dotenv",
-    "quickjs-ng",
+    "quickjs-ng>=0.17.0.1",
     "uvloop>=0.21.0; sys_platform != 'win32'",
     "winloop>=0.6.0; sys_platform == 'win32'",
 ]

@@ -226,6 +226,28 @@ the specified encoding is used directly. Decode failures are printed via
 This allows Px to pick up proxy changes (e.g. WPAD updates, PAC file changes)
 without restarting.
 
+## Blocked-proxy auth retry
+
+mcurl tracks per-proxy authentication failures in `MCurl.failed` and refuses
+to send further requests to a proxy once `failure_threshold` (3) consecutive
+407s have been recorded — `Curl.set_proxy()` returns `False` and the handler
+sends 401 to the client without contacting the upstream proxy. `--authretry`
+(`STATE.authretry`, default `0`) is handed to `mcurl.MCurl.set_auth_retry()`
+right after the multi object is created in `parse_config()`, guarded by
+`hasattr(self.mcurl, "set_auth_retry")` since older pymcurl releases do not
+have it; if `--authretry` is set but unsupported, Px logs a warning once and
+otherwise behaves as before. mcurl itself owns all retry/backoff state (the
+blocked-since timestamp, the in-flight probe slot) — Px only forwards the
+configured interval and never tracks failures or retries on its own.
+
+With `--authretry` set, once the interval has elapsed since a proxy was
+blocked, mcurl admits exactly one `Curl` handle through `set_proxy()` as a
+probe; every other handle for that proxy keeps being refused until the probe
+completes, even under concurrent load, since the admission decision and the
+probe slot are both guarded by mcurl's internal lock. A successful probe
+response clears `MCurl.failed` for that proxy immediately; a 407 re-blocks it
+for another interval.
+
 ## CONNECT tunnel relay
 
 CONNECT tunnels are the most complex part of the proxy. After `mcurl.do()`
@@ -443,7 +465,10 @@ When libcurl reports an SSO failure (`resp == 401`, "single sign-on failed") or
 a mechanism error (`resp == 407`, "auth mechanism error"), the reactive check
 forces a ticket renewal bypassing both the fast-path timestamp gate and the
 in-lock double-check. If the ticket is invalid, a new one is acquired and
-`MCURL.failed` is cleared so previously-blocked proxies are retried.
+previously-blocked proxies are retried: `reload_kerberos()` calls
+`mcurl.reset_proxy_failures()` when the installed pymcurl provides it (see
+[Blocked-proxy auth retry](#blocked-proxy-auth-retry)), falling back to
+clearing `MCURL.failed` directly on older versions.
 
 ### Credential cache cleanup
 

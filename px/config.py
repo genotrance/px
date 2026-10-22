@@ -376,6 +376,7 @@ DEFAULTS = {
     "threads": "32",
     "idle": "30",
     "socktimeout": "20.0",
+    "authretry": "0",
     "proxyreload": "60",
     "foreground": "0",
     "log": "0",
@@ -402,6 +403,7 @@ class State:
     pac = ""
     proxyreload = 60
     socktimeout = 20.0
+    authretry = 0.0
     useragent = ""
 
     # Auth
@@ -462,6 +464,7 @@ class State:
             "log": self.set_debug,
             "idle": self.set_idle,
             "socktimeout": self.set_socktimeout,
+            "authretry": self.set_authretry,
             "proxyreload": self.set_proxyreload,
             "event_loop": self.set_event_loop,
             "test": self.set_test,
@@ -628,6 +631,9 @@ class State:
         self.socktimeout = socktimeout
         socket.setdefaulttimeout(socktimeout)
 
+    def set_authretry(self, authretry):
+        self.authretry = authretry
+
     def set_proxyreload(self, proxyreload):
         self.proxyreload = proxyreload
 
@@ -706,7 +712,7 @@ class State:
         # [settings]
         elif name in ["workers", "threads", "idle", "proxyreload", "foreground", "log"]:
             self.cfg_int_init("settings", name, val, callback, override)
-        elif name in ["socktimeout"]:
+        elif name in ["socktimeout", "authretry"]:
             self.cfg_float_init("settings", name, val, callback, override)
         elif name in ["event_loop"]:
             self.cfg_str_init("settings", name, val, callback, override)
@@ -909,6 +915,12 @@ class State:
         # Curl multi object to manage all easy connections
         self.mcurl = mcurl.MCurl(debug_print=dprint)
 
+        # Single-probe auth retry for proxies blocked by repeated 407s
+        if hasattr(self.mcurl, "set_auth_retry"):
+            self.mcurl.set_auth_retry(self.authretry)
+        elif self.authretry > 0:
+            pprint("--authretry requires a newer pymcurl with set_auth_retry support - ignoring")
+
         # Increase idle connection reuse cache (default is 4 x easy handles).
         # Active CONNECT tunnels are protected by keeping their handle in the
         # multi — this setting only affects how many idle HTTP connections curl
@@ -956,7 +968,10 @@ class State:
         if result is True:
             # Fresh ticket acquired — clear auth failure cache so
             # previously-blocked proxies are retried
-            self.mcurl.failed.clear()
+            if hasattr(self.mcurl, "reset_proxy_failures"):
+                self.mcurl.reset_proxy_failures()
+            else:
+                self.mcurl.failed.clear()
 
     def cleanup_kerberos(self):
         """Explicitly clean up Kerberos credential cache."""

@@ -310,40 +310,47 @@ def test(testurl):
                     os._exit(config.ERROR_TEST)
 
     def query(url, method="GET", data=None, do_quit=True, check=False, insecure=False):
+        success = False
         if do_quit:
             waitforpx()
 
-        ec = mcurl.Curl(url, method)
-        ec.set_proxy(listen, port)
-        handler.set_curl_auth(ec, auth)
-        if url.startswith("https"):
-            ec.set_insecure(insecure)
-        ec.set_debug(STATE.debug is not None)
-        if data is not None:
-            ec.buffer(data.encode("utf-8"))
-            ec.set_headers({"Content-Length": len(data)})
-        else:
-            ec.buffer()
-        ec.set_useragent("mcurl v" + __version__)
-        ret = ec.perform()
         pprint(f"\nTesting {method} {url}")
-        if ret != 0:
-            pprint(f"Failed with error {ret}\n{ec.errstr}")
-            os._exit(config.ERROR_TEST)
-        else:
-            ret_data = ec.get_data()
-            pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
-            if check:
-                # Tests against httpbin
-                if url not in ret_data:
-                    pprint("Failed: response does not contain " + f"{url}:\n{ret_data}")
-                    os._exit(config.ERROR_TEST)
-                if data is not None and data not in ret_data:
-                    pprint("Failed: response does not match " + f"{data}:\n{ret_data}")
-                    os._exit(config.ERROR_TEST)
+        try:
+            ec = mcurl.Curl(url, method)
+            ec.set_proxy(listen, port)
+            handler.set_curl_auth(ec, auth)
+            if url.startswith("https"):
+                ec.set_insecure(insecure)
+            ec.set_debug(STATE.debug is not None)
+            if data is not None:
+                ec.buffer(data.encode("utf-8"))
+                ec.set_headers({"Content-Length": len(data)})
+            else:
+                ec.buffer()
+            ec.set_useragent("mcurl v" + __version__)
+            ret = ec.perform()
+            if ret != 0:
+                pprint(f"Failed with error {ret}\n{ec.errstr}")
+            else:
+                success = True
+                ret_data = ec.get_data()
+                pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
+                if check:
+                    # Tests against httpbin
+                    if url not in ret_data:
+                        pprint("Failed: response does not contain " + f"{url}:\n{ret_data}")
+                        success = False
+                    if data is not None and data not in ret_data:
+                        pprint("Failed: response does not match " + f"{data}:\n{ret_data}")
+                        success = False
+        except Exception as exc:
+            pprint(f"Failed with exception: {exc}")
 
+        if success:
+            pprint("Passed")
         if do_quit:
-            os._exit(config.ERROR_SUCCESS)
+            os._exit(config.ERROR_SUCCESS if success else config.ERROR_TEST)
+        return success
 
     def queryall(testurl):
         import uuid
@@ -372,11 +379,16 @@ def test(testurl):
 
         # Run all method queries concurrently for speed
         threads = []
+        results = []
+
+        def run_query(*args, **kwargs):
+            results.append(query(*args, **kwargs))
+
         for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
             for url in urls:
                 data = str(uuid.uuid4()) if method in ["POST", "PUT", "PATCH"] else None
                 t = threading.Thread(
-                    target=query,
+                    target=run_query,
                     args=(url + method.lower(), method, data),
                     kwargs={"do_quit": False, "check": True, "insecure": insecure},
                 )
@@ -385,7 +397,7 @@ def test(testurl):
         for t in threads:
             t.join()
 
-        os._exit(config.ERROR_SUCCESS)
+        os._exit(config.ERROR_SUCCESS if all(results) else config.ERROR_TEST)
 
     # Run testurl query in a thread
     if testurl in ["all", "1"] or testurl.startswith("all:"):

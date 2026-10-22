@@ -48,7 +48,8 @@ Actions:
   --test=URL | --test
   Test Px as configured with the URL specified. This can be used to confirm that
   Px is configured correctly and is able to connect and authenticate with the
-  upstream proxy. If URL is skipped, Px runs multiple tests against httpbin.org.
+  upstream proxy. If URL is skipped, Px runs multiple tests against httpbin.org,
+  reports each result, and fails only after all tests finish.
 
 Configuration:
   --config= | PX_CONFIG=

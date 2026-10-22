@@ -49,7 +49,7 @@ The `--save` flag writes the current configuration to `px.ini`:
 | `--restart` | Quit and start a new instance |
 | `--password` | Prompt and save password to keyring |
 | `--client-password` | Prompt and save client password to keyring |
-| `--test[=URL]` | Test Px connectivity (defaults to httpbin.org) |
+| `--test[=URL]` | Test Px connectivity (defaults to httpbin.org); reports every check before failing if any fail |
 
 ---
 

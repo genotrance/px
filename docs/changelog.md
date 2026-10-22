@@ -4,6 +4,10 @@
 
 ## v0.13.0
 
+### Improvements
+- `px --test` now reports every connectivity check as passed or failed and
+  completes all checks before returning a failure status (#274).
+
 ### New features
 - Switched to libuv-based event loops: `winloop` on Windows, `uvloop` on
   Linux/macOS. These replace Python's default asyncio event loop with libuv,

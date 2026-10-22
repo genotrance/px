@@ -62,6 +62,13 @@ The same setting is available as `PX_EVENT_LOOP=asyncio` or
 `settings:event_loop=asyncio` in `px.ini`. Set it to `auto` (the default) to
 restore automatic winloop or uvloop selection.
 
+### Testing connectivity
+
+`px --test` exercises GET, POST, PUT, DELETE, and PATCH requests against both
+HTTP and HTTPS httpbin endpoints. Each request is reported as passed or failed;
+Px completes every request before returning a non-zero exit code if any fail.
+Use `--test=URL` to test one configured endpoint instead.
+
 ## Credentials
 
 If SSPI is not available or not preferred, providing `--username` in

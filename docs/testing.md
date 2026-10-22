@@ -136,8 +136,9 @@ count based on CPU count and platform:
   connections on resource-constrained CI runners.
 
 Each xdist worker starts its search for proxy test ports (`fixtures.py`) at a
-worker-specific offset and reserves the first free block of 3 consecutive ports,
-so concurrent test runs on the same host skip ports already in use. Network
+worker-specific offset and atomically reserves the first free block of 3
+consecutive ports, so concurrent test runs on the same host skip ports already
+in use. Network
 tests (`test_network.py`) reserve 10 ports for their own worker offset, falling
 back to the next free port when the computed one is busy.
 

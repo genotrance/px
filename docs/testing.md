@@ -39,7 +39,7 @@ This runs `pytest` with coverage via `uv run`.
 
 ```bash
 # Install dev dependencies
-uv sync
+uv sync --upgrade-package quickjs-ng
 uv pip install -e .
 
 # Run all tests
@@ -57,6 +57,10 @@ uv run python -m pytest tests -n auto
 # Run the suite with Python's standard asyncio event loop
 PX_EVENT_LOOP=asyncio uv run python -m pytest tests -n auto
 ```
+
+The upgrade command refreshes `quickjs-ng` from PyPI while preserving every
+other locked package. The shared CI setup runs it too and prints the resolved
+version before PAC tests execute.
 
 ### Windows testing via WSL2
 

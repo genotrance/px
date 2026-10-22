@@ -2,4 +2,5 @@
 FROM python:alpine
 RUN apk add --no-cache heimdal dbus gnome-keyring tini
 COPY . /src
-RUN pip install /src
+RUN pip install --upgrade /src && \
+    python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"

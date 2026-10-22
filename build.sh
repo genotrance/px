@@ -25,6 +25,10 @@ get_version() {
     grep '^version' pyproject.toml | head -1 | cut -d'"' -f2
 }
 
+log_quickjs_version() {
+    "$1" -c 'from importlib.metadata import version; print(f"quickjs-ng version: {version('"'"'quickjs-ng'"'"')}")'
+}
+
 ensure_uv() {
     if command -v uv > /dev/null 2>&1; then
         return
@@ -57,7 +61,9 @@ build_wheels() {
             PY=$(find_python "$pyver")
             if [ -f "$PY" ]; then
                 echo "Building wheels for Python $pyver"
+                "$PY" -m pip wheel --upgrade 'quickjs-ng>=0.17.0.1' -w wheels
                 "$PY" -m pip wheel . -w wheels
+                echo "quickjs-ng wheel: $(find wheels -maxdepth 1 -name 'quickjs_ng-*.whl' -printf '%f\n' | tail -1)"
             fi
         done
     else
@@ -67,7 +73,9 @@ build_wheels() {
             PY=$(find_python "$pyver") || continue
             if [ -n "$PY" ]; then
                 echo "Building wheels for Python $pyver"
+                "$PY" -m pip wheel --upgrade 'quickjs-ng>=0.17.0.1' -w wheels
                 "$PY" -m pip wheel . -w wheels
+                echo "quickjs-ng wheel: $(find wheels -maxdepth 1 -name 'quickjs_ng-*.whl' -printf '%f\n' | tail -1)"
             fi
         done
     fi
@@ -121,6 +129,7 @@ build_binary() {
             pip install 'patchelf==0.17.2.4'
             uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
             uv pip install px-proxy --no-index -f "$WHEELS"
+            log_quickjs_version python
             python tools.py --nuitka
             python tools.py --depspkg
             ;;
@@ -133,6 +142,7 @@ build_binary() {
             . .venv/bin/activate
             uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
             uv pip install px-proxy --no-index -f "$WHEELS"
+            log_quickjs_version python
             python tools.py --nuitka
             python tools.py --depspkg
             ;;
@@ -141,6 +151,7 @@ build_binary() {
             ensure_uv
             PY=$(uv python find 3.13)
             uv pip install nuitka pymcurl -f "$WHEELS"
+            uv run python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
             "$PY" tools.py --nuitka
             "$PY" tools.py --depspkg
             ;;
@@ -149,6 +160,7 @@ build_binary() {
             ensure_uv
             PY=$(uv python find 3.13)
             uv pip install pymcurl -f "$WHEELS"
+            uv run python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
             "$PY" tools.py --embed
             "$PY" tools.py --depspkg
             ;;
@@ -289,7 +301,7 @@ build_local() {
     done
 
     echo "=== Building sdist ==="
-    uv sync
+    uv sync --upgrade-package quickjs-ng
     uv pip install build twine
     uv run python tools.py --wheel || return 1
 

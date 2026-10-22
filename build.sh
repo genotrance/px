@@ -31,7 +31,7 @@ get_version() {
 }
 
 log_quickjs_version() {
-    "$1" -c 'from importlib.metadata import version; print(f"quickjs-ng version: {version('"'"'quickjs-ng'"'"')}")'
+    "$1" -c 'import importlib.metadata as m; print("quickjs-ng version:", m.version("quickjs-ng"))'
 }
 
 ensure_uv() {
@@ -218,7 +218,7 @@ build_binary() {
             ensure_uv
             select_python
             uv pip install nuitka pymcurl -f "$WHEELS"
-            uv run python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
+            uv run python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
             "$PY" tools.py --nuitka
             "$PY" tools.py --depspkg
             ;;
@@ -227,7 +227,7 @@ build_binary() {
             ensure_uv
             select_python
             uv pip install pymcurl -f "$WHEELS"
-            uv run python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
+            uv run python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
             "$PY" tools.py --embed
             "$PY" tools.py --depspkg
             ;;

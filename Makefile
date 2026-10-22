@@ -5,7 +5,7 @@ TAG := genotrance/px
 install: ## Install the virtual environment and pre-commit hooks
 	@uv sync --upgrade-package quickjs-ng
 	@uv pip install -e . -f mcurllib
-	@uv run python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
+	@uv run python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
 	@uv run python -m pre_commit install
 
 .PHONY: check

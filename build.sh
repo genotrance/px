@@ -21,6 +21,11 @@ get_os() {
     esac
 }
 
+# CPython minor version bundled in every binary (keep in sync with PY_MINOR in
+# tools.py). The newest published patch release is always used, never a pinned
+# patch version.
+PY_MINOR="${PY_MINOR:-3.13}"
+
 get_version() {
     grep '^version' pyproject.toml | head -1 | cut -d'"' -f2
 }
@@ -96,8 +101,70 @@ install_upx() {
 
 # Install system build dependencies for Alpine
 install_alpine_deps() {
-    apk add --no-cache curl python3 python3-dev py3-pip gcc musl-dev \
-        libffi-dev ccache upx
+    apk add --no-cache curl gcc musl-dev libffi-dev ccache upx
+}
+
+# Install the newest uv-managed (python-build-standalone) CPython of PY_MINOR
+# and set PY to it. python-build-standalone ships new patch releases within a
+# day of python.org and provides musl builds, unlike distro or image pythons.
+install_managed_python() {
+    # uv only knows the Python releases that existed when it was released, and
+    # images may ship an older uv, so put the latest one first on PATH
+    curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh
+    export PATH="$HOME/.local/bin:$PATH"
+    uv --version
+    uv python install "$PY_MINOR"
+    PY=$(uv python find --managed-python "$PY_MINOR")
+}
+
+# Fail unless interpreter $1 is the newest published release of PY_MINOR
+# (fetched from python.org at run time). Prints the bundled version.
+check_python() {
+    "$1" tools.py --check-python
+}
+
+# Set PY to the interpreter to bundle for this platform, failing early if it
+# is not the newest published release of PY_MINOR. Linux glibc prefers the
+# manylinux image's python and falls back to a uv-managed one when the image
+# is stale; musl always uses a uv-managed one (Alpine's apk python is a
+# different minor release); macOS uses setup-python (check-latest).
+select_python() {
+    OS=$(get_os)
+    PY=""
+    case "$OS" in
+        linux-musl)
+            install_managed_python
+            ;;
+        linux-glibc)
+            PY="/opt/python/cp$(echo "$PY_MINOR" | tr -d .)-cp$(echo "$PY_MINOR" | tr -d .)/bin/python3"
+            if ! check_python "$PY"; then
+                echo "manylinux python is stale, using uv-managed CPython $PY_MINOR"
+                install_managed_python
+            fi
+            ;;
+        mac|windows)
+            PY=$(uv python find "$PY_MINOR")
+            ;;
+    esac
+    if [ "$OS" = "windows" ]; then
+        "$PY" tools.py --check-embed
+    else
+        check_python "$PY"
+    fi
+}
+
+# Pre-build guard: resolve the interpreter that build_binary will bundle and
+# fail if it is not the newest published release of PY_MINOR
+check_bundled_python() {
+    NAME="$1"
+    OS=$(get_os)
+    case "$OS" in
+        linux-musl) install_alpine_deps ;;
+        linux-glibc) setup_manylinux ;;
+        mac|windows) ensure_uv ;;
+    esac
+    select_python
+    echo "Python bundled in ${NAME}: $("$PY" -V) ($PY)"
 }
 
 # Set up manylinux static libs
@@ -115,10 +182,10 @@ build_binary() {
     case "$OS" in
         linux-musl)
             install_alpine_deps
-            ensure_uv
-            python3 -m venv .venv
+            select_python
+            "$PY" -m venv .venv
             . .venv/bin/activate
-            pip install 'patchelf==0.17.2.4'
+            uv pip install 'patchelf==0.17.2.4'
             uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
             uv pip install px-proxy --no-index -f "$WHEELS"
             python tools.py --nuitka
@@ -128,7 +195,7 @@ build_binary() {
             install_upx
             setup_manylinux
             ensure_uv
-            PY=/opt/python/cp313-cp313/bin/python3
+            select_python
             "$PY" -m venv .venv
             . .venv/bin/activate
             uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
@@ -139,7 +206,7 @@ build_binary() {
         mac)
             install_upx
             ensure_uv
-            PY=$(uv python find 3.13)
+            select_python
             uv pip install nuitka pymcurl -f "$WHEELS"
             "$PY" tools.py --nuitka
             "$PY" tools.py --depspkg
@@ -147,7 +214,7 @@ build_binary() {
         windows)
             install_upx
             ensure_uv
-            PY=$(uv python find 3.13)
+            select_python
             uv pip install pymcurl -f "$WHEELS"
             "$PY" tools.py --embed
             "$PY" tools.py --depspkg

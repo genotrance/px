@@ -65,7 +65,7 @@ jobs:
           - os: ubuntu-24.04-arm
             image: "quay.io/pypa/musllinux_1_2_aarch64"
             name: linux-musl-aarch64
-          - os: macos-latest
+          - os: macos-15
             name: mac-arm64
           - os: windows-latest
             name: windows-amd64
@@ -118,7 +118,7 @@ jobs:
             image: "alpine:3.21"
             name: linux-musl-aarch64
             alpine: true
-          - os: macos-latest
+          - os: macos-15
             name: mac-arm64
           - os: windows-latest
             name: windows-amd64
@@ -133,6 +133,22 @@ jobs:
       - name: Set up the environment
         if: runner.os != 'Linux'
         uses: ./.github/actions/setup-python-env
+        with:
+          check-latest: "true"
+
+      # Fail early if the Python bundled in the binary is not the newest
+      # published 3.13 release on python.org
+      - name: Check bundled Python (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          SHELL_BIN="${{ matrix.alpine && '/bin/sh' || '/bin/bash' }}"
+          docker run --rm -v ${{ github.workspace }}:/px -w /px \
+            ${{ matrix.image }} $SHELL_BIN -c '. /px/build.sh && check_bundled_python ${{ matrix.name }}'
+
+      - name: Check bundled Python (macOS, Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: . ./build.sh && check_bundled_python ${{ matrix.name }}
 
       - name: Download wheels
         uses: actions/download-artifact@v8

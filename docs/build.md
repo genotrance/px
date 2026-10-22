@@ -94,14 +94,24 @@ and called from the workflow steps.
   distribution (Windows) using `tools.py --nuitka` / `tools.py --embed`.
   Also packages dependency wheel archives with `tools.py --depspkg`.
   Uses `build_binary` from `build.sh`.
-  Linux glibc builds run inside manylinux2014 containers using
-  `/opt/python/cp313-cp313/bin/python3`. Linux musl builds use Alpine
-  containers with system Python and dev headers since Nuitka needs
-  `Python.h` which the musllinux containers lack. Alpine's `patchelf`
-  package (0.18.0) is intentionally not used because Nuitka rejects it as a
-  known buggy release; instead `build.sh` installs `patchelf==0.17.2.4`
-  from PyPI into the build venv. Aarch64 builds run on native
-  `ubuntu-24.04-arm` runners.
+  Every job first prints and checks the interpreter version that it will
+  bundle against the newest published CPython 3.13 patch release on
+  python.org. The check is run again when the build selects its interpreter,
+  so a release cannot continue with a stale runner or container image.
+  macOS resolves the newest patch with `actions/setup-python`'s
+  `check-latest` option. Linux glibc uses the manylinux interpreter when it
+  passes the check, otherwise it installs the newest managed CPython through
+  the current uv release. Linux musl always uses that managed CPython because
+  Alpine's system Python can have a different minor version; its
+  python-build-standalone distribution includes the headers Nuitka needs.
+  Windows instead checks that python.org publishes the newest patch's amd64
+  embeddable zip, then deterministically downloads that exact asset.
+  During validation on 2026-10-22, the python.org, manylinux, and uv-managed
+  resolutions all returned CPython 3.13.17. Aarch64 builds run on native
+  `ubuntu-24.04-arm` runners. Alpine's `patchelf` package (0.18.0) is
+  intentionally not used because Nuitka rejects it as a known buggy release;
+  instead `build.sh` installs `patchelf==0.17.2.4` from PyPI into the build
+  venv.
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
@@ -137,6 +147,9 @@ stays concise. Functions include:
 - `build_wheels` — builds dependency wheels for all supported Python versions.
 - `build_binary` — installs build dependencies and runs `tools.py --nuitka` or
   `--embed` plus `--depspkg`.
+- `check_bundled_python` — the pre-build release guard; resolves and logs the
+  interpreter a binary job will bundle, and rejects it if it is behind the
+  newest published CPython 3.13 patch release.
 - `extract_archives` — unpacks binary and wheel archives for the test-binary job.
 - `test_binary` — sets up tox and runs the test suite against the built artifacts.
 - `build_local` — end-to-end local build and test using Docker containers.
@@ -154,8 +167,11 @@ Local build helper used by both developers and the GitHub Actions workflows:
   `--include-package=winloop` alongside the keyring package. The guarded loop
   imports may not be detected automatically by Nuitka.
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
-  and packages `px.exe` (Windows only). The install uses the matching Windows
-  wheel archive, so the platform dependency metadata installs `winloop`.
+  and packages `px.exe` (Windows only). It selects the highest versioned
+  amd64 embeddable zip published for the newest CPython 3.13 release rather
+  than relying on the order of python.org's directory listing. The install
+  uses the matching Windows wheel archive, so the platform dependency metadata
+  installs `winloop`.
 - `--deps` — builds dependency wheels for the current Python version.
 - `--depspkg` — packages all dependency wheels into a release archive with
   sha256 checksums.
@@ -186,6 +202,10 @@ builds use `BUILDER=local` which copies the source tree and runs `pip install`.
 The CI image uses the Linux musl wheel archive, including its `uvloop` wheel;
 local source installs resolve the same dependency. Thus both image variants use
 the Linux default event loop, with Px retaining its runtime `asyncio` fallback.
+The moving `python:3.13-alpine` base tag is pulled before each image build and
+its interpreter is compared with python.org's newest 3.13 release. The
+completed mini image is checked again before it can be pushed. This makes local
+and release Docker builds fail rather than publishing a stale CPython patch.
 Run `make docker` to build both images locally.
 
 Three additional Dockerfiles support the Kerberos integration test

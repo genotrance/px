@@ -6,6 +6,10 @@ inputs:
     description: "Python version to use"
     required: true
     default: "3.13"
+  check-latest:
+    description: "Resolve the newest published patch release instead of the runner's cached one"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -13,6 +17,7 @@ runs:
     - uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
+        check-latest: ${{ inputs.check-latest }}
         allow-prereleases: true
 
     - name: Install uv

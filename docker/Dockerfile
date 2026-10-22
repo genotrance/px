@@ -1,8 +1,11 @@
 # Select builder: --build-arg BUILDER=local for local builds (default: ci)
 ARG BUILDER=ci
 
+# CPython minor version, always the newest patch release of it
+ARG PYTHON_MINOR=3.13
+
 # Main image to use
-FROM python:alpine AS base
+FROM python:${PYTHON_MINOR}-alpine AS base
 
 ###
 # CI builder — installs from pre-built wheel archives

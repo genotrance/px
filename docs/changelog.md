@@ -5,6 +5,10 @@
 ## v0.13.0
 
 ### Improvements
+- PAC `dnsResolve()` (and so `isResolvable()`/`isInNet()`) and IP-based
+  `--noproxy` matching use a cached, bounded DNS resolver: successful and
+  failed lookups are cached, concurrent lookups of one name are shared, and
+  slow resolvers no longer stall unrelated requests (#273).
 - `px --test` now reports every connectivity check as passed or failed and
   completes all checks before returning a failure status (#274).
 
@@ -33,6 +37,13 @@
   stalls at 200+ concurrent connections.
 - `TCP_NODELAY` is now set on accepted client connections on the plain asyncio
   loop, removing ~40 ms per round trip on CONNECT tunnels.
+
+### Internal
+- New `px/resolver.py` module with a bounded DNS worker pool, positive and
+  negative TTL caches and in-flight de-duplication, used by `px.pac` and
+  `px.wproxy` (#273).
+- New `tools/bench_dns_stalls.py` benchmark measuring PAC and `--noproxy`
+  latency and throughput under slow or failing DNS (#273).
 
 ---
 

@@ -24,6 +24,16 @@ px --test
 For all CLI flags, environment variables, and INI keys, see the
 [configuration reference](configuration.md).
 
+### PAC DNS helpers
+
+PAC `dnsResolve()` requests are resolved asynchronously from the PAC evaluator
+and wait for at most three seconds. A resolution failure or timeout returns
+JavaScript `null`, so standard PAC helpers such as `isResolvable()` and
+`isInNet()` correctly return `false` for hosts that cannot be resolved.
+Successful and failed lookups are cached briefly; IP literals need no DNS.
+`myIpAddress()` discovers a local IPv4 address without resolving the machine
+hostname.
+
 ## Running Px
 
 Once installed, Px can be run as follows:

@@ -190,8 +190,21 @@ initialised with Mozilla PAC utility functions from `pacutils.py`
 (`dnsDomainIs`, `isInNet`, `shExpMatch`, `myIpAddress`, etc.).
 
 `Pac` uses `quickjs.Function` (rather than `quickjs.Context`) to ensure thread
-safety — each call to `find_proxy_for_url()` is dispatched to a thread pool
-internally by `quickjs.Function`.
+safety. PAC JavaScript and its Python callbacks execute on one quickjs worker,
+so callbacks must not perform unbounded blocking work.
+
+`alert`, `dnsResolve`, and `myIpAddress` are the only PAC callbacks implemented
+in Python. `dnsResolve` uses `px.resolver.Resolver`: a dedicated, bounded
+eight-worker DNS pool with per-host-and-address-family positive (60 second) and
+negative (10 second) caches. Concurrent requests for the same name share one
+system lookup; PAC evaluation returns `null` after three seconds if that lookup
+is still running, while its eventual result remains cached. This bounds the
+time a slow resolver can occupy the quickjs worker. IP literals do not use DNS.
+
+`myIpAddress` selects the local IPv4 address with a UDP route probe, which sends
+no packet and does not query the hostname. If no route is available, it uses
+the first active, non-loopback, non-link-local IPv4 interface address, or
+`127.0.0.1` as a last resort.
 
 ### PAC encoding detection
 

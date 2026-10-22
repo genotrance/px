@@ -1,7 +1,6 @@
 "PAC file support using quickjs-ng"
 
 import codecs
-import socket
 import sys
 import threading
 from typing import ClassVar
@@ -10,6 +9,7 @@ import mcurl
 
 from .debug import pprint
 from .pacutils import PACUTILS
+from .resolver import Resolver, my_ip_address
 
 try:
     import quickjs
@@ -27,6 +27,7 @@ class Pac:
     "Load and run PAC files using quickjs-ng"
 
     _lock = None
+    _resolver = None
 
     pac_location = None
     pac_encoding = None
@@ -39,12 +40,16 @@ class Pac:
             dprint = debug_print
 
         self._lock = threading.Lock()
+        self._resolver = Resolver()
 
         self.pac_location = pac_location
         self.pac_encoding = pac_encoding or None
 
     def __del__(self):
         "Release quickjs resources"
+        if self._resolver is not None:
+            self._resolver.close()
+            self._resolver = None
         if self._lock is not None:
             if self.pac_find_proxy_for_url is not None:
                 with self._lock:
@@ -210,12 +215,9 @@ class Pac:
         pass
 
     def dnsResolve(self, host):
-        "Resolve host to IP"
-        try:
-            return socket.gethostbyname(host)
-        except socket.gaierror:
-            return ""
+        "Resolve an IPv4 host address, returning JavaScript null on failure"
+        return self._resolver.lookup(host)
 
     def myIpAddress(self):
-        "Get my IP address"
-        return self.dnsResolve(socket.gethostname())
+        "Get this host's IPv4 address without DNS"
+        return my_ip_address()

@@ -18,10 +18,11 @@ Tests live in `tests/`.
 | `test_debug.py` | Debug module tests — `Debug` singleton, `pprint`, `dprint` |
 | `test_kerberos.py` | Kerberos ticket management — unit tests (mocked subprocess, Linux/macOS only) and Docker-based integration tests against local MIT and Heimdal KDCs (marked `integration`, run via `make test-kerberos`) |
 | `test_network.py` | Network integration tests — `--quit`, `--listen`, `--hostonly`, `--gateway`, `--allow`, `--noproxy` |
-| `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve`, `myIpAddress`) |
+| `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
 | `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
-| `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods |
+| `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |
+| `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 
 ---
 
@@ -346,6 +347,15 @@ Run it from a directory outside the repo with a clean `HOME` so a developer
 `.env` (`PX_NOPROXY`, `PX_THREADS`) does not interfere; `--json` saves results
 for before/after comparison, and `--timeout` bounds each request (requests
 stalled beyond it count as failures).
+
+Before the bounded resolver (#273), slow DNS held up all PAC evaluation on the
+single quickjs worker and every `--noproxy` IP check did its own blocking
+lookup. With 5 second lookups at 50 concurrent requests, PAC went from 0 of 50
+requests completing within 30 seconds to 50 of 50 (p95 about 1 second) and
+`--noproxy` p95 fell from about 10 seconds to under 0.1 seconds. With normal
+or failing DNS, throughput is unchanged within run-to-run variance (repeated
+50-concurrency PAC runs vary by roughly 70-90 requests per second on the same
+revision), so compare several alternating runs rather than a single one.
 
 ---
 

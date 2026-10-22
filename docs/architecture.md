@@ -80,6 +80,7 @@ socket sharing or duplication between processes.
 | `px/wproxy.py` | `Wproxy` — proxy discovery from config, environment, Windows Internet Options, PAC |
 | `px/pac.py` | `Pac` — PAC file loading and evaluation via quickjs-ng |
 | `px/pacutils.py` | Mozilla PAC utility functions injected into the QuickJS runtime |
+| `px/resolver.py` | `Resolver` — bounded, cached DNS lookups shared by PAC callbacks and `--noproxy` IP matching; local IPv4 discovery for `myIpAddress` |
 | `px/debug.py` | `Debug` singleton — stdout/file logging redirection |
 | `px/help.py` | CLI help text (rendered from `--help`) |
 | `px/kerberos.py` | `KerberosManager` — Kerberos ticket lifecycle (kinit, renewal, cleanup) |

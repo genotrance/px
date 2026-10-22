@@ -1,6 +1,5 @@
 import contextlib
 import glob
-import gzip
 import hashlib
 import os
 import platform
@@ -9,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 import zipfile
 
 try:
@@ -27,6 +27,13 @@ except Exception:
                 break
 
 WHEEL = "px_proxy-" + __version__ + "-py3-none-any.whl"
+
+# CPython minor version bundled in every release binary and Docker image. The
+# newest published patch release of this minor is always used, never a pinned
+# patch version.
+PY_MINOR = "3.13"
+PY_FTP = "https://www.python.org/ftp/python/"
+PY_EMBED = "python-{}-embed-amd64.zip"
 
 # CLI
 
@@ -184,6 +191,102 @@ def curl(
     return 0, ec.get_data(encoding)
 
 
+# Bundled Python
+
+
+def fetch_text(url):
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as exc:
+        # Fall back to the curl binary when urllib lacks CA certificates
+        ret = subprocess.run(["curl", "-fsSL", url], capture_output=True, text=True)
+        if ret.returncode != 0:
+            print(f"Failed to fetch {url}: {exc}")
+            sys.exit(1)
+        return ret.stdout
+
+
+def version_tuple(version):
+    return tuple(int(p) for p in version.split("."))
+
+
+def latest_python(minor=PY_MINOR, asset=None):
+    """
+    Newest published CPython patch release of a minor version on python.org
+
+    asset - file name template ({} is the version) that the release must ship,
+            defaults to the source tarball
+    """
+    listing = fetch_text(PY_FTP)
+    versions = {v for v in re.findall(r'href="(\d+\.\d+\.\d+)/"', listing) if v.rsplit(".", 1)[0] == minor}
+    for version in sorted(versions, key=version_tuple, reverse=True):
+        name = asset.format(version) if asset else f"Python-{version}.tar.xz"
+        if f'href="{name}"' in fetch_text(f"{PY_FTP}{version}/"):
+            return version
+
+    print(f"No published CPython {minor}.x release found on {PY_FTP}")
+    sys.exit(1)
+
+
+def check_python():
+    """Fail unless this interpreter is the newest published release of PY_MINOR"""
+    have = platform.python_version()
+    m = re.match(r"\d+\.\d+\.\d+", have)
+    have = m.group(0) if m else have
+    newest = latest_python()
+    print(f"Bundled CPython {have} ({sys.executable}), newest published {PY_MINOR}.x is {newest}")
+    if have.rsplit(".", 1)[0] != PY_MINOR or version_tuple(have) < version_tuple(newest):
+        print(f"ERROR: bundled CPython {have} is not the newest {PY_MINOR}.x release {newest}")
+        sys.exit(1)
+
+
+def check_embed():
+    """Fail unless the Windows embeddable zip selected is the newest published release of PY_MINOR"""
+    newest = latest_python()
+    embed = latest_python(asset=PY_EMBED)
+    print(f"Windows embed will bundle CPython {embed}, newest published {PY_MINOR}.x is {newest}")
+    if embed != newest:
+        print(f"ERROR: python.org has no {PY_EMBED.format(newest)} for the newest {PY_MINOR}.x release yet")
+        sys.exit(1)
+    return embed
+
+
+def check_bundled_version(have, target):
+    """Fail unless target reports the newest published PY_MINOR release."""
+    newest = latest_python()
+    print(f"{target} bundles CPython {have}, newest published {PY_MINOR}.x is {newest}")
+    if not have.startswith(PY_MINOR + ".") or version_tuple(have) < version_tuple(newest):
+        print(f"ERROR: {target} CPython {have or 'unknown'} is not the newest {PY_MINOR}.x release {newest}")
+        sys.exit(1)
+
+
+def docker_python(image, target):
+    """Pull and check a Docker base or output image's bundled interpreter."""
+    ret = subprocess.run(["docker", "pull", image])
+    if ret.returncode != 0:
+        print(f"Failed to pull {image}")
+        sys.exit(1)
+    res = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "python",
+            image,
+            "-c",
+            "import platform;print(platform.python_version())",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        print(f"Failed to get the Python version from {target}: {res.stderr.strip()}")
+        sys.exit(1)
+    check_bundled_version(res.stdout.strip(), target)
+
+
 # Build
 
 
@@ -317,24 +420,16 @@ def embed():
     rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
 
-    # Get latest releases from web
-    ret, data = curl("https://www.python.org/downloads/windows/", encoding=None)
-    with contextlib.suppress(gzip.BadGzipFile):
-        data = gzip.decompress(data)
-    data = data.decode("utf-8")
-
-    # Get Python version from CLI if specified
-    version = get_argval("tag")
-
-    # Find all URLs for zip files in webpage
-    urls = re.findall(r'href=[\'"]?([^\'" >]+\.zip)', data)
-    dlurl = ""
-    for url in urls:
-        # Filter embedded amd64 URLs
-        # Get the first or specified version URL
-        if "embed" in url and "amd64" in url and (len(version) == 0 or version in url):
-            dlurl = url
-            break
+    # Always select the newest published release of PY_MINOR. Preserve --tag
+    # for callers that provide the current version explicitly, but reject a
+    # stale value before downloading or packaging it.
+    newest = check_embed()
+    version = get_argval("tag").lstrip("v") or newest
+    if version != newest:
+        print(f"ERROR: requested CPython {version}, but newest {PY_MINOR}.x release is {newest}")
+        sys.exit(1)
+    dlurl = PY_FTP + f"{version}/" + PY_EMBED.format(version)
+    print(f"Bundling CPython {version} (Windows embeddable): {dlurl}")
 
     # Download zip file
     fname = os.path.join(outdir, os.path.basename(dlurl))
@@ -351,6 +446,12 @@ def embed():
         # Unzip
         with zipfile.ZipFile(fname, "r") as z:
             z.extractall(dist)
+
+    ret = subprocess.run([os.path.join(dist, "python.exe"), "-V"], capture_output=True, text=True)
+    print(f"Bundled {ret.stdout.strip()}")
+    if ret.stdout.strip() != f"Python {version}":
+        print(f"ERROR: embedded python reports {ret.stdout.strip()}, expected {version}")
+        sys.exit(1)
 
     # Find all files ending with ._pth
     pth = glob.glob(os.path.join(dist, "*._pth"))[0]
@@ -492,12 +593,16 @@ def depspkg():
 
 def docker():
     tag = "genotrance/px"
-    dbuild = "docker build --network host --build-arg VERSION=" + __version__
+    dbuild = f"docker build --pull --network host --build-arg VERSION={__version__} --build-arg PYTHON_MINOR={PY_MINOR}"
     wheels_dir = get_argval("wheels-dir")
     if wheels_dir:
         dbuild += f" --build-arg WHEELS_DIR={wheels_dir}"
     dbuild += " -f docker/Dockerfile"
     push = "--push" in sys.argv
+
+    # Check the moving base-image tag before doing either expensive image build.
+    # docker build --pull below then guarantees it uses this freshly checked tag.
+    docker_python(f"python:{PY_MINOR}-alpine", "Docker base image")
 
     # Build mini image
     mtag = f"{tag}:{__version__}-mini"
@@ -506,6 +611,9 @@ def docker():
     if ret != 0:
         print("Failed to build mini image")
         sys.exit(1)
+
+    # Verify the completed image as well, before pushing anything.
+    docker_python(mtag, "Docker image")
 
     if push:
         for t in [mtag, ltag]:
@@ -520,6 +628,8 @@ def docker():
     if ret != 0:
         print("Failed to build full image")
         sys.exit(1)
+
+    docker_python(ftag, "Docker image")
 
     if push:
         for t in [ftag, lftag]:
@@ -557,6 +667,12 @@ def main():
         if "--docker" in sys.argv:
             docker()
 
+    if "--check-python" in sys.argv:
+        check_python()
+
+    if "--check-embed" in sys.argv:
+        check_embed()
+
     if "--nuitka" in sys.argv:
         nuitka()
 
@@ -572,12 +688,14 @@ def main():
     # Help
 
     if len(sys.argv) == 1:
-        print("""
+        print(f"""
 Build:
+--check-python	Fail unless this Python is the newest published {PY_MINOR}.x
+--check-embed	Fail unless the Windows embeddable zip is the newest published {PY_MINOR}.x
 --wheel		Build wheels for pypi.org
 --nuitka	Build px distribution using Nuitka
 --embed		Build px distribution using Python Embeddable distro
-  --tag=vX.X.X	Use specified tag
+  --tag=X.X.X	Use specified Python version instead of the newest {PY_MINOR}.x
 --deps		Build all wheel dependencies for this Python version
 --depspkg	Build an archive of all dependencies
 --docker	Build Docker images

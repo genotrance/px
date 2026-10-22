@@ -154,7 +154,7 @@ ignore = [
 # C901: complex Windows proxy detection functions
 "px/wproxy.py" = ["C901"]
 # Build script: subprocess/shell commands, complex functions
-"tools.py" = ["C901", "S602", "S605", "S607"]
+"tools.py" = ["C901", "S310", "S602", "S603", "S605", "S607"]
 
 [tool.ruff.format]
 preview = true

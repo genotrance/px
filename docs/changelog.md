@@ -7,6 +7,9 @@
 ### Improvements
 - `px --test` now reports every connectivity check as passed or failed and
   completes all checks before returning a failure status (#274).
+- Release binaries and Docker images now resolve the newest published CPython
+  3.13 patch release at build time. Builds log the bundled version and fail
+  before packaging or pushing if the selected interpreter is behind python.org.
 
 ### New features
 - Switched to libuv-based event loops: `winloop` on Windows, `uvloop` on

@@ -323,6 +323,32 @@ The `kerberos` job in `ci.yml` runs the integration tests on every push to
 
 ---
 
+## DNS stall benchmark
+
+`tools/bench_dns_stalls.py` is a standalone script (not part of the pytest run)
+that measures how slow or failing name resolution affects px request latency
+and throughput through a PAC file and through a `--noproxy` IP list. It starts
+a local asyncio upstream and a px subprocess per scenario and mode, and
+injects a `sitecustomize` hook into the px process that delays or fails
+`socket.getaddrinfo`/`gethostbyname` calls made from `px.pac` and
+`px.wproxy` only, so no root or real DNS is needed and px's own sockets are
+unaffected.
+
+- Scenarios: `pac` (PAC calling `myIpAddress()`, `dnsResolve()`, `isInNet()`
+  and `isResolvable()`) and `noproxy` (`--noproxy` with IPs, which triggers an
+  uncached lookup per request).
+- Modes: `normal`, `slow1` (1 s per lookup), `slow5` (5 s per lookup), `fail`
+  (lookups raise `gaierror`).
+- Output: per concurrency level (default 1, 10 and 50 simultaneous requests)
+  successes, failures, requests per second, p50, p95 and max latency.
+
+Run it from a directory outside the repo with a clean `HOME` so a developer
+`.env` (`PX_NOPROXY`, `PX_THREADS`) does not interfere; `--json` saves results
+for before/after comparison, and `--timeout` bounds each request (requests
+stalled beyond it count as failures).
+
+---
+
 ## Concurrency benchmarks
 
 `test_benchmark.py` measures the async server's performance under concurrent

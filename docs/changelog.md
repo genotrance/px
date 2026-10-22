@@ -5,6 +5,10 @@
 ## v0.13.0
 
 ### Improvements
+- PAC `dnsResolve()` (and so `isResolvable()`/`isInNet()`) and IP-based
+  `--noproxy` matching use a cached, bounded DNS resolver: successful and
+  failed lookups are cached, concurrent lookups of one name are shared, and
+  slow resolvers no longer stall unrelated requests (#273).
 - `px --test` now reports every connectivity check as passed or failed and
   completes all checks before returning a failure status (#274).
 - Release binaries and Docker images now resolve the newest published CPython
@@ -23,12 +27,26 @@
   `winloop`/`uvloop`.
 
 ### Bug fixes
+- PAC DNS helpers no longer hold up all PAC evaluation during slow name
+  resolution. Failed or timed-out `dnsResolve()` requests now return `null`,
+  so `isResolvable()` and `isInNet()` correctly reject unresolved hosts;
+  `myIpAddress()` no longer depends on hostname DNS (#273).
+- IP-based `--noproxy` checks now use the bounded DNS resolver and reuse its
+  cached results instead of performing a new unbounded DNS lookup per request
+  (#273).
 - `--idle` now also applies to plain-HTTP transfers: a response that sends no
   data for that long is aborted (needs pymcurl with `Curl.set_low_speed`).
 - Listen backlog raised from 128 to 2048, avoiding ~1 second SYN-retransmit
   stalls at 200+ concurrent connections.
 - `TCP_NODELAY` is now set on accepted client connections on the plain asyncio
   loop, removing ~40 ms per round trip on CONNECT tunnels.
+
+### Internal
+- New `px/resolver.py` module with a bounded DNS worker pool, positive and
+  negative TTL caches and in-flight de-duplication, used by `px.pac` and
+  `px.wproxy` (#273).
+- New `tools/bench_dns_stalls.py` benchmark measuring PAC and `--noproxy`
+  latency and throughput under slow or failing DNS (#273).
 
 ---
 

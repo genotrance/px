@@ -80,6 +80,7 @@ socket sharing or duplication between processes.
 | `px/wproxy.py` | `Wproxy` — proxy discovery from config, environment, Windows Internet Options, PAC |
 | `px/pac.py` | `Pac` — PAC file loading and evaluation via quickjs-ng |
 | `px/pacutils.py` | Mozilla PAC utility functions injected into the QuickJS runtime |
+| `px/resolver.py` | `Resolver` — bounded, cached DNS lookups shared by PAC callbacks and `--noproxy` IP matching; local IPv4 discovery for `myIpAddress` |
 | `px/debug.py` | `Debug` singleton — stdout/file logging redirection |
 | `px/help.py` | CLI help text (rendered from `--help`) |
 | `px/kerberos.py` | `KerberosManager` — Kerberos ticket lifecycle (kinit, renewal, cleanup) |
@@ -181,6 +182,11 @@ The `parse_noproxy()` function parses the noproxy string into two structures:
 - `set` of hostname strings for domain-based bypasses.
 
 `find_proxy_for_url()` checks both structures before forwarding to the proxy.
+For an IP-based bypass and a hostname URL, `Wproxy` resolves the hostname
+through its `Resolver` with `AF_UNSPEC` and tests the first returned address.
+The resolver's bounded lookup, positive cache, and negative cache prevent
+requests from repeatedly blocking on DNS; an unresolved hostname is left for
+the upstream proxy to handle.
 
 ## PAC file evaluation (`px.pac`)
 
@@ -190,8 +196,21 @@ initialised with Mozilla PAC utility functions from `pacutils.py`
 (`dnsDomainIs`, `isInNet`, `shExpMatch`, `myIpAddress`, etc.).
 
 `Pac` uses `quickjs.Function` (rather than `quickjs.Context`) to ensure thread
-safety — each call to `find_proxy_for_url()` is dispatched to a thread pool
-internally by `quickjs.Function`.
+safety. PAC JavaScript and its Python callbacks execute on one quickjs worker,
+so callbacks must not perform unbounded blocking work.
+
+`alert`, `dnsResolve`, and `myIpAddress` are the only PAC callbacks implemented
+in Python. `dnsResolve` uses `px.resolver.Resolver`: a dedicated, bounded
+eight-worker DNS pool with per-host-and-address-family positive (60 second) and
+negative (10 second) caches. Concurrent requests for the same name share one
+system lookup; PAC evaluation returns `null` after three seconds if that lookup
+is still running, while its eventual result remains cached. This bounds the
+time a slow resolver can occupy the quickjs worker. IP literals do not use DNS.
+
+`myIpAddress` selects the local IPv4 address with a UDP route probe, which sends
+no packet and does not query the hostname. If no route is available, it uses
+the first active, non-loopback, non-link-local IPv4 interface address, or
+`127.0.0.1` as a last resort.
 
 ### PAC encoding detection
 

@@ -18,10 +18,11 @@ Tests live in `tests/`.
 | `test_debug.py` | Debug module tests — `Debug` singleton, `pprint`, `dprint` |
 | `test_kerberos.py` | Kerberos ticket management — unit tests (mocked subprocess, Linux/macOS only) and Docker-based integration tests against local MIT and Heimdal KDCs (marked `integration`, run via `make test-kerberos`) |
 | `test_network.py` | Network integration tests — `--quit`, `--listen`, `--hostonly`, `--gateway`, `--allow`, `--noproxy` |
-| `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve`, `myIpAddress`) |
+| `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
 | `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
-| `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods |
+| `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |
+| `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 
 ---
 
@@ -329,6 +330,74 @@ The `kerberos` job in `ci.yml` runs the integration tests on every push to
   tests are skipped with a clear message.
 - The `--cap-add IPC_LOCK` capability is passed to the px container so that
   `gnome-keyring-daemon` can lock memory pages for secure credential storage.
+
+---
+
+## DNS stall benchmark
+
+`tools/bench_dns_stalls.py` is a standalone script (not part of the pytest run)
+that measures how slow or failing name resolution affects px request latency
+and throughput through a PAC file and through a `--noproxy` IP list. It starts
+a local asyncio upstream and a px subprocess per scenario and mode, and
+injects a `sitecustomize` hook into the px process that delays or fails
+`socket.getaddrinfo`/`gethostbyname` calls made from `px.pac` and
+`px.wproxy` only, so no root or real DNS is needed and px's own sockets are
+unaffected.
+
+- Scenarios: `pac` (PAC calling `myIpAddress()`, `dnsResolve()`, `isInNet()`
+  and `isResolvable()`) and `noproxy` (`--noproxy` with IPs, which triggers an
+  uncached lookup per request).
+- Modes: `normal`, `slow1` (1 s per lookup), `slow5` (5 s per lookup), `fail`
+  (lookups raise `gaierror`).
+- Output: per concurrency level (default 1, 10 and 50 simultaneous requests)
+  successes, failures, requests per second, p50, p95 and max latency.
+
+Run it from a directory outside the repo with a clean `HOME` and
+`PX_EVENT_LOOP` unset so a developer `.env` (`PX_NOPROXY`, `PX_THREADS`) does
+not interfere; `--json` saves results for before/after comparison, and
+`--timeout` bounds each request (requests stalled beyond it count as failures).
+
+### Before/after results
+
+The full default matrix below was run with `--timeout 35 --json <result>.json`
+against baseline `a2bb145` (before the bounded resolver) and integrated
+revision `2c5c1d5` (after it). `Done` is completed requests out of the selected
+concurrency; p95 is seconds and RPS is completed requests per wall-clock
+second.
+
+| Scenario | Mode | Concurrency | Before Done | Before p95 | Before RPS | After Done | After p95 | After RPS |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| pac | normal | 1 | 1/1 | 0.047 | 20.91 | 1/1 | 0.052 | 19.13 |
+| pac | normal | 10 | 10/10 | 0.195 | 50.05 | 10/10 | 0.131 | 73.43 |
+| pac | normal | 50 | 50/50 | 0.794 | 59.22 | 50/50 | 0.600 | 77.91 |
+| pac | slow1 | 1 | 1/1 | 4.050 | 0.25 | 1/1 | 0.053 | 18.77 |
+| pac | slow1 | 10 | 8/10 | 35.036 | 0.23 | 10/10 | 0.142 | 67.94 |
+| pac | slow1 | 50 | 0/50 | 35.037 | 0.00 | 50/50 | 0.618 | 75.84 |
+| pac | slow5 | 1 | 1/1 | 20.052 | 0.05 | 1/1 | 0.053 | 18.53 |
+| pac | slow5 | 10 | 1/10 | 35.037 | 0.03 | 10/10 | 0.147 | 65.74 |
+| pac | slow5 | 50 | 0/50 | 35.037 | 0.00 | 50/50 | 0.594 | 78.69 |
+| pac | fail | 1 | 1/1 | 0.043 | 23.18 | 1/1 | 0.054 | 18.41 |
+| pac | fail | 10 | 10/10 | 0.141 | 68.29 | 10/10 | 0.135 | 71.10 |
+| pac | fail | 50 | 50/50 | 0.578 | 82.03 | 50/50 | 0.607 | 79.54 |
+| noproxy | normal | 1 | 1/1 | 0.031 | 31.69 | 1/1 | 0.038 | 25.90 |
+| noproxy | normal | 10 | 10/10 | 0.029 | 300.32 | 10/10 | 0.026 | 323.64 |
+| noproxy | normal | 50 | 50/50 | 0.068 | 489.49 | 50/50 | 0.041 | 492.08 |
+| noproxy | slow1 | 1 | 1/1 | 1.032 | 0.97 | 1/1 | 0.036 | 27.30 |
+| noproxy | slow1 | 10 | 10/10 | 1.035 | 9.61 | 10/10 | 0.026 | 326.89 |
+| noproxy | slow1 | 50 | 50/50 | 2.015 | 24.53 | 50/50 | 0.043 | 590.11 |
+| noproxy | slow5 | 1 | 1/1 | 5.032 | 0.20 | 1/1 | 0.036 | 27.27 |
+| noproxy | slow5 | 10 | 10/10 | 5.029 | 1.99 | 10/10 | 0.026 | 327.37 |
+| noproxy | slow5 | 50 | 50/50 | 10.019 | 4.98 | 50/50 | 0.055 | 504.03 |
+| noproxy | fail | 1 | 1/1 | 0.027 | 35.79 | 1/1 | 0.035 | 27.75 |
+| noproxy | fail | 10 | 10/10 | 0.038 | 223.15 | 10/10 | 0.025 | 331.62 |
+| noproxy | fail | 50 | 50/50 | 0.073 | 411.06 | 50/50 | 0.042 | 599.28 |
+
+The slow-DNS rows show the resolver improvement directly: bounded asynchronous
+resolution prevents the PAC worker from serially holding requests and caches
+the `--noproxy` lookup. For normal and failing DNS, especially 50-concurrency
+PAC runs, repeated measurements can vary by roughly 70--90 RPS on the same
+revision. Those throughput deltas are noise rather than a performance claim;
+compare repeated alternating runs when assessing non-stall modes.
 
 ---
 

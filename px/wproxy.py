@@ -14,6 +14,7 @@ except ImportError:
 
 # PAC processing using quickjs-ng
 from .pac import Pac
+from .resolver import Resolver
 
 # Proxy modes - source of proxy info
 MODE_NONE = 0
@@ -133,6 +134,7 @@ class _WproxyBase:
     noproxy_hosts_str = None
     pac = None
     pac_encoding = None
+    _resolver = None
 
     def __init__(self, mode=MODE_NONE, servers=None, noproxy=None, pac_encoding=None, debug_print=None):
         global dprint
@@ -141,6 +143,7 @@ class _WproxyBase:
 
         self.servers = []
         self.pac_encoding = pac_encoding
+        self._resolver = Resolver()
 
         # Load noproxy if specified
         self.noproxy, self.noproxy_hosts = parse_noproxy(noproxy)
@@ -199,6 +202,12 @@ class _WproxyBase:
 
         return netloc, path
 
+    def _get_resolver(self):
+        "Create the resolver for Windows Internet Options configurations lazily"
+        if self._resolver is None:
+            self._resolver = Resolver()
+        return self._resolver
+
     def check_noproxy_for_netloc(self, netloc):
         """
         Check if (host, port) is in noproxy list
@@ -208,19 +217,17 @@ class _WproxyBase:
         """
 
         if self.noproxy.size:
-            addr = []
-            try:
-                addr = socket.getaddrinfo(netloc[0], netloc[1])
-            except socket.gaierror:
+            ip = self._get_resolver().lookup(netloc[0], socket.AF_UNSPEC)
+            if ip is None:
                 # Couldn't resolve, let parent proxy try, px#18
                 dprint("Couldn't resolve host")
-            if len(addr) != 0 and len(addr[0]) == 5:
-                ipport = addr[0][4]
-                # "%s => %s + %s" % (url, ipport, path)
+                return None
 
-                if ipport[0] in self.noproxy:  # type: ignore[operator]
-                    # Direct connection from noproxy configuration
-                    return ipport
+            ipport = (ip, netloc[1])
+            # "%s => %s + %s" % (url, ipport, path)
+            if ip in self.noproxy:  # type: ignore[operator]
+                # Direct connection from noproxy configuration
+                return ipport
 
     def check_noproxy_for_url(self, url):
         """
@@ -263,12 +270,18 @@ class _WproxyBase:
     async def async_find_proxy_for_url(self, url):
         """Async wrapper — offloads to thread pool when blocking I/O is needed.
 
-        noproxy check calls socket.getaddrinfo(), PAC mode runs quickjs + dnsResolve(),
-        and Windows MODE_AUTO/MODE_PAC call WinHttpGetProxyForUrl. All block.
-        When none of these apply, runs inline with no thread pool overhead.
+        An uncached noproxy hostname lookup, PAC mode, and Windows
+        MODE_AUTO/MODE_PAC can block. IP literals and cached noproxy results
+        run inline when no PAC or WinHTTP resolution is required.
         """
-        if self.noproxy.size or self.mode in (MODE_CONFIG_PAC, MODE_AUTO, MODE_PAC):
+        if self.mode in (MODE_CONFIG_PAC, MODE_AUTO, MODE_PAC):
             return await asyncio.to_thread(self.find_proxy_for_url, url)
+
+        if self.noproxy.size and self.mode != MODE_NONE:
+            netloc, _path = self.get_netloc(url)
+            if not self._get_resolver().has_immediate_result(netloc[0], socket.AF_UNSPEC):
+                return await asyncio.to_thread(self.find_proxy_for_url, url)
+
         return self.find_proxy_for_url(url)
 
 

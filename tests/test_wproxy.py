@@ -1,5 +1,6 @@
 """Tests for px.wproxy module — parse_proxy, parse_noproxy, Wproxy basics."""
 
+import asyncio
 import socket
 
 import netaddr
@@ -157,12 +158,49 @@ class TestWproxyBase:
         w = _WproxyBase(mode=MODE_CONFIG, servers=[("proxy.com", 8080)], noproxy="127.0.0.1")
         # 127.0.0.1 is an IP so goes into noproxy IPSet, not noproxy_hosts
         assert w.noproxy_hosts_str is None
-        # Mock getaddrinfo to return 127.0.0.1
         monkeypatch.setattr(
-            socket, "getaddrinfo", lambda host, port, *a, **kw: [(None, None, None, None, ("127.0.0.1", 80))]
+            socket, "getaddrinfo", lambda *_: (_ for _ in ()).throw(AssertionError("literal must not be resolved"))
         )
         servers, _netloc, _path = w.find_proxy_for_url("http://127.0.0.1")
         assert servers == [DIRECT]
+
+    def test_noproxy_reuses_resolver_result(self, monkeypatch):
+        from px.wproxy import _WproxyBase
+
+        calls = 0
+
+        def getaddrinfo(*_):
+            nonlocal calls
+            calls += 1
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.25", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+        w = _WproxyBase(mode=MODE_CONFIG, servers=[("proxy.com", 8080)], noproxy="192.0.2.0/24")
+        assert w.check_noproxy_for_netloc(("cache.example", 8080)) == ("192.0.2.25", 8080)
+        assert w.check_noproxy_for_netloc(("cache.example", 8080)) == ("192.0.2.25", 8080)
+        assert calls == 1
+
+    def test_noproxy_unresolvable_host_uses_proxy(self, monkeypatch):
+        from px.wproxy import _WproxyBase
+
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *_: (_ for _ in ()).throw(socket.gaierror()))
+        w = _WproxyBase(mode=MODE_CONFIG, servers=[("proxy.com", 8080)], noproxy="192.0.2.0/24")
+        assert w.check_noproxy_for_netloc(("missing.example", 80)) is None
+        servers, netloc, _path = w.find_proxy_for_url("http://missing.example")
+        assert servers == [("proxy.com", 8080)]
+        assert netloc == ("missing.example", 80)
+
+    def test_async_noproxy_ip_literal_runs_inline_without_pac(self, monkeypatch):
+        from px.wproxy import _WproxyBase
+
+        async def to_thread(*_args, **_kwargs):
+            raise AssertionError()
+
+        monkeypatch.setattr(asyncio, "to_thread", to_thread)
+        w = _WproxyBase(mode=MODE_CONFIG, servers=[("proxy.com", 8080)], noproxy="127.0.0.1")
+        servers, netloc, _path = asyncio.run(w.async_find_proxy_for_url("http://127.0.0.1"))
+        assert servers == [DIRECT]
+        assert netloc == ("127.0.0.1", 80)
 
     def test_noproxy_hosts_str_cached(self):
         from px.wproxy import _WproxyBase

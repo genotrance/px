@@ -350,7 +350,13 @@ class TestPacCallables:
         pac_file.write_bytes(SIMPLE_PAC)
         pac = Pac(str(pac_file))
         result = pac.dnsResolve("this.host.definitely.does.not.exist.invalid")
-        assert result == ""
+        assert result is None
+
+    def test_dns_resolve_ip_literal(self, tmp_path):
+        pac_file = tmp_path / "proxy.pac"
+        pac_file.write_bytes(SIMPLE_PAC)
+        pac = Pac(str(pac_file))
+        assert pac.dnsResolve("192.0.2.1") == "192.0.2.1"
 
     def test_my_ip_address(self, tmp_path):
         pac_file = tmp_path / "proxy.pac"
@@ -359,3 +365,18 @@ class TestPacCallables:
         result = pac.myIpAddress()
         # Should return some IP address
         assert len(result) > 0
+
+    def test_unresolvable_host_is_not_resolvable_or_in_net(self, tmp_path):
+        pac_file = tmp_path / "proxy.pac"
+        pac_file.write_bytes(
+            b"""
+function FindProxyForURL(url, host) {
+    if (isResolvable(host) || isInNet(host, "10.0.0.0", "255.0.0.0")) {
+        return "PROXY proxy.example:8080";
+    }
+    return "DIRECT";
+}
+"""
+        )
+        pac = Pac(str(pac_file))
+        assert pac.find_proxy_for_url("http://nope.invalid", "nope.invalid") == "DIRECT"

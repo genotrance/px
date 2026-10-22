@@ -65,7 +65,7 @@ The `--save` flag writes the current configuration to `px.ini`:
 | `--gateway=0\|1` | `PX_GATEWAY` | `proxy:gateway` | `0` | Allow remote clients; overrides `--listen` |
 | `--hostonly=0\|1` | `PX_HOSTONLY` | `proxy:hostonly` | `0` | Restrict to local interfaces only |
 | `--allow=IPGLOB` | `PX_ALLOW` | `proxy:allow` | `*.*.*.*` | Allowed client IPs (specific, wildcard, range, CIDR) |
-| `--noproxy=LIST` | `PX_NOPROXY` | `proxy:noproxy` | *(none)* | Hosts/IPs that bypass upstream proxy (IP, wildcard, range, CIDR, domain) |
+| `--noproxy=LIST` | `PX_NOPROXY` | `proxy:noproxy` | *(none)* | Hosts/IPs that bypass upstream proxy (IP matches use bounded, cached DNS; wildcard, range, CIDR, domain) |
 | `--useragent=STR` | `PX_USERAGENT` | `proxy:useragent` | *(none)* | Override or send User-Agent header |
 
 ---

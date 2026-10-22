@@ -24,6 +24,9 @@
   resolution. Failed or timed-out `dnsResolve()` requests now return `null`,
   so `isResolvable()` and `isInNet()` correctly reject unresolved hosts;
   `myIpAddress()` no longer depends on hostname DNS (#273).
+- IP-based `--noproxy` checks now use the bounded DNS resolver and reuse its
+  cached results instead of performing a new unbounded DNS lookup per request
+  (#273).
 - `--idle` now also applies to plain-HTTP transfers: a response that sends no
   data for that long is aborted (needs pymcurl with `Curl.set_low_speed`).
 - Listen backlog raised from 128 to 2048, avoiding ~1 second SYN-retransmit

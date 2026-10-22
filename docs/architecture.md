@@ -181,6 +181,11 @@ The `parse_noproxy()` function parses the noproxy string into two structures:
 - `set` of hostname strings for domain-based bypasses.
 
 `find_proxy_for_url()` checks both structures before forwarding to the proxy.
+For an IP-based bypass and a hostname URL, `Wproxy` resolves the hostname
+through its `Resolver` with `AF_UNSPEC` and tests the first returned address.
+The resolver's bounded lookup, positive cache, and negative cache prevent
+requests from repeatedly blocking on DNS; an unresolved hostname is left for
+the upstream proxy to handle.
 
 ## PAC file evaluation (`px.pac`)
 

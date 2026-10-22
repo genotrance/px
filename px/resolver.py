@@ -107,6 +107,15 @@ class Resolver:
 
         return True, value
 
+    def has_immediate_result(self, host, family=socket.AF_INET):
+        "Return whether lookup() can return without submitting or waiting for DNS"
+        if self._literal(host, family) is not None:
+            return True
+
+        with self._lock:
+            hit, _value = self._cached((host, family))
+            return hit
+
     def _resolve(self, host, family, pending):
         "Blocking lookup, run on the executor and cached for waiting callers"
         try:

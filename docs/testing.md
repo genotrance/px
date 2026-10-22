@@ -135,9 +135,11 @@ count based on CPU count and platform:
   under concurrent HTTPS CONNECT tests when multiple Px instances compete for
   connections on resource-constrained CI runners.
 
-Each xdist worker reserves 3 ports for proxy tests (`fixtures.py`) and 10 ports
-for network tests (`test_network.py`), allocated via worker ID offsets to avoid
-collisions.
+Each xdist worker starts its search for proxy test ports (`fixtures.py`) at a
+worker-specific offset and reserves the first free block of 3 consecutive ports,
+so concurrent test runs on the same host skip ports already in use. Network
+tests (`test_network.py`) reserve 10 ports for their own worker offset, falling
+back to the next free port when the computed one is busy.
 
 To override the auto-computed value, either pass an explicit `-n N` or set the
 `PYTEST_XDIST_AUTO_NUM_WORKERS` environment variable.
@@ -161,8 +163,10 @@ in the build workflow's `test-binary` job.
 The build workflow (`.github/workflows/build.yml`) triggers on pushes to
 `master` and manual dispatch. It tests built artifacts using tox across all
 Python versions (3.10–3.14) inside musllinux and Ubuntu Docker containers and on
-native macOS/Windows runners. Aarch64 Linux jobs run on native `ubuntu-24.04-arm`
-runners with containers running natively, avoiding QEMU emulation overhead.
+the `macos-latest`/Windows test runners. Aarch64 Linux jobs run on native
+`ubuntu-24.04-arm` runners with containers running natively, avoiding QEMU
+emulation overhead. Release wheels and binaries are built separately on the
+pinned `macos-15` runner.
 
 ---
 

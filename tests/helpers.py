@@ -58,6 +58,14 @@ def find_free_port(start=4000):
     return None
 
 
+def find_free_port_block(start=3148, count=3):
+    """Find the first port from start where count consecutive ports are free."""
+    for port in range(start, start + 200):
+        if all(is_port_free(port + i) for i in range(count)):
+            return port
+    return None
+
+
 def is_px_running(port, listen_ip="127.0.0.1"):
     # Make sure Px starts
     retry = 20

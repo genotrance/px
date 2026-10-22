@@ -60,8 +60,8 @@ Runs on pushes to the `devel` branch and on pull requests (fast feedback loop).
   3.10–3.14, Ubuntu ARM64 (`ubuntu-24.04-arm`) on 3.10 and 3.14, macOS on
   3.10 and 3.14, Windows on 3.10 and 3.14 (11 jobs total). Uses the shared
   `.github/actions/setup-python-env` action for consistent environment
-  setup. macOS excludes `test_network.py` due to GitHub Actions environment
-  limitations.
+  setup. macOS test jobs use `macos-latest` and exclude `test_network.py` due
+  to GitHub Actions environment limitations.
 - **tests-musl** — runs `pytest` inside musllinux Docker containers on both
   x86_64 (`ubuntu-latest`) and aarch64 (`ubuntu-24.04-arm`) with Python
   3.10 and 3.14 (4 jobs total). This verifies Px works correctly on musl
@@ -97,7 +97,8 @@ from PyPI.
   musllinux, or native runners across Python 3.10–3.14. x86_64 Linux jobs
   run on `ubuntu-latest`, aarch64 Linux jobs run on `ubuntu-24.04-arm`
   (native ARM64 runners) with the same container images running natively
-  instead of under QEMU emulation. Uses `build_wheels` from `build.sh`.
+  instead of under QEMU emulation. The macOS wheel archive is built on the
+  pinned `macos-15` runner. Uses `build_wheels` from `build.sh`.
 - **binary** — builds Nuitka binaries (Linux/macOS) or the Python Embedded
   distribution (Windows) using `tools.py --nuitka` / `tools.py --embed`.
   Also packages dependency wheel archives with `tools.py --depspkg`.
@@ -120,12 +121,20 @@ from PyPI.
   intentionally not used because Nuitka rejects it as a known buggy release;
   instead `build.sh` installs `patchelf==0.17.2.4` from PyPI into the build
   venv.
+  Linux glibc builds run inside manylinux2014 containers using
+  `/opt/python/cp313-cp313/bin/python3`. Linux musl builds use Alpine
+  containers with system Python and dev headers since Nuitka needs
+  `Python.h` which the musllinux containers lack. The macOS binary is built on
+  the pinned `macos-15` runner. Neither `tools.py` nor `build.sh` sets
+  `MACOSX_DEPLOYMENT_TARGET`, so the macOS minimum version comes from the
+  toolchain on that image; pinning the runner keeps it from drifting when
+  `macos-latest` moves to a newer image.
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
   versions (3.10–3.14). Tests run inside musllinux and Ubuntu containers
-  on Linux and on native macOS/Windows runners. Aarch64 Linux tests run on
-  native `ubuntu-24.04-arm` runners. Uses `extract_archives`
+  on Linux and on the `macos-latest`/Windows test runners. Aarch64 Linux tests
+  run on native `ubuntu-24.04-arm` runners. Uses `extract_archives`
   and `test_binary` from `build.sh`. The `PXBIN` environment variable is
   set so the `binary` tox environment can test the Nuitka binary directly.
   `build.sh` ensures the tox driver venv is created with a non-free-threaded

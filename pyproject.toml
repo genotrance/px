@@ -35,7 +35,7 @@ dependencies = [
     "keyrings.alt",
     "netaddr",
     "psutil",
-    "pymcurl",
+    "pymcurl<8.23.0.1",
     "pyspnego",
     "python-dotenv",
     "quickjs-ng>=0.17.0.1",

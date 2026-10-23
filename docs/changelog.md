@@ -14,6 +14,8 @@
 - Release binaries and Docker images now resolve the newest published CPython
   3.13 patch release at build time. Builds log the bundled version and fail
   before packaging or pushing if the selected interpreter is behind python.org.
+- Installation docs now cover uninstalling Px for winget, pip and standalone
+  binary installs, including removing the Windows auto-start entry first.
 
 ### New features
 - Switched to libuv-based event loops: `winloop` on Windows, `uvloop` on

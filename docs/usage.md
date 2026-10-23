@@ -50,8 +50,9 @@ Px can be set up to run on startup on Windows:
 
     pxw --install
 
-Remove with `--uninstall`. Use `--force` to overwrite an existing entry. If
-`px.ini` is at a non-default location:
+Remove with `--uninstall` (see [uninstallation](installation.md#uninstallation)).
+Use `--force` to overwrite an existing entry. If `px.ini` is at a non-default
+location:
 
     pxw --install --config=path/px.ini
 

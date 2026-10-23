@@ -10,6 +10,10 @@ inputs:
     description: "Resolve the newest published patch release instead of the runner's cached one"
     required: false
     default: "false"
+  refresh-quickjs:
+    description: "Resolve the newest quickjs-ng release for a release build"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -26,9 +30,14 @@ runs:
         enable-cache: "true"
         cache-suffix: ${{ inputs.python-version }}
 
-    - name: Install dependencies
+    - name: Install locked dependencies
       run: |
-        uv sync --upgrade-package quickjs-ng
+        if [ "${{ inputs.refresh-quickjs }}" = "true" ]; then
+          # Release builds deliberately resolve the latest quickjs-ng.
+          uv sync --upgrade-package quickjs-ng
+        else
+          uv sync --locked
+        fi
         uv pip install -e .
-        uv run python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
+        uv run --locked python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"
       shell: bash

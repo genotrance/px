@@ -87,4 +87,3 @@ _*.stats
 *.log
 *.crt
 .env
-uv.lock

@@ -46,6 +46,20 @@ Package metadata, dependencies, and all tool configuration (ruff, mypy, pytest,
 coverage, tox) live in `pyproject.toml`. The build backend is
 `setuptools.build_meta`.
 
+## Dependency lock
+
+`uv.lock` is committed so developer checkouts, CI, and ORC verification use the
+same reviewed dependency versions. Normal installs and `uv run` commands use
+the lock in `--locked` mode and fail when it no longer matches
+`pyproject.toml`.
+
+Dependabot opens monthly `uv` pull requests for routine dependency updates,
+grouping minor and patch releases into one review. To intentionally update
+dependencies locally, run `uv lock --upgrade` for all packages or
+`uv lock --upgrade-package <name>` for one package, run the relevant tests,
+and commit both `pyproject.toml` (when changed) and `uv.lock`. Review and test
+Dependabot pull requests in the same way.
+
 ## GitHub Actions
 
 All CI and release builds run via GitHub Actions. The workflows live in
@@ -82,13 +96,14 @@ scaffolding (environment setup, wheel building, binary building, archive
 extraction, and test execution) is implemented as shell functions in `build.sh`
 and called from the workflow steps.
 
-The setup action refreshes `quickjs-ng` from PyPI on every run, subject only to
-the minimum version declared in `pyproject.toml`, and prints the resolved
-version. `build_wheels` does the same before creating dependency archives, so
-the Linux, macOS, and Windows binary jobs consume the newly resolved wheel.
-The Docker builders also print the installed version; CI Docker images install
-from that generated wheel archive while local images resolve the newest release
-from PyPI.
+Release builds deliberately refresh `quickjs-ng` from PyPI on every run,
+subject only to the minimum version declared in `pyproject.toml`, and print the
+resolved version. This is the explicit exception to locked dependency installs.
+`build_wheels` does the same before creating dependency archives, so the Linux,
+macOS, and Windows binary jobs consume the newly resolved wheel. The Docker
+builders also print the installed version; CI Docker images install from that
+generated wheel archive while local images resolve the newest release from
+PyPI.
 
 - **setup** — extracts the version from `pyproject.toml` and makes it available
   to downstream jobs.

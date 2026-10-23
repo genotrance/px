@@ -22,13 +22,14 @@
   `px.ini`) to run on Python's default asyncio event loop instead of
   `winloop`/`uvloop`.
 - New `--authretry=<seconds>` option (`PX_AUTHRETRY`, `authretry` in
-  `px.ini`) lets Px probe an upstream proxy again after it has been blocked
-  for repeated 407s, instead of staying blocked until the next Kerberos
-  ticket renewal or restart: once the interval elapses, exactly one request
-  is let through as a probe even under concurrent load, and a successful
-  response unblocks the proxy immediately. Needs pymcurl with
-  `MCurl.set_auth_retry`; default `0` keeps today's behaviour on older
-  versions. Thanks to #276 (enkunkun) for identifying the problem.
+  `px.ini`) takes a float number of seconds (fractions allowed) and lets Px
+  probe an upstream proxy again after it has been blocked for repeated 407s.
+  For example, `--authretry=300` retries every 5 minutes. Once blocked, one
+  request is let through per interval and all other requests are refused until
+  that probe succeeds. A successful response unblocks the proxy immediately;
+  another 407 re-blocks it. Needs pymcurl with `MCurl.set_auth_retry`; default
+  `0` keeps today's behaviour on older versions. Thanks to #276 (enkunkun) for
+  identifying the problem.
 
 ### Bug fixes
 - `--idle` now also applies to plain-HTTP transfers: a response that sends no

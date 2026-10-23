@@ -319,13 +319,15 @@ By default, once an upstream proxy has rejected three requests in a row with
 until the next Kerberos ticket renewal (or restart) resets that state - a
 temporary credential or proxy issue otherwise has no other way to recover.
 
-`--authretry=<seconds>` lets Px probe a blocked proxy again on its own: once
-that many seconds have passed since it was blocked, Px lets exactly one
-request through as a probe (other requests keep being refused while the probe
-is outstanding, even under concurrent load). A successful probe response
-unblocks the proxy immediately; another 407 blocks it for another interval.
-This needs a pymcurl that provides `MCurl.set_auth_retry`; with older versions
-`--authretry` has no effect and Px logs a warning.
+`--authretry=<seconds>` is a float number of seconds (fractions allowed) that
+lets Px probe a blocked proxy again on its own. For example,
+`--authretry=300` retries every 5 minutes. Once that interval has passed since
+the proxy was blocked, Px lets exactly one request through as a probe; all
+other requests are refused until the probe succeeds, even under concurrent
+load. A successful probe response unblocks the proxy immediately; another 407
+blocks it for another interval. This needs a pymcurl that provides
+`MCurl.set_auth_retry`; with older versions `--authretry` has no effect and Px
+logs a warning.
 
 ## Dependencies
 

@@ -81,9 +81,9 @@ jobs:
             export PX_EVENT_LOOP=asyncio
           fi
           if [ "${{ matrix.os }}" == "macos-latest" ]; then
-            PX_CI_MINIMAL=1 uv run python -m pytest tests -n auto --tb=short -q --ignore=tests/test_network.py
+            PX_CI_MINIMAL=1 uv run --locked python -m pytest tests -n auto --tb=short -q --ignore=tests/test_network.py
           else
-            uv run python -m pytest tests -n auto --tb=short -q
+            uv run --locked python -m pytest tests -n auto --tb=short -q
           fi
 
   tests-musl:
@@ -155,7 +155,7 @@ jobs:
 
       - name: Run large data transfer tests
         timeout-minutes: 15
-        run: uv run python -m pytest tests/test_large_data.py -m largedata -v -s
+        run: uv run --locked python -m pytest tests/test_large_data.py -m largedata -v -s
 
   benchmark:
     strategy:
@@ -178,7 +178,7 @@ jobs:
 
       - name: Run benchmarks
         timeout-minutes: 15
-        run: uv run python -m pytest tests/test_benchmark.py -m benchmark -v -s
+        run: uv run --locked python -m pytest tests/test_benchmark.py -m benchmark -v -s
 
   kerberos:
     runs-on: ubuntu-latest
@@ -193,4 +193,4 @@ jobs:
 
       - name: Run Kerberos integration tests
         timeout-minutes: 10
-        run: uv run python -m pytest tests/test_kerberos.py -m integration -v
+        run: uv run --locked python -m pytest tests/test_kerberos.py -m integration -v

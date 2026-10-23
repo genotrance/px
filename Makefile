@@ -2,20 +2,20 @@ VERSION := $(shell grep '^version' pyproject.toml | head -1 | cut -d'"' -f2)
 TAG := genotrance/px
 
 .PHONY: install
-install: ## Install the virtual environment and pre-commit hooks
-	@uv sync --upgrade-package quickjs-ng
+install: ## Install the locked virtual environment and pre-commit hooks
+	@uv sync --locked
 	@uv pip install -e . -f mcurllib
-	@uv run python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
-	@uv run python -m pre_commit install
+	@uv run --locked python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
+	@uv run --locked python -m pre_commit install
 
 .PHONY: check
 check: ## Run code quality tools
-	@uv run pre-commit run -a
-	@uv run mypy
+	@uv run --locked pre-commit run -a
+	@uv run --locked mypy
 
 .PHONY: test
 test: ## Run the test suite with coverage
-	@uv run python -m pytest tests -n auto --cov --cov-config=pyproject.toml --cov-report=xml
+	@uv run --locked python -m pytest tests -n auto --cov --cov-config=pyproject.toml --cov-report=xml
 
 .PHONY: test-musl
 test-musl: ## Build and test in musl (Alpine) containers
@@ -40,15 +40,15 @@ docker-kerberos: docker ## Build Docker images for Kerberos integration tests
 
 .PHONY: test-kerberos
 test-kerberos: docker-kerberos ## Run Kerberos integration tests against a local KDC in Docker
-	@uv run python -m pytest tests/test_kerberos.py -m integration -v
+	@uv run --locked python -m pytest tests/test_kerberos.py -m integration -v
 
 .PHONY: benchmark
 benchmark: ## Run concurrency benchmarks
-	@uv run python -m pytest tests/test_benchmark.py -m benchmark -v -s
+	@uv run --locked python -m pytest tests/test_benchmark.py -m benchmark -v -s
 
 .PHONY: test-large-data
 test-large-data: ## Run large data transfer reliability tests
-	@uv run python -m pytest tests/test_large_data.py -m largedata -v -s
+	@uv run --locked python -m pytest tests/test_large_data.py -m largedata -v -s
 
 .PHONY: build
 build: clean ## Build sdist and wheel

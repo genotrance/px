@@ -35,11 +35,13 @@ jobs:
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
+        with:
+          refresh-quickjs: "true"
 
       - name: Build sdist and wheel
         run: |
           uv pip install build twine
-          uv run python tools.py --wheel
+          uv run --locked python tools.py --wheel
 
       - uses: actions/upload-artifact@v7
         with:
@@ -87,6 +89,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           python-version: "3.14"
+          refresh-quickjs: "true"
 
       - name: Build wheels (macOS/Windows) - continue
         if: runner.os != 'Linux'
@@ -135,6 +138,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           check-latest: "true"
+          refresh-quickjs: "true"
 
       # Fail early if the Python bundled in the binary is not the newest
       # published 3.13 release on python.org
@@ -228,6 +232,8 @@ jobs:
       - name: Set up the environment
         if: runner.os != 'Linux'
         uses: ./.github/actions/setup-python-env
+        with:
+          refresh-quickjs: "true"
 
       - name: Test (Linux container)
         if: runner.os == 'Linux'

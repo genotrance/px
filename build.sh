@@ -218,7 +218,7 @@ build_binary() {
             ensure_uv
             select_python
             uv pip install nuitka pymcurl -f "$WHEELS"
-            uv run python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
+            uv run --locked python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
             "$PY" tools.py --nuitka
             "$PY" tools.py --depspkg
             ;;
@@ -227,7 +227,7 @@ build_binary() {
             ensure_uv
             select_python
             uv pip install pymcurl -f "$WHEELS"
-            uv run python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
+            uv run --locked python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
             "$PY" tools.py --embed
             "$PY" tools.py --depspkg
             ;;
@@ -318,7 +318,7 @@ test_binary() {
             PYTEST_CMD="pytest -n 2 tests --ignore=tests/test_network.py"
         fi
         uv pip install tox tox-uv
-        PXBIN="$PXBIN" uv run tox --installpkg "$PXWHEEL" \
+        PXBIN="$PXBIN" uv run --locked tox --installpkg "$PXWHEEL" \
             --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" \
             --override "tool.tox.env_run_base.commands=$PYTEST_CMD"
     fi
@@ -368,9 +368,10 @@ build_local() {
     done
 
     echo "=== Building sdist ==="
+    # Release builds intentionally resolve the latest quickjs-ng.
     uv sync --upgrade-package quickjs-ng
     uv pip install build twine
-    uv run python tools.py --wheel || return 1
+    uv run --locked python tools.py --wheel || return 1
 
     echo "=== Building wheels in $WHEELS_IMAGE ==="
     docker run --rm -v "$(pwd)":/px -w /px \

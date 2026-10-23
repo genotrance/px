@@ -143,14 +143,27 @@ python px.py   # run in a console window
 
 ## Uninstallation
 
-If Px has been installed to the Windows registry to start on boot, uninstall
-first:
+`px --uninstall` only removes the Windows sign-in auto-start entry created by
+`px --install`. It does not delete any files, so run it before removing the
+install. Stop Px first with `px --quit`.
 
+Winget (Windows):
+
+    px --quit
     px --uninstall
+    winget uninstall genotrance.px
 
-Then remove via pip:
+Add `--purge` to `winget uninstall` to delete everything in the package folder.
+Delete `%APPDATA%\px\px.ini` if a configuration was saved there.
 
+pip:
+
+    px --quit
+    px --uninstall    # Windows only, if auto-start was set up
     python -m pip uninstall px-proxy
+
+Standalone binary: run `px --quit`, `px --uninstall` if auto-start was set up,
+then delete the folder containing the binary.
 
 ## Docker
 

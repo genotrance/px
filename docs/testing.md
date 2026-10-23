@@ -123,6 +123,25 @@ The `tox` configuration in `pyproject.toml` defines environments for Python
 3.10–3.14 and a "binary" environment. All environments use `pytest -n auto`
 for parallel test execution, auto-scaled by the `conftest.py` hook.
 
+### Developer machine notes
+
+Some failures on a developer machine come from the environment rather than from
+px. Check these before debugging a test:
+
+- **Run from outside your home directory.** px loads `.env` files from the
+  current directory and every parent directory. A `.env` in `$HOME` that sets
+  `PX_NOPROXY` or `PX_THREADS` changes proxy routing and threading under the
+  tests, and it breaks the auth-chain tests in particular. Run the suite from a
+  git worktree under `/tmp` or `$ORC_SCRATCH_DIR`, or make sure no `PX_` variables
+  are set in any parent `.env` and in the shell environment.
+- **Pin Python 3.14 when it matters.** CI and ORC verification run on 3.14
+  (`UV_PYTHON=3.14`). `uv` may otherwise pick a newer interpreter such as 3.15,
+  which px does not support yet.
+- **Stop leftover px processes between runs.** A failed test can leave px
+  servers listening on the test ports, and the next run then fails with port
+  conflicts or stale behaviour. Check for running px processes and stop them
+  before starting another run.
+
 ---
 
 ## Parallel test execution
@@ -248,6 +267,38 @@ Test dependencies (`pytest`, `pytest-xdist`, `pytest-httpbin`, `pytest-cov`,
 `psutil`) are declared in the `dev` dependency group in `pyproject.toml`
 alongside linting and type checking tools (`pre-commit`, `ruff`, `mypy`).
 `uv sync` installs them all.
+
+---
+
+## Testing a new pymcurl
+
+px's HTTPS proxy-auth tests exercise pymcurl (and the libcurl it wraps) in ways
+that pymcurl's own test suite does not. A pymcurl release that passes mcurl's
+tests can still break px: pymcurl 8.23.0.1 passed mcurl's tests but broke
+px's HTTPS proxy-auth tests, which only px's suite covers. Validate every new
+pymcurl this way before raising px's pymcurl minimum or adopting it, including
+release candidates built from mcurl.
+
+1. **Build a baseline with the previous pymcurl.** In a clean environment (see
+   [Developer machine notes](#developer-machine-notes)), install the pymcurl
+   version px currently uses and run the full suite at least twice for each
+   setting: with `PX_EVENT_LOOP` unset and with `PX_EVENT_LOOP=asyncio`. Stop
+   leftover px processes before each run.
+2. **Run the same matrix with the new pymcurl.** Install the candidate into the
+   same px environment, replacing the old version, and run the full suite at
+   least twice on each event loop setting, stopping leftover px processes before
+   each run.
+3. **Compare per test case.** Record which tests fail in each run. Judge
+   failures against the baseline that used the old pymcurl, never against a run
+   where the new pymcurl was already installed. The HTTPS proxy-auth tests fail
+   intermittently with `SSL connect` errors or Px exiting with 1024, and the
+   failing set changes between runs. A single failure is not a regression, but
+   a test that fails consistently on the new pymcurl and passes on the old one
+   is.
+
+Do not rely on `uv sync` to switch versions for the comparison: it restores the
+locked pymcurl. Install the candidate with `uv pip install` after the sync, and
+check the installed version (`uv pip show pymcurl`) before each run.
 
 ---
 

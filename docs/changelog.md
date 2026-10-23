@@ -25,6 +25,15 @@
 - New `--event-loop=auto|asyncio` option (`PX_EVENT_LOOP`, `event_loop` in
   `px.ini`) to run on Python's default asyncio event loop instead of
   `winloop`/`uvloop`.
+- New `--authretry=<seconds>` option (`PX_AUTHRETRY`, `authretry` in
+  `px.ini`) takes a float number of seconds (fractions allowed) and lets Px
+  probe an upstream proxy again after it has been blocked for repeated 407s.
+  For example, `--authretry=300` retries every 5 minutes. Once blocked, one
+  request is let through per interval and all other requests are refused until
+  that probe succeeds. A successful response unblocks the proxy immediately;
+  another 407 re-blocks it. Needs pymcurl with `MCurl.set_auth_retry`; default
+  `0` keeps today's behaviour on older versions. Thanks to #276 (enkunkun) for
+  identifying the problem.
 
 ### Bug fixes
 - PAC DNS helpers no longer hold up all PAC evaluation during slow name

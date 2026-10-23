@@ -173,6 +173,15 @@ Configuration:
   --socktimeout= | PX_SOCKTIMEOUT= | settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid float, default: 20
 
+  --authretry= | PX_AUTHRETRY= | settings:authretry=
+  Seconds to wait before retrying an upstream proxy blocked by repeated 407s.
+    Valid float number of seconds (fractions allowed), default: 0 (disabled -
+    today's behaviour, blocked proxies stay blocked until Kerberos ticket
+    renewal or restart). For example, --authretry=300 retries every 5 minutes.
+    Once blocked, exactly one probe request is let through per interval; all
+    other requests are refused until that probe succeeds. Another 407 re-blocks
+    the proxy. Requires pymcurl with set_auth_retry support.
+
   --proxyreload= | PX_PROXYRELOAD= | settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60
     Proxy info reloaded from Internet Options or --pac URL

@@ -98,6 +98,7 @@ class TestDefaults:
             "threads",
             "idle",
             "socktimeout",
+            "authretry",
             "proxyreload",
             "foreground",
             "log",
@@ -229,6 +230,78 @@ class TestEventLoopSelection:
         assert result.returncode == 0, result.stderr
 
 
+class TestAuthRetry:
+    """--authretry wiring: default, parsing, and hasattr guards for pymcurl support."""
+
+    def test_default_disabled(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["px"])
+        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
+        config.STATE.parse_config()
+        assert config.STATE.authretry == 0.0
+
+    def test_command_line_sets_value(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["px", "--authretry=5.5"])
+        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
+        config.STATE.parse_config()
+        assert config.STATE.authretry == 5.5
+
+    def test_environment_sets_value(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["px"])
+        monkeypatch.setenv("PX_AUTHRETRY", "2.5")
+        config.STATE.parse_config()
+        assert config.STATE.authretry == 2.5
+
+    def test_set_auth_retry_called_when_supported(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["px", "--authretry=3"])
+        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
+
+        class FakeMCurl:
+            def __init__(self, debug_print=None):
+                self.retry_calls = []
+
+            def set_auth_retry(self, interval):
+                self.retry_calls.append(interval)
+
+            def setopt(self, *args, **kwargs):
+                pass
+
+        monkeypatch.setattr(config.mcurl, "MCurl", FakeMCurl)
+        config.STATE.parse_config()
+        assert config.STATE.mcurl.retry_calls == [3.0]
+
+    def test_warns_once_when_unsupported_and_enabled(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["px", "--authretry=3"])
+        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
+
+        class FakeMCurlNoRetry:
+            def __init__(self, debug_print=None):
+                pass
+
+            def setopt(self, *args, **kwargs):
+                pass
+
+        monkeypatch.setattr(config.mcurl, "MCurl", FakeMCurlNoRetry)
+        config.STATE.parse_config()
+        captured = capsys.readouterr()
+        assert "authretry" in captured.out.lower()
+
+    def test_no_warning_when_disabled_and_unsupported(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["px"])
+        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
+
+        class FakeMCurlNoRetry:
+            def __init__(self, debug_print=None):
+                pass
+
+            def setopt(self, *args, **kwargs):
+                pass
+
+        monkeypatch.setattr(config.mcurl, "MCurl", FakeMCurlNoRetry)
+        config.STATE.parse_config()
+        captured = capsys.readouterr()
+        assert "authretry" not in captured.out.lower()
+
+
 # -------------------------------------------------------------------
 # Legacy parametrized test (kept as-is)
 # -------------------------------------------------------------------
@@ -257,6 +330,7 @@ def generate_config():
         "proxyreload",
         "server",
         "socktimeout",
+        "authretry",
         "threads",
         "username",
         "useragent",
@@ -286,6 +360,8 @@ def generate_config():
             value = 100
         elif key == "socktimeout":
             value = 35.5
+        elif key == "authretry":
+            value = 2.5
         elif key == "log":
             value = 4
         elif key == "event_loop":

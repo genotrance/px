@@ -2,10 +2,15 @@
 
 import sys
 
-from px.debug import Debug, dprint, pprint
+from px.debug import Debug, dprint, missing_module_message, pprint
 
 
 class TestPprint:
+    def test_missing_module_message_includes_import_error(self):
+        assert missing_module_message("pyspnego", ModuleNotFoundError("No module named 'cryptography'")) == (
+            "Requires module pyspnego: No module named 'cryptography'"
+        )
+
     def test_pprint_outputs_to_stdout(self, capsys):
         pprint("hello world")
         captured = capsys.readouterr()

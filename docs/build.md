@@ -34,15 +34,16 @@ Linux (glibc and musl) and macOS, or `winloop` for Windows. They cannot omit
 install --no-index` needs the wheel to resolve the package. The musl wheel
 archive is also the input to the CI Docker build.
 
-Linux and macOS Nuitka builds explicitly include `uvloop`, and Windows Nuitka
-builds explicitly include `winloop`, since their guarded imports are not
-reliably discovered by Nuitka. Linux and macOS Nuitka builds also include
-`spnego` (pyspnego), which `px.handler` imports inside a guarded block; without
-it the frozen binary prints `Requires module pyspnego`. `tools.py --nuitka`
-fails the build if the `spnego` or `uvloop` package directory is missing from the
-output. The Windows Python Embedded build installs
-`winloop` from the matching wheel archive when it installs `px-proxy`. Px falls
-back to `asyncio` when either loop cannot be imported at runtime.
+Linux and macOS Nuitka builds explicitly include `uvloop` and `spnego`
+(pyspnego), and Windows Nuitka builds explicitly include `winloop`, since
+guarded imports are not reliably discovered by Nuitka. Including `spnego`
+preserves the cryptography-backed NTLM imports used by `px.handler`. The binary
+job runs each completed artifact with `--help`; imports happen before that
+option is processed, so this cheap smoke check catches missing authentication
+dependencies before the longer binary test job. The Windows Python Embedded
+build installs `winloop` from the matching wheel archive when it installs
+`px-proxy`. Px falls back to `asyncio` when either loop cannot be imported at
+runtime.
 
 ## `pyproject.toml`
 

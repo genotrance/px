@@ -6,10 +6,12 @@ import sys
 import urllib.parse
 import urllib.request
 
+from .debug import missing_module_message
+
 try:
     import netaddr
-except ImportError:
-    print("Requires module netaddr")
+except ImportError as error:
+    print(missing_module_message("netaddr", error))
     sys.exit(1)
 
 # PAC processing using quickjs-ng

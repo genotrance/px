@@ -7,14 +7,14 @@ from typing import ClassVar
 
 import mcurl
 
-from .debug import pprint
+from .debug import missing_module_message, pprint
 from .pacutils import PACUTILS
 from .resolver import Resolver, my_ip_address
 
 try:
     import quickjs
-except ImportError:
-    print("Requires module quickjs-ng")
+except ImportError as error:
+    print(missing_module_message("quickjs-ng", error))
     sys.exit(1)
 
 

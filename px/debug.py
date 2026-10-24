@@ -13,6 +13,11 @@ def pprint(*objs):
         print(*objs)
 
 
+def missing_module_message(module, error):
+    "Describe a missing optional dependency without hiding its import error."
+    return f"Requires module {module}: {error}"
+
+
 class Debug:
     "Redirect stdout to a file for debugging"
 

@@ -62,6 +62,14 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- New `tools/release-check.sh` replays `build.yml`'s Linux x86_64 release jobs
+  (sdist, wheels, Nuitka binary and binary tests for glibc and musl) locally
+  with Docker; it is the required check before dispatching `build.yml` on
+  `devel`.
+- The binary test job's tox driver environment is now pinned to Python 3.14.
+  In the glibc `ubuntu` test container, which has no Python, uv picked the
+  newest release (3.15) and the `binary` environment failed to install `uvloop`
+  (found by the local release check).
 - Added a weekly automatic patch-release workflow that prepares dependency and
   CPython updates from `master`, gates the exact candidate through the existing
   CI matrix, and only then fast-forwards `master` to start release builds.

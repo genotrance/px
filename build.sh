@@ -302,13 +302,16 @@ test_binary() {
 
         # Prefer non-free-threaded Python for the tox driver venv so the
         # 'binary' tox environment does not default to a free-threaded ABI
-        # (cp314t) that abi3 wheels like psutil cannot satisfy.
+        # (cp314t) that abi3 wheels like psutil cannot satisfy. Pin it to 3.14,
+        # the newest version the wheels are built for: without a system Python
+        # (the ubuntu image) uv would otherwise download the newest release
+        # (3.15), for which there are no uvloop wheels.
         if [ -d /opt/python/cp314-cp314/bin ]; then
             export PATH=/opt/python/cp314-cp314/bin:$PATH
         fi
 
         # Run tests with tox in a venv
-        uv venv /tmp/tox-env
+        uv venv --python 3.14 /tmp/tox-env
         . /tmp/tox-env/bin/activate
         uv pip install tox tox-uv
         PXBIN="$PXBIN" tox --installpkg "$PXWHEEL" \

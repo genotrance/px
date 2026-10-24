@@ -317,12 +317,14 @@ class TestKinitWithPassword:
         with (
             unittest.mock.patch("subprocess.Popen", side_effect=FileNotFoundError),
             unittest.mock.patch("pty.openpty", return_value=(10, 11)),
-            unittest.mock.patch("os.close"),
+            unittest.mock.patch("os.close") as mock_close,
         ):
             result = mgr._kinit_with_password()
 
         assert result is False
         assert mgr.backoff == CHECK_INTERVAL
+        # Each pty fd must be closed exactly once, or the second close raises EBADF
+        assert sorted(c.args[0] for c in mock_close.call_args_list) == [10, 11]
 
     def test_env_contains_krb5ccname(self, monkeypatch):
         mgr = make_manager(monkeypatch)

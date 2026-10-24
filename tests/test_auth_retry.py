@@ -95,13 +95,17 @@ def _start_px(name, port, fake_upstream, authretry, event_loop, tmp_path):
     else:
         env.pop("PX_EVENT_LOOP", None)
 
+    # Do not let a configuration file outside this per-test directory change
+    # the isolated subprocess (notably by enabling Kerberos).
+    config_path = tmp_path / "px.ini"
+    config_path.touch()
     flags = (
         f"--server={fake_upstream.addr} --auth=BASIC --username={USERNAME}"
-        f" --authretry={authretry} --noproxy= --threads=64 --workers=1"
+        f" --authretry={authretry} --noproxy= --threads=64 --workers=1 --config={config_path}"
     )
-    # Auth-retry's burst tests run beside many Px subprocesses under xdist;
-    # allow extra time for this isolated server to initialize under that load.
-    return run_px(name, port, tmp_path, flags, env, startup_retries=40)
+    # Auth-retry's burst tests run beside many Px subprocesses under xdist.
+    # Poll the listener for long enough to tolerate a saturated test host.
+    return run_px(name, port, tmp_path, flags, env, startup_timeout=90)
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])

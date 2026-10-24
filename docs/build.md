@@ -199,7 +199,9 @@ resolve the newest release from PyPI.
   and `test_binary` from `build.sh`. The `PXBIN` environment variable is
   set so the `binary` tox environment can test the Nuitka binary directly.
   `build.sh` ensures the tox driver venv is created with a non-free-threaded
-  Python (`/opt/python/cp314-cp314/bin` is preferred when present) so the
+  Python 3.14 (`/opt/python/cp314-cp314/bin` is preferred when present; the
+  version is pinned because the glibc test container has no Python and uv
+  would otherwise download 3.15, for which no wheels exist) so the
   `binary` environment does not default to a free-threaded ABI (`cp314t`) that
   abi3 wheels like `psutil` cannot satisfy. macOS excludes `test_network.py`
   via `PX_CI_MINIMAL`.
@@ -210,6 +212,41 @@ resolve the newest release from PyPI.
   via `vedantmgoyal9/winget-releaser`, and builds and pushes Docker images
   to Docker Hub. The Winget step requires a `WINGET_TOKEN` repository secret
   (classic PAT with `public_repo` scope).
+
+### Local release check (`tools/release-check.sh`)
+
+CI on `devel` and `working` only runs `ci.yml` (tests from source), so the
+`build.yml` release jobs are never exercised until they are dispatched. Run
+`tools/release-check.sh` before dispatching `build.yml` on `devel` (and before
+any merge to `master`); it is the required step before that dry run. The first
+release build failed in every wheels job on a problem that only the real jobs
+reveal, and the dry run is slow and shared, so failures should be found
+locally first.
+
+The script replays the Linux x86_64 jobs of `build.yml` with Docker, using the
+same containers, `build.sh` functions and artifact hand-offs:
+
+1. `sdist` on the host with uv, refreshing `quickjs-ng`, into `wheel/`.
+2. `wheels` in `manylinux2014_x86_64` and `musllinux_1_2_x86_64`
+   (`build_wheels`).
+3. `binary` in `manylinux2014_x86_64` and `alpine:3.21`
+   (`check_bundled_python`, then `build_binary`, which runs Nuitka).
+4. `test-binary` in `ubuntu` and `musllinux_1_2_x86_64` against a fresh tree
+   that only contains the binary archives, as the workflow's download step
+   provides (`extract_archives`, then `test_binary` with tox).
+
+Usage is `tools/release-check.sh [--fresh] [glibc|musl|all]`; the default is
+both. Each job works on its own copy of the working tree (tracked and
+untracked, not ignored) under `RELEASE_CHECK_DIR` (default `px-release-check`
+under `$ORC_SCRATCH_DIR` or `/tmp`), so the checkout never receives root-owned
+build output. Completed stages are remembered and skipped on re-runs, which
+makes iterating on a failing stage cheap; `--fresh` discards them. The glibc
+test container defaults to `ubuntu` as in `build.yml` and can be changed with
+`TEST_IMAGE_GLIBC`. The script fails if `build.yml` stops referencing the
+images it replays, so the two cannot drift silently. A full run downloads
+dependencies and compiles Nuitka binaries, so it needs network access and
+takes a while. The aarch64, macOS and Windows jobs are not covered and still
+rely on the real workflow.
 
 ## `build.sh`
 

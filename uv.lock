@@ -1531,7 +1531,7 @@ requires-dist = [
     { name = "pymcurl", specifier = ">=8.23.0.2" },
     { name = "pyspnego" },
     { name = "python-dotenv" },
-    { name = "quickjs-ng", specifier = ">=0.17.0.1" },
+    { name = "quickjs-ng", specifier = ">=0.17.0.2" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0" },
     { name = "winloop", marker = "sys_platform == 'win32'", specifier = ">=0.6.0" },
 ]

@@ -66,7 +66,7 @@ build_wheels() {
             PY=$(find_python "$pyver")
             if [ -f "$PY" ]; then
                 echo "Building wheels for Python $pyver"
-                "$PY" -m pip wheel --upgrade 'quickjs-ng>=0.17.0.1' -w wheels
+                "$PY" -m pip wheel --no-cache-dir 'quickjs-ng>=0.17.0.2' -w wheels
                 "$PY" -m pip wheel . -w wheels
                 echo "quickjs-ng wheel: $(find wheels -maxdepth 1 -name 'quickjs_ng-*.whl' -printf '%f\n' | tail -1)"
             fi
@@ -78,7 +78,7 @@ build_wheels() {
             PY=$(find_python "$pyver") || continue
             if [ -n "$PY" ]; then
                 echo "Building wheels for Python $pyver"
-                "$PY" -m pip wheel --upgrade 'quickjs-ng>=0.17.0.1' -w wheels
+                "$PY" -m pip wheel --no-cache-dir 'quickjs-ng>=0.17.0.2' -w wheels
                 "$PY" -m pip wheel . -w wheels
                 echo "quickjs-ng wheel: $(find wheels -maxdepth 1 -name 'quickjs_ng-*.whl' -printf '%f\n' | tail -1)"
             fi

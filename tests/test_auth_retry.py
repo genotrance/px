@@ -72,6 +72,14 @@ def fake_upstream():
     server.server_close()
 
 
+@pytest.fixture
+def auth_retry_port():
+    """Reserve a dedicated Px port block for this subprocess-heavy test."""
+    port = find_free_port_block()
+    assert port, "No free port block for auth-retry Px"
+    return port
+
+
 def _client_request(port):
     "One client request proxied through Px; returns the status code or None on error"
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -99,23 +107,23 @@ def _start_px(name, port, fake_upstream, authretry, event_loop, tmp_path):
         f"--server={fake_upstream.addr} --auth=BASIC --username={USERNAME}"
         f" --authretry={authretry} --noproxy= --threads=64 --workers=1"
     )
-    # Auth-retry's burst tests run beside many Px subprocesses under xdist;
-    # allow extra time for this isolated server to initialize under that load.
-    return run_px(name, port, tmp_path, flags, env, startup_retries=40)
+    # Auth-retry's burst tests run beside many Px subprocesses under xdist.
+    # Poll the listener for long enough to tolerate a saturated test host.
+    return run_px(name, port, tmp_path, flags, env, startup_timeout=90)
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])
-def test_default_disabled_never_retries(fake_upstream, px_port, tmp_path, event_loop):
+def test_default_disabled_never_retries(fake_upstream, auth_retry_port, tmp_path, event_loop):
     "default authretry=0 keeps today's behaviour: blocked proxy stays blocked"
-    subp, cmd, buffer = _start_px("AuthRetryDefault", px_port, fake_upstream, 0, event_loop, tmp_path)
+    subp, cmd, buffer = _start_px("AuthRetryDefault", auth_retry_port, fake_upstream, 0, event_loop, tmp_path)
     try:
         for _ in range(3):
-            _client_request(px_port)
+            _client_request(auth_retry_port)
         assert fake_upstream.attempts == 3
 
         time.sleep(0.5)  # long enough for any retry interval to have elapsed
         with concurrent.futures.ThreadPoolExecutor(max_workers=50) as pool:
-            list(pool.map(lambda _: _client_request(px_port), range(50)))
+            list(pool.map(lambda _: _client_request(auth_retry_port), range(50)))
         assert fake_upstream.attempts == 3
     finally:
         print_buffer(buffer)
@@ -123,18 +131,18 @@ def test_default_disabled_never_retries(fake_upstream, px_port, tmp_path, event_
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])
-def test_single_probe_per_interval_under_burst(fake_upstream, px_port, tmp_path, event_loop):
+def test_single_probe_per_interval_under_burst(fake_upstream, auth_retry_port, tmp_path, event_loop):
     "After blocking, a burst of concurrent clients yields exactly one upstream probe"
     interval = 0.3
-    subp, cmd, buffer = _start_px("AuthRetryBurst", px_port, fake_upstream, interval, event_loop, tmp_path)
+    subp, cmd, buffer = _start_px("AuthRetryBurst", auth_retry_port, fake_upstream, interval, event_loop, tmp_path)
     try:
         for _ in range(3):
-            _client_request(px_port)
+            _client_request(auth_retry_port)
         assert fake_upstream.attempts == 3
 
         time.sleep(interval + 0.3)
         with concurrent.futures.ThreadPoolExecutor(max_workers=50) as pool:
-            list(pool.map(lambda _: _client_request(px_port), range(50)))
+            list(pool.map(lambda _: _client_request(auth_retry_port), range(50)))
         assert fake_upstream.attempts == 4
     finally:
         print_buffer(buffer)
@@ -142,18 +150,18 @@ def test_single_probe_per_interval_under_burst(fake_upstream, px_port, tmp_path,
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])
-def test_recovery_after_probe_succeeds(fake_upstream, px_port, tmp_path, event_loop):
+def test_recovery_after_probe_succeeds(fake_upstream, auth_retry_port, tmp_path, event_loop):
     "A successful probe unblocks the proxy for subsequent requests"
     interval = 0.3
-    subp, cmd, buffer = _start_px("AuthRetryRecover", px_port, fake_upstream, interval, event_loop, tmp_path)
+    subp, cmd, buffer = _start_px("AuthRetryRecover", auth_retry_port, fake_upstream, interval, event_loop, tmp_path)
     try:
         for _ in range(3):
-            _client_request(px_port)
+            _client_request(auth_retry_port)
         assert fake_upstream.attempts == 3
 
         time.sleep(interval + 0.3)
         fake_upstream.mode = "allow"
-        assert _client_request(px_port) == 200
+        assert _client_request(auth_retry_port) == 200
         assert fake_upstream.attempts == 4
 
         # Px's do() detects completion via polling, so clearing the probe's
@@ -161,7 +169,7 @@ def test_recovery_after_probe_succeeds(fake_upstream, px_port, tmp_path, event_l
         # response — give it a moment before confirming the proxy stayed
         # unblocked, rather than requiring an immediate following request.
         time.sleep(0.2)
-        statuses = [_client_request(px_port) for _ in range(5)]
+        statuses = [_client_request(auth_retry_port) for _ in range(5)]
         assert statuses == [200] * 5
         assert fake_upstream.attempts == 9
     finally:

@@ -151,7 +151,6 @@ class KerberosManager:
                 preexec_fn=_child_setup,
             )
         except FileNotFoundError:
-            os.close(child_fd)
             os.close(ctrl_fd)
             self.dprint("Kerberos: kinit not found")
             self.backoff = CHECK_INTERVAL

@@ -2,7 +2,7 @@
 
 ---
 
-## v0.13.0 — 2026-10-23
+## v0.13.0 — 2026-10-24
 
 ### Improvements
 - Px now requires pymcurl 8.23.0.2 or newer, which provides the keepalive,
@@ -54,8 +54,15 @@
   stalls at 200+ concurrent connections.
 - `TCP_NODELAY` is now set on accepted client connections on the plain asyncio
   loop, removing ~40 ms per round trip on CONNECT tunnels.
+- Fixed `--kerberos` crashing Px at startup with `OSError: [Errno 9] Bad file
+  descriptor` on hosts where `kinit` is not installed; Px now logs
+  `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- The test helper now starts every Px instance with an explicit empty config
+  file so a `px.ini` that `test_config` temporarily writes next to the px
+  script under `pytest -n auto` can no longer leak into other tests' Px
+  processes (this caused sporadic "Px didn't start" failures).
 - New `px/resolver.py` module with a bounded DNS worker pool, positive and
   negative TTL caches and in-flight de-duplication, used by `px.pac` and
   `px.wproxy` (#273).

@@ -159,12 +159,20 @@ def run_px(name, port, tmp_path, flags="", env=None, listen_ip="127.0.0.1", star
 
     tmp_path can be a Path (function-scoped) or a tmp_path_factory
     (session-scoped) — if it has mktemp(), a subdirectory is created."""
+    if hasattr(tmp_path, "mktemp"):
+        tmp_path = tmp_path.mktemp(f"{name}-{port}")
+
+    # Explicit config path keeps a px.ini that a parallel test_config run
+    # temporarily writes next to the px script from being auto-discovered
+    if "--config" not in flags:
+        ini_path = os.path.join(tmp_path, "px.ini")
+        open(ini_path, "a").close()
+        flags += f" --config={ini_path}"
+
     cmd = f"px --verbose --port={port} {flags}"
 
     px_print_env(f"{name}: {cmd}", env)
 
-    if hasattr(tmp_path, "mktemp"):
-        tmp_path = tmp_path.mktemp(f"{name}-{port}")
     logfile = open(f"{tmp_path}{os.sep}{name}-{port}.log", "w+")
     subp = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=logfile, env=env, cwd=tmp_path)
 

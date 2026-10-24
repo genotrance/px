@@ -1,9 +1,5 @@
 """Tests for --authretry: mcurl's single-probe retry of a proxy blocked by
 repeated 407s, exercised through a real Px process against a fake upstream.
-
-Requires a pymcurl built from mcurl's feature/auth-retry branch (adds
-MCurl.set_auth_retry / reset_proxy_failures). Skipped entirely against a
-released pymcurl that lacks those APIs.
 """
 
 import concurrent.futures
@@ -14,15 +10,9 @@ import os
 import threading
 import time
 
-import mcurl
 import pytest
 from fixtures import *  # noqa: F403
 from helpers import *  # noqa: F403
-
-pytestmark = pytest.mark.skipif(
-    not hasattr(mcurl.MCurl, "set_auth_retry") or not hasattr(mcurl.MCurl, "reset_proxy_failures"),
-    reason="Installed pymcurl lacks set_auth_retry/reset_proxy_failures (needs mcurl feature/auth-retry)",
-)
 
 TARGET = "http://auth-retry.test/"
 USERNAME = "authretry-test"

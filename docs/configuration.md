@@ -108,13 +108,15 @@ for the full list of supported types.
 
 ## Settings
 
+Px requires pymcurl 8.23.0.2 or newer.
+
 | Flag | Env var | INI key | Default | Description |
 |------|---------|---------|---------|-------------|
 | `--workers=N` | `PX_WORKERS` | `settings:workers` | `1` | Number of worker processes |
 | `--threads=N` | `PX_THREADS` | `settings:threads` | `32` | Thread pool size for upstream connections |
-| `--idle=N` | `PX_IDLE` | `settings:idle` | `30` | Inactivity timeout for CONNECT tunnels and plain-HTTP transfers (seconds); plain HTTP needs pymcurl with `set_low_speed` |
+| `--idle=N` | `PX_IDLE` | `settings:idle` | `30` | Inactivity timeout for CONNECT tunnels and plain-HTTP transfers (seconds) |
 | `--socktimeout=N` | `PX_SOCKTIMEOUT` | `settings:socktimeout` | `20` | Connection timeout (seconds) |
-| `--authretry=N` | `PX_AUTHRETRY` | `settings:authretry` | `0` | Float number of seconds (fractions allowed) before re-probing an upstream proxy blocked by repeated 407s; for example, `--authretry=300` retries every 5 minutes; one probe is allowed per interval and other requests are refused until it succeeds; `0` disables retrying; needs pymcurl with `set_auth_retry` |
+| `--authretry=N` | `PX_AUTHRETRY` | `settings:authretry` | `0` | Float number of seconds (fractions allowed) before re-probing an upstream proxy blocked by repeated 407s; for example, `--authretry=300` retries every 5 minutes; one probe is allowed per interval and other requests are refused until it succeeds; `0` disables retrying |
 | `--proxyreload=N` | `PX_PROXYRELOAD` | `settings:proxyreload` | `60` | Proxy info refresh interval (seconds) |
 | `--event-loop=MODE` | `PX_EVENT_LOOP` | `settings:event_loop` | `auto` | `auto` uses winloop/uvloop when available; `asyncio` forces Python's standard loop |
 | `--foreground=0\|1` | `PX_FOREGROUND` | `settings:foreground` | `0` | Run in foreground when compiled/frozen |

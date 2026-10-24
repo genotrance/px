@@ -916,10 +916,7 @@ class State:
         self.mcurl = mcurl.MCurl(debug_print=dprint)
 
         # Single-probe auth retry for proxies blocked by repeated 407s
-        if hasattr(self.mcurl, "set_auth_retry"):
-            self.mcurl.set_auth_retry(self.authretry)
-        elif self.authretry > 0:
-            pprint("--authretry requires a newer pymcurl with set_auth_retry support - ignoring")
+        self.mcurl.set_auth_retry(self.authretry)
 
         # Increase idle connection reuse cache (default is 4 x easy handles).
         # Active CONNECT tunnels are protected by keeping their handle in the
@@ -968,10 +965,7 @@ class State:
         if result is True:
             # Fresh ticket acquired — clear auth failure cache so
             # previously-blocked proxies are retried
-            if hasattr(self.mcurl, "reset_proxy_failures"):
-                self.mcurl.reset_proxy_failures()
-            else:
-                self.mcurl.failed.clear()
+            self.mcurl.reset_proxy_failures()
 
     def cleanup_kerberos(self):
         """Explicitly clean up Kerberos credential cache."""

@@ -5,6 +5,8 @@
 ## v0.13.0
 
 ### Improvements
+- Px now requires pymcurl 8.23.0.2 or newer, which provides the keepalive,
+  low-speed timeout, and auth-retry APIs used by Px.
 - PAC `dnsResolve()` (and so `isResolvable()`/`isInNet()`) and IP-based
   `--noproxy` matching use a cached, bounded DNS resolver: successful and
   failed lookups are cached, concurrent lookups of one name are shared, and
@@ -33,9 +35,9 @@
   For example, `--authretry=300` retries every 5 minutes. Once blocked, one
   request is let through per interval and all other requests are refused until
   that probe succeeds. A successful response unblocks the proxy immediately;
-  another 407 re-blocks it. Needs pymcurl with `MCurl.set_auth_retry`; default
-  `0` keeps today's behaviour on older versions. Thanks to #276 (enkunkun) for
-  identifying the problem.
+  another 407 re-blocks it. Default `0` keeps blocked proxies blocked until
+  Kerberos ticket renewal or restart. Thanks to #276 (enkunkun) for identifying
+  the problem.
 
 ### Bug fixes
 - PAC DNS helpers no longer hold up all PAC evaluation during slow name
@@ -46,7 +48,7 @@
   cached results instead of performing a new unbounded DNS lookup per request
   (#273).
 - `--idle` now also applies to plain-HTTP transfers: a response that sends no
-  data for that long is aborted (needs pymcurl with `Curl.set_low_speed`).
+  data for that long is aborted.
 - Listen backlog raised from 128 to 2048, avoiding ~1 second SYN-retransmit
   stalls at 200+ concurrent connections.
 - `TCP_NODELAY` is now set on accepted client connections on the plain asyncio

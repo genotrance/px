@@ -168,7 +168,7 @@ Configuration:
 
   --idle= | PX_IDLE= | settings:idle=
   Inactivity timeout in seconds for HTTP CONNECT tunnels and plain HTTP
-  transfers (plain HTTP needs pymcurl with set_low_speed). Valid integer, default: 30
+  transfers. Valid integer, default: 30
 
   --socktimeout= | PX_SOCKTIMEOUT= | settings:socktimeout=
   Timeout in seconds for connections before giving up. Valid float, default: 20
@@ -180,7 +180,7 @@ Configuration:
     renewal or restart). For example, --authretry=300 retries every 5 minutes.
     Once blocked, exactly one probe request is let through per interval; all
     other requests are refused until that probe succeeds. Another 407 re-blocks
-    the proxy. Requires pymcurl with set_auth_retry support.
+  the proxy.
 
   --proxyreload= | PX_PROXYRELOAD= | settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60

@@ -17,7 +17,7 @@ Tests live in `tests/`.
 | `test_large_data.py` | Large data transfer reliability — concurrent multi-MB GET/POST over HTTP and HTTPS with SHA-256 integrity verification (marked `largedata`, run via `make test-large-data`) |
 | `test_debug.py` | Debug module tests — `Debug` singleton, `pprint`, `dprint` |
 | `test_kerberos.py` | Kerberos ticket management — unit tests (mocked subprocess, Linux/macOS only) and Docker-based integration tests against local MIT and Heimdal KDCs (marked `integration`, run via `make test-kerberos`) |
-| `test_auth_retry.py` | `--authretry` integration tests — Px against a fake upstream proxy that denies or allows authenticated requests, proving latching after 3 consecutive 407s, exactly one probe per interval under a 50-client concurrent burst, and recovery. Skipped unless the installed pymcurl provides `MCurl.set_auth_retry`/`reset_proxy_failures` |
+| `test_auth_retry.py` | `--authretry` integration tests — Px against a fake upstream proxy that denies or allows authenticated requests, proving latching after 3 consecutive 407s, exactly one probe per interval under a 50-client concurrent burst, and recovery |
 | `test_network.py` | Network integration tests — `--quit`, `--listen`, `--hostonly`, `--gateway`, `--allow`, `--noproxy` |
 | `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |

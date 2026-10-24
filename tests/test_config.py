@@ -269,6 +269,7 @@ class TestAuthRetry:
         config.STATE.parse_config()
         assert config.STATE.mcurl.retry_calls == [3.0]
 
+
 # -------------------------------------------------------------------
 # Legacy parametrized test (kept as-is)
 # -------------------------------------------------------------------

@@ -6,6 +6,7 @@ behavior. They are ported from the legacy test.py.
 
 import asyncio
 import os
+import subprocess
 import time
 import unittest.mock
 
@@ -69,10 +70,9 @@ class TestQuit:
         try:
             assert can_connect("127.0.0.1", port), "Px should be running"
 
-            # Give Px a moment to fully initialize all workers
-            time.sleep(1)
-
-            # Send --quit with retries for slow CI environments
+            # Send --quit with retries: if workers aren't fully up yet, an
+            # early attempt may fail, so retry rather than guess a fixed
+            # warm-up delay.
             quit_cmd = f"px --port={port} --quit"
             ret = None
             for _attempt in range(3):
@@ -86,8 +86,10 @@ class TestQuit:
             retcode = subp.wait(timeout=15)
             assert retcode == 0, f"Px exited with {retcode}"
 
-            # Port should be free now
-            time.sleep(0.5)
+            # Poll for the port to free up rather than guessing a fixed delay
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not is_port_free(port):
+                time.sleep(0.05)
             assert is_port_free(port), "Port should be free after quit"
         except Exception:
             quit_px("quit", subp, cmd, strict=False)
@@ -221,12 +223,23 @@ class TestAllow:
         port = _worker_port(request, 6)
         if port is None:
             pytest.skip("No free port found")
-        subp, cmd, logfile = run_px("allow-subnet", port, tmp_path, flags="--gateway --allow=10.0.*.*")
+        subp, _cmd, logfile = run_px("allow-subnet", port, tmp_path, flags="--gateway --allow=10.0.*.*")
         try:
             # Gateway should bind all interfaces
             assert can_connect("127.0.0.1", port), "Should connect on 127.0.0.1"
         finally:
-            quit_px("allow-subnet", subp, cmd, strict=False)
+            # --quit picks its target interface from the hosts that match
+            # --allow (see get_listen() in px/config.py); none of this host's
+            # real interfaces are ever in 10.0.0.0/8, so --quit is guaranteed
+            # to fail here. Terminate directly instead of paying for 3 doomed
+            # --quit retries plus a 10s wait before quit_px() falls back to
+            # killing it anyway.
+            subp.terminate()
+            try:
+                subp.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                subp.kill()
+                subp.wait()
             if logfile:
                 logfile.close()
 

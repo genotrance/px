@@ -88,6 +88,22 @@
   resolved version rather than using an older locked release.
 - Added the reviewed `uv.lock` dependency lockfile so CI, developer checkouts,
   and ORC verification use identical dependency versions.
+- Added a `slow` pytest marker (`pyproject.toml`) for tests that are
+  inherently slow — `--authretry` tests that assert real retry intervals, and
+  the full chained-proxy auth matrix in `test_proxy_auth_upstream`/
+  `test_proxy_auth_chain`. `pytest tests` and `make test` still run them, but
+  `pytest tests -m "not integration and not benchmark and not largedata and
+  not slow"` skips them for a fast inner-loop run (~6s vs ~21-27s for the
+  full suite, measured with `-n auto`). Also fixed two tests that were slow
+  only because of an avoidable wait rather than what they verify:
+  `test_pac.py`'s `dnsResolve` tests now mock `getaddrinfo` instead of making
+  a real DNS lookup (previously bounded by a 3s timeout per lookup, and prone
+  to platform-dependent resolution differences); and
+  `test_network.py::test_allow_specific_subnet` no longer tears down through
+  `--quit`, which `--allow=10.0.*.*` makes impossible for `--quit` to target
+  (`get_listen()` has no local IP to pick), so the test was paying for 3
+  doomed `--quit` retries plus a 10s kill timeout (~17s) every run for an
+  outcome that was never in doubt.
 
 ---
 

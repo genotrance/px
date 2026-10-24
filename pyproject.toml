@@ -98,6 +98,7 @@ markers = [
     "integration: Docker-based integration tests (require docker, run with: pytest -m integration)",
     "benchmark: Concurrency benchmark tests (run with: pytest -m benchmark)",
     "largedata: Large data transfer reliability tests (run with: pytest -m largedata)",
+    "slow: Inherently slow tests - real timing/retry intervals or large network-dependent combinations (included by default; skip with: pytest -m 'not integration and not benchmark and not largedata and not slow')",
 ]
 addopts = "-m 'not integration and not benchmark and not largedata'"
 

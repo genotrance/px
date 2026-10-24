@@ -1,7 +1,9 @@
 """Tests for px.pac module — PAC file loading and evaluation."""
 
 import codecs
+import socket
 
+from px import resolver
 from px.pac import Pac
 
 SIMPLE_PAC = b"""
@@ -338,14 +340,29 @@ class TestPacCleanup:
 
 
 class TestPacCallables:
-    def test_dns_resolve(self, tmp_path):
+    def test_dns_resolve(self, tmp_path, monkeypatch):
+        # Avoid real DNS: a real lookup of "localhost" can be slow and even
+        # resolve to ::1 first on some platforms (e.g. macOS), which isn't
+        # what this test is checking — it's checking that dnsResolve() wires
+        # through to the resolver and returns the plain IPv4 string.
+        monkeypatch.setattr(
+            resolver.socket,
+            "getaddrinfo",
+            lambda *_: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))],
+        )
         pac_file = tmp_path / "proxy.pac"
         pac_file.write_bytes(SIMPLE_PAC)
         pac = Pac(str(pac_file))
         result = pac.dnsResolve("localhost")
         assert result == "127.0.0.1"
 
-    def test_dns_resolve_bad_host(self, tmp_path):
+    def test_dns_resolve_bad_host(self, tmp_path, monkeypatch):
+        # Avoid a real (and on some platforms, slow) negative DNS lookup —
+        # this test only checks that a resolver failure surfaces as null.
+        def fail(*_):
+            raise socket.gaierror
+
+        monkeypatch.setattr(resolver.socket, "getaddrinfo", fail)
         pac_file = tmp_path / "proxy.pac"
         pac_file.write_bytes(SIMPLE_PAC)
         pac = Pac(str(pac_file))
@@ -366,7 +383,13 @@ class TestPacCallables:
         # Should return some IP address
         assert len(result) > 0
 
-    def test_unresolvable_host_is_not_resolvable_or_in_net(self, tmp_path):
+    def test_unresolvable_host_is_not_resolvable_or_in_net(self, tmp_path, monkeypatch):
+        # isResolvable() calls dnsResolve() internally, which would otherwise
+        # make a real (and on some platforms, slow) negative DNS lookup.
+        def fail(*_):
+            raise socket.gaierror
+
+        monkeypatch.setattr(resolver.socket, "getaddrinfo", fail)
         pac_file = tmp_path / "proxy.pac"
         pac_file.write_bytes(
             b"""

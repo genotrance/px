@@ -247,6 +247,116 @@ in `tests/test_proxy.py`.
 
 ---
 
+## Slow tests
+
+A `slow` pytest marker identifies tests that are inherently slow — they are
+*not* excluded by the default `addopts` filter (`-m 'not integration and not
+benchmark and not largedata'`), so `pytest tests` and `make test` still run
+them every time, the same as any other test. Use the marker to skip them for
+a fast inner-loop run:
+
+```bash
+pytest tests -m "not integration and not benchmark and not largedata and not slow"
+```
+
+Measured on Linux/Python 3.14 with `pytest -n auto` (default `addopts`
+already excludes `integration`/`benchmark`/`largedata`; absolute numbers vary
+with host load, but the relative drop is the point):
+
+| Selection | Tests | Wall time |
+|---|---|---|
+| Full (`pytest tests`) | 459 passed, 6 skipped | ~21-27s |
+| `PX_CI_MINIMAL=1 --ignore=tests/test_network.py` (macOS CI selection) | 281 passed, 174 skipped | ~13s |
+| `-m "... and not slow"` (fast selection) | 309 passed, 6 skipped | ~6s |
+
+The fast selection runs in roughly a quarter of the full suite's time. Two
+specific fixes (below) also measured cleanly in isolation, independent of
+host load: `test_network.py::test_allow_specific_subnet` dropped from 17.4-
+17.7s to 0.5s, and `test_network.py::test_quit_stops_px` dropped from 2.0-
+2.5s to about 1.0s (both measured with `pytest --durations=0`, no `-n`, run
+alone before and after).
+
+Two groups carry the marker, because they are slow by what they verify, not
+by an avoidable wait:
+
+- `test_auth_retry.py` (all tests) — `--authretry` latches a blocked upstream
+  for a real interval and these tests assert on that interval actually
+  elapsing (`time.sleep`), plus a 50-client concurrent burst. There is no way
+  to assert "this retry interval was honoured" without waiting it out.
+- `test_proxy.py::test_proxy_auth_upstream` and `test_proxy_auth_chain` — each
+  spawns 2-3 real Px processes and covers the full auth × cli/env × http/https
+  × test-auth matrix (72 combinations each). This is the same matrix
+  `PX_CI_MINIMAL` already skips entirely on macOS CI (see below); the `slow`
+  marker makes that selection available on any platform without the env var.
+  Basic proxy auth (one hop, no chaining) stays fast via `test_proxy_auth`.
+
+Everything else in the suite — including `test_network.py`'s process-spawning
+tests — runs in roughly a second or two per test once the avoidable waits
+below are fixed, so it stays in the fast selection.
+
+### Avoidable waits fixed
+
+Profiling the suite with `pytest --durations=0` found tests that were slow
+only because of waits the test itself didn't need:
+
+- `test_pac.py`'s `dnsResolve` tests (`test_dns_resolve`,
+  `test_dns_resolve_bad_host`, `test_unresolvable_host_is_not_resolvable_or_in_net`)
+  performed real DNS lookups (including a deliberately-unresolvable
+  `*.invalid` name). `px.resolver.Resolver.lookup()` bounds a failed lookup to
+  `LOOKUP_TIMEOUT` (3s), so a slow or absent resolver — plausible on macOS
+  GitHub Actions runners, which route DNS through `mDNSResponder` and can be
+  slow to fail unqualified or unusual names — made each of these tests pay
+  up to 3 extra seconds for no benefit: the test only checks that `Pac`
+  plumbs failures through as `null`, which `tests/test_resolver.py` already
+  proves against a mocked resolver. They now monkeypatch
+  `resolver.socket.getaddrinfo` the same way, so they're instant and
+  deterministic on every platform instead of depending on real DNS behaviour
+  (including which family "localhost" resolves to first, which also differs
+  on macOS).
+- `test_network.py::TestAllow::test_allow_specific_subnet` starts Px with
+  `--gateway --allow=10.0.*.*` and tore it down with the normal `--quit`
+  flow. `--quit`'s target interface comes from `get_listen()` in
+  `px/config.py`, which picks the first local IP that matches `--allow` — but
+  no real test host has an IP in `10.0.0.0/8`, so that match never succeeds
+  and `--quit` was *guaranteed* to fail every run. The test tolerates that
+  (`quit_px(..., strict=False)`), but tolerating it still meant paying for 3
+  doomed `--quit` attempts (with 2s backoff) and then a 10s wait before
+  falling back to killing the process — about 17s of pure waiting for an
+  outcome that was never in doubt. The test only needs the process gone, so
+  teardown now terminates it directly instead of routing through a `--quit`
+  that can't work for this `--allow` value.
+- `test_network.py::TestQuit::test_quit_stops_px` also had a fixed `time.sleep(1)`
+  "to let Px finish starting" before issuing `--quit`, even though the
+  existing 3-attempt retry loop (with a 2s backoff) already tolerates an
+  early `--quit` failing. It also waited a fixed `time.sleep(0.5)` for the
+  port to free up after the process exited. Both are now a bounded poll
+  (removed, and a `is_port_free()` poll up to 5s) instead of a fixed delay.
+
+### macOS-specific reasoning
+
+The macOS GitHub Actions `test macos-latest py3.14 auto` job
+(`PX_CI_MINIMAL=1 --ignore=tests/test_network.py`) takes roughly 18.5 minutes
+against ~1 minute on Linux for the same selection. Its progress log shows two
+very different phases: the bulk of the collected tests (most of them skipped
+by `PX_CI_MINIMAL`'s auth pairing and the chain-test skip) complete in a few
+minutes, then the last ~5% of tests (~20 of them, not skipped) take about 6
+more minutes on their own — roughly 15-20s each. That magnitude (tens of
+seconds per test, not milliseconds) points at real timeouts or slow syscalls
+rather than ordinary process-startup overhead, which is why DNS and
+`--allow`/`--quit` interactions were the first things worth checking locally:
+unqualified or unresolvable hostnames and "localhost" resolving to `::1`
+first are both specifically slower on macOS's `mDNSResponder`-backed
+resolver than on Linux's glibc resolver, and the `test_allow_specific_subnet`
+bug above produces exactly this kind of ~15-20s-per-test cost through a
+completely different path (a doomed `--quit`, not DNS) — it cannot be
+reproduced on macOS directly in this environment, but the fix removes a
+guaranteed-to-fail code path regardless of platform, so it helps there too.
+`test_network.py` is excluded entirely from the macOS CI job today; once a
+follow-up task re-enables it there (this task does not touch CI config), the
+fix here means it no longer carries that cost.
+
+---
+
 ## Keyring backend for testing
 
 Tests use the plaintext keyring backend to avoid system keyring prompts and ensure

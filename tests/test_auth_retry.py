@@ -14,6 +14,10 @@ import pytest
 from fixtures import *  # noqa: F403
 from helpers import *  # noqa: F403
 
+# Every test here asserts behaviour that only shows up after a real retry
+# interval elapses (time.sleep), so none of them can be made fast.
+pytestmark = pytest.mark.slow
+
 TARGET = "http://auth-retry.test/"
 USERNAME = "authretry-test"
 PASSWORD = "authretry-pass"

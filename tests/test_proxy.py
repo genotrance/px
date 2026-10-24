@@ -24,6 +24,7 @@ def test_proxy_auth(px_basic_cli, px_auth, px_username, px_password, tmp_path):
     run_in_temp(cmd, tmp_path)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(os.getenv("PX_CI_MINIMAL") == "1", reason="Skip slow chain tests in minimal CI mode")
 def test_proxy_auth_upstream(
     px_upstream, px_basic_cli, px_port, px_auth, px_username, px_password, px_test_auth, tmp_path
@@ -37,6 +38,7 @@ def test_proxy_auth_upstream(
     run_in_temp(cmd, tmp_path, px_upstream)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(os.getenv("PX_CI_MINIMAL") == "1", reason="Skip slow chain tests in minimal CI mode")
 def test_proxy_auth_chain(
     px_upstream, px_chain, px_basic_cli, px_port, px_auth, px_username, px_password, px_test_auth, tmp_path

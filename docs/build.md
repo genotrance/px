@@ -201,8 +201,12 @@ resolve the newest release from PyPI.
   bundle against the newest published CPython 3.13 patch release on
   python.org. The check is run again when the build selects its interpreter,
   so a release cannot continue with a stale runner or container image.
-  macOS resolves the newest patch with `actions/setup-python`'s
-  `check-latest` option. Linux glibc uses the manylinux interpreter when it
+  macOS always uses the newest uv-managed python-build-standalone CPython:
+  `actions/setup-python`'s macOS CPython links Homebrew's OpenSSL by absolute
+  path (`/opt/homebrew/Cellar/openssl@3/<version>/lib/libcrypto.3.dylib`), so
+  the Nuitka binary built from it ran only on Macs with that exact Homebrew
+  version. python-build-standalone statically links OpenSSL into `_ssl` and
+  `_hashlib`, making the binary self-contained. Linux glibc uses the manylinux interpreter when it
   passes the check, otherwise it installs the newest managed CPython through
   the current uv release. Linux musl always uses that managed CPython because
   Alpine's system Python can have a different minor version; its
@@ -227,6 +231,17 @@ resolve the newest release from PyPI.
   `MACOSX_DEPLOYMENT_TARGET`, so the macOS minimum version comes from the
   toolchain on that image; pinning the runner keeps it from drifting when
   `macos-latest` moves to a newer image.
+  The macOS build creates a fresh venv from the managed CPython, installs the
+  wheels archive into it, and runs `tools.py --check-ssl` (imports `ssl`,
+  `hashlib` and `spnego`, and fails if `_ssl` or `_hashlib` link a Homebrew
+  or `/usr/local` library) before the slow Nuitka compile. After the build,
+  `smoke_binary` fails if `px --help` exits non-zero or reports
+  `Requires module`, and on macOS runs `tools.py --check-portable` over
+  `px.dist`, which runs `otool -L` on every Mach-O file and fails on any
+  reference to `/opt/homebrew` or `/usr/local`. The check is needed because
+  the build runner has Homebrew, so the binary loads fine there and the
+  failure otherwise only appears on the clean `test-binary` runner, where
+  every auth test timed out (about 20 minutes per tox environment).
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
@@ -326,6 +341,11 @@ Local build helper used by both developers and the GitHub Actions workflows:
   On Linux/macOS, adds `--include-package=uvloop`; on Windows, adds
   `--include-package=winloop` alongside the keyring package. The guarded loop
   imports may not be detected automatically by Nuitka.
+- `--check-ssl` — fails unless `ssl`, `hashlib` and `spnego` import in this
+  interpreter and, on macOS, `_ssl`/`_hashlib` link no Homebrew or
+  `/usr/local` library.
+- `--check-portable DIR` — macOS only; fails if any Mach-O file under `DIR`
+  links a library under `/opt/homebrew` or `/usr/local` (`otool -L`).
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
   and packages `px.exe` (Windows only). It selects the highest versioned
   amd64 embeddable zip published for the newest CPython 3.13 release rather

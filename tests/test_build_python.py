@@ -66,3 +66,56 @@ def test_docker_checks_base_and_each_built_image(monkeypatch):
         f"genotrance/px:{tools.__version__}-mini",
         f"genotrance/px:{tools.__version__}",
     ]
+
+
+MACHO = bytes.fromhex("cffaedfe") + b"\0" * 16
+
+OTOOL_OUTPUT = {
+    "good": "good:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n\t@rpath/libcrypto.3.dylib (compatibility version 3.0.0)\n",
+    "bad": "bad:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n\t/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.3.dylib (compatibility version 3.0.0)\n",
+    "local": "local:\n\t/usr/local/opt/openssl@3/lib/libssl.3.dylib (compatibility version 3.0.0)\n",
+    "libcrypto.3.dylib": "libcrypto.3.dylib:\n\t/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib (compatibility version 3.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
+}
+
+
+@pytest.fixture
+def fake_otool(monkeypatch):
+    monkeypatch.setattr(tools.sys, "platform", "darwin")
+    monkeypatch.setattr(tools.subprocess, "check_output", lambda cmd, **_kw: OTOOL_OUTPUT[Path(cmd[-1]).name])
+
+
+def make_dist(root, names):
+    root.mkdir(exist_ok=True)
+    for name in names:
+        (root / name).write_bytes(MACHO)
+    (root / "px.ini").write_text("not mach-o")
+    return root
+
+
+def test_check_portable_accepts_bundled_libraries(fake_otool, tmp_path, capsys):
+    dist = make_dist(tmp_path / "dist", ["good"])
+
+    tools.check_portable(str(dist))
+
+    assert "No Homebrew" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["bad", "local"])
+def test_check_portable_rejects_host_library_references(fake_otool, tmp_path, capsys, name):
+    dist = make_dist(tmp_path / "dist", ["good", name])
+
+    with pytest.raises(SystemExit):
+        tools.check_portable(str(dist))
+
+    assert f"{name} links" in capsys.readouterr().out
+
+
+def test_check_portable_ignores_dylib_own_install_name(fake_otool, tmp_path):
+    dist = make_dist(tmp_path / "dist", ["libcrypto.3.dylib"])
+
+    assert tools.host_lib_refs(str(dist / "libcrypto.3.dylib")) == []
+
+
+def test_check_portable_rejects_empty_dist(fake_otool, tmp_path):
+    with pytest.raises(SystemExit):
+        tools.check_portable(str(make_dist(tmp_path / "dist", [])))

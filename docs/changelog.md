@@ -2,6 +2,20 @@
 
 ---
 
+## Unreleased
+
+### Bug fixes
+- The macOS binary no longer links Homebrew's OpenSSL by absolute path, which
+  made SSL and pyspnego fail to load on Macs without that exact Homebrew
+  version. It is now built with a self-contained python-build-standalone
+  CPython.
+
+### Internal
+- macOS release builds fail early if the build interpreter's `_ssl` or
+  `_hashlib` link host libraries, and fail after the build if any Mach-O file
+  in `px.dist` references `/opt/homebrew` or `/usr/local`. The binary smoke
+  check also fails on `Requires module` import errors.
+
 ## v0.13.0 — 2026-10-24
 
 ### Improvements

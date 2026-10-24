@@ -99,7 +99,9 @@ def _start_px(name, port, fake_upstream, authretry, event_loop, tmp_path):
         f"--server={fake_upstream.addr} --auth=BASIC --username={USERNAME}"
         f" --authretry={authretry} --noproxy= --threads=64 --workers=1"
     )
-    return run_px(name, port, tmp_path, flags, env)
+    # Auth-retry's burst tests run beside many Px subprocesses under xdist;
+    # allow extra time for this isolated server to initialize under that load.
+    return run_px(name, port, tmp_path, flags, env, startup_retries=40)
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])

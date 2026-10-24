@@ -175,7 +175,11 @@ resolve the newest release from PyPI.
   `ubuntu-24.04-arm` runners. Alpine's `patchelf` package (0.18.0) is
   intentionally not used because Nuitka rejects it as a known buggy release;
   instead `build.sh` installs `patchelf==0.17.2.4` from PyPI into the build
-  venv.
+  venv. `build.sh` pins Nuitka to 4.1.3 for every Nuitka target. Later
+  releases bundle SCons 4.10.1, whose `ilink` tool discovery fails with the
+  GCC 10 compiler in manylinux2014; 4.1.3 is the newest version verified by
+  the v0.12.0 Linux glibc build. Pinning all Nuitka targets keeps their
+  compiler behavior aligned while the upstream regression is unresolved.
   Linux glibc builds run inside manylinux2014 containers using
   `/opt/python/cp313-cp313/bin/python3`. Linux musl builds use Alpine
   containers with system Python and dev headers since Nuitka needs

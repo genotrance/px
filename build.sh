@@ -25,6 +25,10 @@ get_os() {
 # tools.py). The newest published patch release is always used, never a pinned
 # patch version.
 PY_MINOR="${PY_MINOR:-3.13}"
+# Nuitka 4.2+ bundles SCons 4.10.1, which cannot select the linker in the
+# manylinux2014 GCC 10 environment. Keep every binary target on the newest
+# version validated there until upstream fixes that regression.
+NUITKA_VERSION="4.1.3"
 
 get_version() {
     grep '^version' pyproject.toml | head -1 | cut -d'"' -f2
@@ -194,7 +198,7 @@ build_binary() {
             "$PY" -m venv .venv
             . .venv/bin/activate
             uv pip install 'patchelf==0.17.2.4'
-            uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
+            uv pip install "nuitka==$NUITKA_VERSION" auditwheel pymcurl -f "$WHEELS"
             uv pip install px-proxy --no-index -f "$WHEELS"
             log_quickjs_version python
             python tools.py --nuitka
@@ -207,7 +211,7 @@ build_binary() {
             select_python
             "$PY" -m venv .venv
             . .venv/bin/activate
-            uv pip install nuitka auditwheel pymcurl -f "$WHEELS"
+            uv pip install "nuitka==$NUITKA_VERSION" auditwheel pymcurl -f "$WHEELS"
             uv pip install px-proxy --no-index -f "$WHEELS"
             log_quickjs_version python
             python tools.py --nuitka
@@ -217,7 +221,7 @@ build_binary() {
             install_upx
             ensure_uv
             select_python
-            uv pip install nuitka pymcurl -f "$WHEELS"
+            uv pip install "nuitka==$NUITKA_VERSION" pymcurl -f "$WHEELS"
             uv run --locked python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
             "$PY" tools.py --nuitka
             "$PY" tools.py --depspkg

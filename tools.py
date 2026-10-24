@@ -252,6 +252,95 @@ def check_embed():
     return embed
 
 
+HOST_LIB_PREFIXES = ("/opt/homebrew", "/usr/local")
+MACHO_MAGICS = {
+    bytes.fromhex(m)
+    for m in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")
+}
+
+
+def is_macho(path):
+    "Return True if path is a Mach-O (thin or fat) file"
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) in MACHO_MAGICS
+    except OSError:
+        return False
+
+
+def host_lib_refs(path):
+    "Return the Homebrew or /usr/local libraries that the Mach-O file path links against"
+    out = subprocess.check_output(["otool", "-L", path], text=True)
+    refs = []
+    for line in out.splitlines():
+        if not line.startswith("\t"):
+            continue
+        lib = line.strip().split(" (compatibility version", 1)[0]
+        # A dylib's first entry is its own install name, not a dependency
+        if path.endswith(".dylib") and not refs and os.path.basename(lib) == os.path.basename(path):
+            continue
+        if lib.startswith(HOST_LIB_PREFIXES):
+            refs.append(lib)
+    return refs
+
+
+def check_portable(root):
+    "Fail if any Mach-O file under root links a library from /opt/homebrew or /usr/local"
+    if sys.platform != "darwin":
+        print("--check-portable requires macOS (otool)")
+        sys.exit(1)
+    if not os.path.isdir(root):
+        print(f"ERROR: {root} is not a directory")
+        sys.exit(1)
+
+    checked = 0
+    bad = {}
+    for dirpath, _, files in os.walk(root):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            if os.path.islink(path) or not is_macho(path):
+                continue
+            checked += 1
+            refs = host_lib_refs(path)
+            if refs:
+                bad[path] = refs
+
+    print(f"Checked {checked} Mach-O files under {root}")
+    if checked == 0:
+        print(f"ERROR: no Mach-O files found under {root}")
+        sys.exit(1)
+    if bad:
+        for path, refs in sorted(bad.items()):
+            for ref in refs:
+                print(f"ERROR: {path} links {ref}")
+        print("ERROR: the binary depends on libraries that only exist on the build host")
+        sys.exit(1)
+    print("No Homebrew or /usr/local library references")
+
+
+def check_ssl():
+    "Fail unless ssl, hashlib and spnego import and, on macOS, their extensions do not link host libraries"
+    import _hashlib
+    import _ssl
+    import hashlib
+    import ssl
+
+    print(f"{ssl.OPENSSL_VERSION} ({sys.executable})")
+    hashlib.sha256(b"px").hexdigest()
+    ssl.create_default_context()
+    if sys.platform == "darwin":
+        bad = {}
+        for mod in (_ssl, _hashlib):
+            path = getattr(mod, "__file__", None)
+            if path and is_macho(path) and (refs := host_lib_refs(path)):
+                bad[path] = refs
+        if bad:
+            for path, refs in bad.items():
+                print(f"ERROR: {path} links {', '.join(refs)}")
+            print(f"ERROR: {sys.executable} is not a self-contained CPython")
+            sys.exit(1)
+
+
 def check_bundled_version(have, target):
     """Fail unless target reports the newest published PY_MINOR release."""
     newest = latest_python()
@@ -364,13 +453,6 @@ def nuitka():
     # Fix binary name on Linux/Mac
     with contextlib.suppress(FileNotFoundError):
         os.rename("px.bin", "px")
-
-    # Nuitka imports wrong openssl libs on Mac
-    if sys.platform == "darwin":
-        # Get brew openssl path
-        osslpath = subprocess.check_output("brew --prefix openssl", shell=True, text=True).strip()
-        for lib in ["libssl.3.dylib", "libcrypto.3.dylib"]:
-            shutil.copy(os.path.join(osslpath, "lib", lib), ".")
 
     # Compress some binaries
     if shutil.which("upx") is not None:
@@ -675,6 +757,12 @@ def main():
     if "--check-embed" in sys.argv:
         check_embed()
 
+    if "--check-ssl" in sys.argv:
+        check_ssl()
+
+    if "--check-portable" in sys.argv:
+        check_portable(sys.argv[sys.argv.index("--check-portable") + 1])
+
     if "--nuitka" in sys.argv:
         nuitka()
 
@@ -694,6 +782,8 @@ def main():
 Build:
 --check-python	Fail unless this Python is the newest published {PY_MINOR}.x
 --check-embed	Fail unless the Windows embeddable zip is the newest published {PY_MINOR}.x
+--check-ssl	Fail unless ssl and spnego import and do not link Homebrew libraries (macOS)
+--check-portable DIR	Fail if a Mach-O file under DIR links /opt/homebrew or /usr/local
 --wheel		Build wheels for pypi.org
 --nuitka	Build px distribution using Nuitka
 --embed		Build px distribution using Python Embeddable distro

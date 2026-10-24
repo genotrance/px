@@ -128,7 +128,7 @@ install_managed_python() {
     export PATH="$HOME/.local/bin:$PATH"
     uv --version
     uv python install "$PY_MINOR"
-    PY=$(uv python find --managed-python "$PY_MINOR")
+    PY=$(uv python find --no-project --managed-python "$PY_MINOR")
 }
 
 # Fail unless interpreter $1 is the newest published release of PY_MINOR
@@ -141,12 +141,13 @@ check_python() {
 # is not the newest published release of PY_MINOR. Linux glibc prefers the
 # manylinux image's python and falls back to a uv-managed one when the image
 # is stale; musl always uses a uv-managed one (Alpine's apk python is a
-# different minor release); macOS uses setup-python (check-latest).
+# different minor release); macOS always uses a uv-managed one because
+# setup-python's macOS CPython links Homebrew's OpenSSL by absolute path.
 select_python() {
     OS=$(get_os)
     PY=""
     case "$OS" in
-        linux-musl)
+        linux-musl|mac)
             install_managed_python
             ;;
         linux-glibc)
@@ -156,7 +157,7 @@ select_python() {
                 install_managed_python
             fi
             ;;
-        mac|windows)
+        windows)
             PY=$(uv python find "$PY_MINOR")
             ;;
     esac
@@ -190,7 +191,23 @@ smoke_binary() {
     fi
 
     echo "Smoke check auth imports: $PXBIN --help"
-    "$PXBIN" --help > /dev/null
+    # px reports a missing or unloadable ssl/pyspnego module and exits non-zero
+    if ! OUT=$("$PXBIN" --help 2>&1); then
+        echo "$OUT" | head -20
+        echo "ERROR: $PXBIN --help failed"
+        return 1
+    fi
+    if echo "$OUT" | grep -q "Requires module"; then
+        echo "$OUT" | head -20
+        echo "ERROR: $PXBIN could not import a required module"
+        return 1
+    fi
+
+    # The build host has Homebrew, so loading can succeed here while failing
+    # on any other Mac: check install names instead
+    if [ "$OS" = "mac" ]; then
+        "${PY:-python3}" tools.py --check-portable "px.dist-${NAME}/px.dist"
+    fi
 }
 
 # Set up manylinux static libs
@@ -235,10 +252,15 @@ build_binary() {
             install_upx
             ensure_uv
             select_python
+            rm -rf .venv
+            "$PY" -m venv .venv
+            . .venv/bin/activate
             uv pip install "nuitka==$NUITKA_VERSION" pymcurl -f "$WHEELS"
-            uv run --locked python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
-            "$PY" tools.py --nuitka
-            "$PY" tools.py --depspkg
+            uv pip install px-proxy --no-index -f "$WHEELS"
+            log_quickjs_version python
+            python tools.py --check-ssl
+            python tools.py --nuitka
+            python tools.py --depspkg
             ;;
         windows)
             install_upx

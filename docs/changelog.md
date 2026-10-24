@@ -104,6 +104,18 @@
   (`get_listen()` has no local IP to pick), so the test was paying for 3
   doomed `--quit` retries plus a 10s kill timeout (~17s) every run for an
   outcome that was never in doubt.
+- Split `ci.yml` into a fast mode and a full mode so push/PR feedback no longer
+  waits on the 19-minute macOS jobs (baseline wall time was about 20 minutes
+  for 24 jobs). Push and pull request runs execute a small matrix (quality,
+  Kerberos, Ubuntu Python 3.10 and 3.14, Ubuntu asyncio, Windows Python 3.14
+  and asyncio, musl x86_64 Python 3.14) with `slow` tests deselected. The full
+  matrix (every Python, OS, architecture, event loop, musl variant, macOS,
+  large-data, benchmarks and slow tests) runs on `workflow_dispatch`, a weekly
+  `schedule`, and `workflow_call`, and `auto-release.yml` explicitly dispatches
+  it with `full=true`. The matrices come from the new `tools/ci_matrix.py`
+  (tested by `tests/test_ci_matrix.py`) through a `plan` job, so each job kind
+  has one definition. Every pytest invocation in CI now passes
+  `--durations=30` to report the slowest tests. See `docs/testing.md`.
 
 ---
 

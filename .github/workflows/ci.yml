@@ -2,16 +2,46 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Run the full matrix (all Pythons, OSes, architectures, event loops, musl, benchmarks, large-data, slow tests)"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      full:
+        description: "Run the full matrix (all Pythons, OSes, architectures, event loops, musl, benchmarks, large-data, slow tests)"
+        type: boolean
+        default: true
+  schedule:
+    - cron: "37 5 * * 0"
   push:
     branches: [devel, working]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      marker: ${{ steps.plan.outputs.marker }}
+      tests: ${{ steps.plan.outputs.tests }}
+      musl: ${{ steps.plan.outputs.musl }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select the matrix
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FULL_INPUT: ${{ inputs.full }}
+        run: python3 tools/ci_matrix.py
+
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -29,38 +59,10 @@ jobs:
         run: make check
 
   tests:
+    needs: plan
     runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.10"
-          - os: ubuntu-latest
-            python-version: "3.11"
-          - os: ubuntu-latest
-            python-version: "3.12"
-          - os: ubuntu-latest
-            python-version: "3.13"
-          - os: ubuntu-latest
-            python-version: "3.14"
-          - os: ubuntu-latest
-            python-version: "3.14"
-            event-loop: asyncio
-          - os: ubuntu-24.04-arm
-            python-version: "3.10"
-          - os: ubuntu-24.04-arm
-            python-version: "3.14"
-          - os: macos-latest
-            python-version: "3.10"
-          - os: macos-latest
-            python-version: "3.14"
-          - os: windows-latest
-            python-version: "3.10"
-          - os: windows-latest
-            python-version: "3.14"
-          - os: windows-latest
-            python-version: "3.14"
-            event-loop: asyncio
+      matrix: ${{ fromJSON(needs.plan.outputs.tests) }}
       fail-fast: false
     defaults:
       run:
@@ -77,37 +79,23 @@ jobs:
 
       - name: Run tests
         timeout-minutes: 60
+        env:
+          MARKER: ${{ needs.plan.outputs.marker }}
         run: |
           if [ "${{ matrix.event-loop }}" == "asyncio" ]; then
             export PX_EVENT_LOOP=asyncio
           fi
           if [ "${{ matrix.os }}" == "macos-latest" ]; then
-            PX_CI_MINIMAL=1 uv run --locked python -m pytest tests -n auto --tb=short -q --ignore=tests/test_network.py
-          else
-            uv run --locked python -m pytest tests -n auto --tb=short -q
+            export PX_CI_MINIMAL=1
+            ignore=(--ignore=tests/test_network.py)
           fi
+          uv run --locked python -m pytest tests -n auto --tb=short -q --durations=30 "${ignore[@]}" ${MARKER:+-m "$MARKER"}
 
   tests-musl:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            image: "quay.io/pypa/musllinux_1_2_x86_64"
-            name: musl-x86_64
-            pyver: "310"
-          - os: ubuntu-latest
-            image: "quay.io/pypa/musllinux_1_2_x86_64"
-            name: musl-x86_64
-            pyver: "314"
-          - os: ubuntu-24.04-arm
-            image: "quay.io/pypa/musllinux_1_2_aarch64"
-            name: musl-aarch64
-            pyver: "310"
-          - os: ubuntu-24.04-arm
-            image: "quay.io/pypa/musllinux_1_2_aarch64"
-            name: musl-aarch64
-            pyver: "314"
+      matrix: ${{ fromJSON(needs.plan.outputs.musl) }}
     runs-on: ${{ matrix.os }}
     name: test ${{ matrix.name }} py${{ matrix.pyver }}
     steps:
@@ -115,8 +103,10 @@ jobs:
 
       - name: Run tests in musllinux container
         timeout-minutes: 60
+        env:
+          MARKER: ${{ needs.plan.outputs.marker }}
         run: |
-          docker run --rm -v ${{ github.workspace }}:/px -w /px \
+          docker run --rm -e MARKER -v ${{ github.workspace }}:/px -w /px \
             ${{ matrix.image }} /bin/bash -c '
               PY=/opt/python/cp${{ matrix.pyver }}-cp${{ matrix.pyver }}/bin/python3
               if [ ! -f "$PY" ]; then echo "Python ${{ matrix.pyver }} not found"; exit 1; fi
@@ -128,10 +118,12 @@ jobs:
               uv pip install -e .
               uv pip install keyring keyrings.alt psutil pytest pytest-xdist pytest-httpbin pytest-cov
               python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
-              python -m pytest tests -n auto --tb=short -q
+              python -m pytest tests -n auto --tb=short -q --durations=30 ${MARKER:+-m "$MARKER"}
             '
 
   large-data-linux:
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -141,9 +133,11 @@ jobs:
 
       - name: Run large data transfer tests
         timeout-minutes: 15
-        run: make test-large-data
+        run: uv run --locked python -m pytest tests/test_large_data.py -m largedata -v -s --durations=30
 
   large-data-windows:
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: windows-latest
     defaults:
       run:
@@ -156,9 +150,11 @@ jobs:
 
       - name: Run large data transfer tests
         timeout-minutes: 15
-        run: uv run --locked python -m pytest tests/test_large_data.py -m largedata -v -s
+        run: uv run --locked python -m pytest tests/test_large_data.py -m largedata -v -s --durations=30
 
   benchmark:
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -179,7 +175,7 @@ jobs:
 
       - name: Run benchmarks
         timeout-minutes: 15
-        run: uv run --locked python -m pytest tests/test_benchmark.py -m benchmark -v -s
+        run: uv run --locked python -m pytest tests/test_benchmark.py -m benchmark -v -s --durations=30
 
   kerberos:
     runs-on: ubuntu-latest
@@ -194,4 +190,4 @@ jobs:
 
       - name: Run Kerberos integration tests
         timeout-minutes: 10
-        run: uv run --locked python -m pytest tests/test_kerberos.py -m integration -v
+        run: uv run --locked python -m pytest tests/test_kerberos.py -m integration -v --durations=30

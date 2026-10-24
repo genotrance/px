@@ -841,7 +841,7 @@ class ConnectionHandler:
         else:
             self.curl.reset(target, method, request_version, STATE.socktimeout)
 
-        if method != "CONNECT" and hasattr(self.curl, "set_low_speed"):
+        if method != "CONNECT":
             self.curl.set_low_speed(1, STATE.idle)
 
         dprint(self.curl.easyhash + ": Path = " + target)

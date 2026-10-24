@@ -956,27 +956,8 @@ class TestSetCurlAuth:
 
 
 class TestMcurlFailedClearing:
-    def test_reload_kerberos_clears_failed_on_fresh_ticket(self, monkeypatch):
-        """Without reset_proxy_failures (today's pymcurl), falls back to failed.clear()."""
-        from px.config import STATE
-
-        mock_mcurl = unittest.mock.Mock(spec=["failed"])
-        mock_mcurl.failed = {"proxy:8080": 3}
-        STATE.mcurl = mock_mcurl
-
-        mock_manager = unittest.mock.Mock()
-        mock_manager.check.return_value = True
-        STATE.krb_manager = mock_manager
-
-        STATE.reload_kerberos()
-
-        assert mock_mcurl.failed == {}
-
-        # Clean up
-        STATE.krb_manager = None
-
-    def test_reload_kerberos_uses_reset_proxy_failures_when_available(self, monkeypatch):
-        """With reset_proxy_failures (auth_retry-capable pymcurl), prefer it over failed.clear()."""
+    def test_reload_kerberos_resets_proxy_failures_on_fresh_ticket(self, monkeypatch):
+        """A fresh ticket lets previously blocked proxies be tried again."""
         from px.config import STATE
 
         mock_mcurl = unittest.mock.Mock(spec=["failed", "reset_proxy_failures"])

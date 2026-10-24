@@ -22,13 +22,6 @@ class FakeCurl:
         self.low_speed.append((limit, seconds))
 
 
-class FakeCurlNoLowSpeed:
-    easyhash = "fake"
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-
 def _run(method, curl_cls, curl=None):
     h = handler.ConnectionHandler.__new__(handler.ConnectionHandler)
     h.curl = curl
@@ -61,7 +54,3 @@ def test_plain_http_reset_sets_low_speed():
 
 def test_connect_does_not_set_low_speed():
     assert _run("CONNECT", FakeCurl).low_speed == []
-
-
-def test_missing_set_low_speed_tolerated():
-    assert not hasattr(_run("GET", FakeCurlNoLowSpeed), "set_low_speed")

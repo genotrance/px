@@ -252,10 +252,9 @@ to send further requests to a proxy once `failure_threshold` (3) consecutive
 407s have been recorded — `Curl.set_proxy()` returns `False` and the handler
 sends 401 to the client without contacting the upstream proxy. `--authretry`
 (`STATE.authretry`, default `0`) is handed to `mcurl.MCurl.set_auth_retry()`
-right after the multi object is created in `parse_config()`, guarded by
-`hasattr(self.mcurl, "set_auth_retry")` since older pymcurl releases do not
-have it; if `--authretry` is set but unsupported, Px logs a warning once and
-otherwise behaves as before. mcurl itself owns all retry/backoff state (the
+right after the multi object is created in `parse_config()`. Px requires
+pymcurl 8.23.0.2 or newer, which supplies this API. mcurl itself owns all
+retry/backoff state (the
 blocked-since timestamp, the in-flight probe slot) — Px only forwards the
 configured interval and never tracks failures or retries on its own.
 
@@ -485,9 +484,8 @@ a mechanism error (`resp == 407`, "auth mechanism error"), the reactive check
 forces a ticket renewal bypassing both the fast-path timestamp gate and the
 in-lock double-check. If the ticket is invalid, a new one is acquired and
 previously-blocked proxies are retried: `reload_kerberos()` calls
-`mcurl.reset_proxy_failures()` when the installed pymcurl provides it (see
-[Blocked-proxy auth retry](#blocked-proxy-auth-retry)), falling back to
-clearing `MCURL.failed` directly on older versions.
+`mcurl.reset_proxy_failures()` (see
+[Blocked-proxy auth retry](#blocked-proxy-auth-retry)).
 
 ### Credential cache cleanup
 

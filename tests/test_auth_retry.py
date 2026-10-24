@@ -1,9 +1,5 @@
 """Tests for --authretry: mcurl's single-probe retry of a proxy blocked by
 repeated 407s, exercised through a real Px process against a fake upstream.
-
-Requires a pymcurl built from mcurl's feature/auth-retry branch (adds
-MCurl.set_auth_retry / reset_proxy_failures). Skipped entirely against a
-released pymcurl that lacks those APIs.
 """
 
 import concurrent.futures
@@ -14,15 +10,9 @@ import os
 import threading
 import time
 
-import mcurl
 import pytest
 from fixtures import *  # noqa: F403
 from helpers import *  # noqa: F403
-
-pytestmark = pytest.mark.skipif(
-    not hasattr(mcurl.MCurl, "set_auth_retry") or not hasattr(mcurl.MCurl, "reset_proxy_failures"),
-    reason="Installed pymcurl lacks set_auth_retry/reset_proxy_failures (needs mcurl feature/auth-retry)",
-)
 
 TARGET = "http://auth-retry.test/"
 USERNAME = "authretry-test"
@@ -109,7 +99,9 @@ def _start_px(name, port, fake_upstream, authretry, event_loop, tmp_path):
         f"--server={fake_upstream.addr} --auth=BASIC --username={USERNAME}"
         f" --authretry={authretry} --noproxy= --threads=64 --workers=1"
     )
-    return run_px(name, port, tmp_path, flags, env)
+    # Auth-retry's burst tests run beside many Px subprocesses under xdist;
+    # allow extra time for this isolated server to initialize under that load.
+    return run_px(name, port, tmp_path, flags, env, startup_retries=40)
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])

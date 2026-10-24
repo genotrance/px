@@ -104,9 +104,9 @@ def find_free_port_block(start=3148, count=3):
     return None
 
 
-def is_px_running(port, listen_ip="127.0.0.1"):
+def is_px_running(port, listen_ip="127.0.0.1", retries=20):
     # Make sure Px starts
-    retry = 20
+    retry = retries
     if sys.platform in ("darwin", "win32") or platform.machine() == "aarch64":
         # Nuitka builds take longer to start on Mac, Windows and aarch64
         retry = 40
@@ -154,7 +154,7 @@ def quit_px(name, subp, cmd, strict=True):
     print(f"{name} Px exited")
 
 
-def run_px(name, port, tmp_path, flags="", env=None, listen_ip="127.0.0.1"):
+def run_px(name, port, tmp_path, flags="", env=None, listen_ip="127.0.0.1", startup_retries=20):
     """Start a Px instance and wait for it to be ready.
 
     tmp_path can be a Path (function-scoped) or a tmp_path_factory
@@ -168,7 +168,7 @@ def run_px(name, port, tmp_path, flags="", env=None, listen_ip="127.0.0.1"):
     logfile = open(f"{tmp_path}{os.sep}{name}-{port}.log", "w+")
     subp = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=logfile, env=env, cwd=tmp_path)
 
-    assert is_px_running(port, listen_ip), f"{name} Px didn't start @ {listen_ip}:{port}"
+    assert is_px_running(port, listen_ip, startup_retries), f"{name} Px didn't start @ {listen_ip}:{port}"
 
     return subp, cmd, logfile
 

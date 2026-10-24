@@ -314,9 +314,7 @@ export https_proxy="http://$(tail -1 /etc/resolv.conf | cut -d' ' -f2):3128"
 
 `--idle` is the inactivity timeout for both CONNECT tunnels and plain-HTTP
 transfers. A plain-HTTP response that sends no data for that long (for example
-a long-poll or server-sent events stream over plain HTTP) is closed. The
-plain-HTTP part needs a pymcurl that provides `Curl.set_low_speed`; with older
-versions only CONNECT tunnels honour `--idle`.
+a long-poll or server-sent events stream over plain HTTP) is closed.
 
 ### MQTT over websockets
 
@@ -336,9 +334,7 @@ lets Px probe a blocked proxy again on its own. For example,
 the proxy was blocked, Px lets exactly one request through as a probe; all
 other requests are refused until the probe succeeds, even under concurrent
 load. A successful probe response unblocks the proxy immediately; another 407
-blocks it for another interval. This needs a pymcurl that provides
-`MCurl.set_auth_retry`; with older versions `--authretry` has no effect and Px
-logs a warning.
+blocks it for another interval.
 
 ## Dependencies
 
@@ -348,7 +344,7 @@ Px depends on the following Python packages:
 - [keyring](https://pypi.org/project/keyring/)
 - [keyrings.alt](https://pypi.org/project/keyrings.alt/)
 - [netaddr](https://pypi.org/project/netaddr/)
-- [pymcurl](https://pypi.org/project/pymcurl/)
+- [pymcurl](https://pypi.org/project/pymcurl/) 8.23.0.2 or newer
 - [psutil](https://pypi.org/project/psutil/)
 - [pyspnego](https://pypi.org/project/pyspnego/)
 - [python-dotenv](https://pypi.org/project/python-dotenv/)

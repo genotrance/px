@@ -231,7 +231,7 @@ class TestEventLoopSelection:
 
 
 class TestAuthRetry:
-    """--authretry wiring: default, parsing, and hasattr guards for pymcurl support."""
+    """--authretry wiring: default, parsing, and mcurl configuration."""
 
     def test_default_disabled(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["px"])
@@ -251,7 +251,7 @@ class TestAuthRetry:
         config.STATE.parse_config()
         assert config.STATE.authretry == 2.5
 
-    def test_set_auth_retry_called_when_supported(self, monkeypatch):
+    def test_set_auth_retry_called(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["px", "--authretry=3"])
         monkeypatch.delenv("PX_AUTHRETRY", raising=False)
 
@@ -268,38 +268,6 @@ class TestAuthRetry:
         monkeypatch.setattr(config.mcurl, "MCurl", FakeMCurl)
         config.STATE.parse_config()
         assert config.STATE.mcurl.retry_calls == [3.0]
-
-    def test_warns_once_when_unsupported_and_enabled(self, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", ["px", "--authretry=3"])
-        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
-
-        class FakeMCurlNoRetry:
-            def __init__(self, debug_print=None):
-                pass
-
-            def setopt(self, *args, **kwargs):
-                pass
-
-        monkeypatch.setattr(config.mcurl, "MCurl", FakeMCurlNoRetry)
-        config.STATE.parse_config()
-        captured = capsys.readouterr()
-        assert "authretry" in captured.out.lower()
-
-    def test_no_warning_when_disabled_and_unsupported(self, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", ["px"])
-        monkeypatch.delenv("PX_AUTHRETRY", raising=False)
-
-        class FakeMCurlNoRetry:
-            def __init__(self, debug_print=None):
-                pass
-
-            def setopt(self, *args, **kwargs):
-                pass
-
-        monkeypatch.setattr(config.mcurl, "MCurl", FakeMCurlNoRetry)
-        config.STATE.parse_config()
-        captured = capsys.readouterr()
-        assert "authretry" not in captured.out.lower()
 
 
 # -------------------------------------------------------------------

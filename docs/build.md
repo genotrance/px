@@ -72,27 +72,47 @@ All CI and release builds run via GitHub Actions. The workflows live in
 
 ### CI (`ci.yml`)
 
-Runs on pushes to the `devel` branch and on pull requests (fast feedback loop).
+Runs in a fast mode on pushes to `devel`/`working` and on pull requests, and
+in a full mode on `workflow_dispatch` (`full` boolean input, default true), a
+weekly `schedule` (Sundays 05:37 UTC, on the default `devel` branch) and
+`workflow_call` (so a release build can run the complete matrix; `full`
+defaults to true). Start the full matrix with
+`gh workflow run ci.yml --ref devel`. The reason for the split is that the macOS
+runners are slow, expensive and few, and used to hold every push for about 19
+minutes. The policy, per-mode job lists and rationale are in
+[Testing](testing.md#ci-testing).
 
+- **plan** — runs `tools/ci_matrix.py`, which resolves the mode (an explicit
+  `full` input wins, a schedule is full, push/PR is fast) and emits the
+  `tests` and `tests-musl` matrices as JSON plus the pytest `-m` expression
+  (empty in full mode, so slow tests run). Keeping both matrices in one
+  script gives each job kind a single definition instead of duplicated blocks.
 - **quality** — runs `make check` (pre-commit, ruff, mypy).
-- **tests** — runs `pytest` across a matrix: Ubuntu x86_64 on Python
-  3.10–3.14, Ubuntu ARM64 (`ubuntu-24.04-arm`) on 3.10 and 3.14, macOS on
-  3.10 and 3.14, Windows on 3.10 and 3.14 (11 jobs total). Uses the shared
+- **tests** — runs `pytest` across the planned matrix. Fast: Ubuntu Python
+  3.10 and 3.14, Ubuntu asyncio, Windows Python 3.14 and asyncio (5 jobs).
+  Full: Ubuntu x86_64 on Python 3.10–3.14 plus asyncio on 3.14, Ubuntu ARM64
+  (`ubuntu-24.04-arm`) on 3.10 and 3.14, macOS on 3.10 and 3.14, Windows on
+  3.10 and 3.14 plus asyncio on 3.14 (13 jobs). Uses the shared
   `.github/actions/setup-python-env` action for consistent environment
   setup. macOS test jobs use `macos-latest` and exclude `test_network.py` due
   to GitHub Actions environment limitations.
-- **tests-musl** — runs `pytest` inside musllinux Docker containers on both
-  x86_64 (`ubuntu-latest`) and aarch64 (`ubuntu-24.04-arm`) with Python
-  3.10 and 3.14 (4 jobs total). This verifies Px works correctly on musl
-  libc without relying on the build workflow.
-- **large-data-linux** / **large-data-windows** — runs the large data transfer
-  reliability tests (`test_large_data.py`) on Ubuntu and Windows respectively.
-  These verify multi-megabyte GET/POST integrity over HTTP and HTTPS with
-  concurrent connections.
-- **kerberos** — builds the KDC Docker images (`make docker-kerberos`) and runs
-  the Kerberos integration tests against local MIT and Heimdal KDCs on
-  Ubuntu. Exercises real ticket acquisition, renewal, expiry parsing, and
-  Heimdal detection.
+- **tests-musl** — runs `pytest` inside musllinux Docker containers. Fast:
+  x86_64 on Python 3.14. Full: x86_64 (`ubuntu-latest`) and aarch64
+  (`ubuntu-24.04-arm`) with Python 3.10 and 3.14 (4 jobs). This verifies Px
+  works correctly on musl libc without relying on the build workflow.
+- **large-data-linux** / **large-data-windows** — full mode only; run the
+  large data transfer reliability tests (`test_large_data.py`) on Ubuntu and
+  Windows respectively. These verify multi-megabyte GET/POST integrity over
+  HTTP and HTTPS with concurrent connections.
+- **benchmark** — full mode only; the concurrency benchmarks on Ubuntu, macOS
+  and Windows.
+- **kerberos** — both modes; builds the KDC Docker images
+  (`make docker-kerberos`) and runs the Kerberos integration tests against
+  local MIT and Heimdal KDCs on Ubuntu. Exercises real ticket acquisition,
+  renewal, expiry parsing, and Heimdal detection.
+
+Every pytest call in the workflow passes `--durations=30` so the job logs show
+the slowest tests.
 
 ### Automatic release (`auto-release.yml`)
 
@@ -111,8 +131,9 @@ successfully. Otherwise it:
    versions, bumps Px's patch version, records the CPython patch, and inserts a
    changelog section listing every changed locked dependency.
 2. Pushes that single candidate commit to `release/auto-<version>` and
-   dispatches the existing `ci.yml` workflow on that exact branch. It does not
-   add or duplicate CI matrix jobs.
+   dispatches the existing `ci.yml` workflow on that exact branch with
+   `full=true`, so the candidate runs the complete matrix. It does not add or
+   duplicate CI matrix jobs.
 3. On CI success, verifies that the version still has no tag or GitHub release
    and that `master` has not moved, then fast-forwards `master` to the tested
    commit. That push starts `build.yml`, whose CPython freshness guards run
@@ -213,7 +234,7 @@ resolve the newest release from PyPI.
 
 ### Local release check (`tools/release-check.sh`)
 
-CI on `devel` and `working` only runs `ci.yml` (tests from source), so the
+CI on `devel` and `working` only runs the fast `ci.yml` matrix (tests from source), so the
 `build.yml` release jobs are never exercised until they are dispatched. Run
 `tools/release-check.sh` before dispatching `build.yml` on `devel` (and before
 any merge to `master`); it is the required step before that dry run. The first

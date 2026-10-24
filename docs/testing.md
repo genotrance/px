@@ -170,17 +170,67 @@ To override the auto-computed value, either pass an explicit `-n N` or set the
 
 ## CI testing
 
-GitHub Actions runs the full test suite on every push to the `devel` branch and
-on pull requests via `.github/workflows/ci.yml`. The test matrix covers 13
-configurations: Ubuntu x86_64 on Python 3.10–3.14 plus asyncio on Python 3.14,
-Ubuntu ARM64
-(`ubuntu-24.04-arm`) on 3.10 and 3.14, macOS on 3.10 and 3.14, and Windows on
-3.10 and 3.14 plus asyncio on 3.14. The asyncio jobs set `PX_EVENT_LOOP=asyncio`
-to cover the standard-library fallback; all other jobs cover automatic
-winloop/uvloop selection. An additional `tests-musl` job runs the test suite inside
-musllinux Docker containers on both x86_64 and aarch64 with Python 3.10 and
-3.14 (4 jobs). All Python versions (3.10–3.14) are additionally tested via tox
-in the build workflow's `test-binary` job.
+`.github/workflows/ci.yml` has two modes so day-to-day feedback is quick while
+nothing is dropped from coverage. A `plan` job runs `tools/ci_matrix.py`, which
+holds the single list of test configurations (each flagged fast or not) and
+emits the matrices; `tests/test_ci_matrix.py` checks the selection logic.
+
+| Trigger | Mode |
+|---|---|
+| push to `devel`/`working`, pull request | fast |
+| `workflow_dispatch` (`full` input, default true) | full unless `full` is unticked |
+| weekly `schedule` (Sundays 05:37 UTC, runs on `devel`) | full |
+| `workflow_call` (`full` input, default true) | full unless `full: false` |
+
+Run the full matrix by hand with `gh workflow run ci.yml --ref devel` (add
+`-f full=false` for a fast run on demand). `auto-release.yml` dispatches CI on
+the release candidate with `-f full=true`, and `build.yml` is meant to call
+`ci.yml` through `workflow_call` for release dry runs.
+
+**Fast mode** runs `quality`, `kerberos` and these test jobs, with the
+`slow` marker deselected (`-m "not integration and not benchmark and not
+largedata and not slow"`, see [Slow tests](#slow-tests)):
+
+- Ubuntu x86_64 Python 3.10 and 3.14: oldest and newest supported Python.
+- Ubuntu Python 3.14 with `PX_EVENT_LOOP=asyncio`: the only coverage of the
+  standard-library event loop fallback on Linux; every other Linux job uses
+  uvloop.
+- Windows Python 3.14: the only Windows coverage of SSPI, Windows paths and
+  winloop; Windows is also the slowest fast job, so it sets the wall time.
+- Windows Python 3.14 with `PX_EVENT_LOOP=asyncio`: Proactor (asyncio) and
+  winloop are different code paths and the CPython Proactor accept-loop bug
+  that motivated winloop only appears there. It runs in parallel with the other
+  Windows job, so it costs no wall time.
+- `tests-musl` x86_64 Python 3.14: musl is a distinct libc with its own
+  wheels (the musllinux image, uvloop and psutil builds); one job is enough to
+  catch breakage there.
+- `kerberos` is cheap (about 1 minute) and is the only job exercising real
+  MIT/Heimdal KDCs.
+
+Left out of fast mode and only covered in full mode: Ubuntu Python 3.11–3.13
+(neighbouring versions of the two tested ends), ARM64 and musl aarch64 (same
+Python code, only a different wheel build), musl Python 3.10, Windows Python
+3.10, both macOS jobs, large-data, benchmarks and the `slow` tests. macOS is
+excluded from fast mode because the macOS runners are slow and scarce: even
+with `PX_CI_MINIMAL` the jobs took about 19 minutes, and that has not been
+re-measured since the slow-test fixes. `px/config.py` has darwin-only paths, so
+a regression there is caught by the weekly or release full run rather than per
+push; if a macOS minimal job drops to a few minutes it can be given
+`"fast": True` in `tools/ci_matrix.py` (and the fast list updated here).
+
+**Full mode** runs everything: 13 test jobs (Ubuntu x86_64 on Python
+3.10–3.14 plus asyncio on 3.14, Ubuntu ARM64 (`ubuntu-24.04-arm`) on 3.10 and
+3.14, macOS on 3.10 and 3.14 with `PX_CI_MINIMAL=1`, Windows on 3.10 and 3.14
+plus asyncio on 3.14), 4 `tests-musl` jobs (x86_64 and aarch64, Python 3.10 and
+3.14), `large-data-linux`, `large-data-windows`, 3 `benchmark` jobs (Ubuntu,
+macOS, Windows), `kerberos` and `quality`, with no `-m` override so the `slow`
+tests run too. The asyncio jobs set `PX_EVENT_LOOP=asyncio`; all other jobs
+cover automatic winloop/uvloop selection.
+
+Every pytest invocation in CI passes `--durations=30`, so each job log lists
+the 30 slowest tests; use it to spot tests that grow slow. All Python versions
+(3.10–3.14) are additionally tested via tox in the build workflow's
+`test-binary` job.
 
 The build workflow (`.github/workflows/build.yml`) triggers on pushes to
 `master` and manual dispatch. It tests built artifacts using tox across all

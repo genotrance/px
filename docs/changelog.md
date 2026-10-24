@@ -2,7 +2,7 @@
 
 ---
 
-## v0.13.0
+## v0.13.0 — 2026-10-23
 
 ### Improvements
 - Px now requires pymcurl 8.23.0.2 or newer, which provides the keepalive,
@@ -15,7 +15,8 @@
   completes all checks before returning a failure status (#274).
 - Release binaries and Docker images now resolve the newest published CPython
   3.13 patch release at build time. Builds log the bundled version and fail
-  before packaging or pushing if the selected interpreter is behind python.org.
+  before packaging or pushing if the selected interpreter is behind python.org
+  (#275).
 - Installation docs now cover uninstalling Px for winget, pip and standalone
   binary installs, including removing the Windows auto-start entry first.
 
@@ -60,6 +61,10 @@
   `px.wproxy` (#273).
 - New `tools/bench_dns_stalls.py` benchmark measuring PAC and `--noproxy`
   latency and throughput under slow or failing DNS (#273).
+- Release builds refresh `quickjs-ng` to the latest PyPI version and log the
+  resolved version rather than using an older locked release.
+- Added the reviewed `uv.lock` dependency lockfile so CI, developer checkouts,
+  and ORC verification use identical dependency versions.
 
 ---
 

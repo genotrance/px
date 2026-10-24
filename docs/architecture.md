@@ -492,3 +492,5 @@ previously-blocked proxies are retried: `reload_kerberos()` calls
 `atexit` registers `_cleanup()` to remove the per-process ccache file.
 `do_quit()` calls `cleanup_kerberos()` explicitly before `os._exit()` since
 `os._exit()` bypasses `atexit` handlers.
+The `/PxQuit` handler drains its `200` response before this forced exit, so
+the client sees a successful shutdown on frozen event loops as well.

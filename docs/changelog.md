@@ -41,6 +41,9 @@
   the problem.
 
 ### Bug fixes
+- `px --quit` now flushes its successful shutdown response before exiting, so
+  Nuitka and Windows embedded binaries reliably stop instead of leaving their
+  proxy port bound.
 - PAC DNS helpers no longer hold up all PAC evaluation during slow name
   resolution. Failed or timed-out `dnsResolve()` requests now return `null`,
   so `isResolvable()` and `isInNet()` correctly reject unresolved hosts;

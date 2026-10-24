@@ -100,7 +100,9 @@ install_upx() {
             apk add --no-cache upx 2>/dev/null || true
             ;;
         linux-glibc)
-            yum install -y upx 2>/dev/null || dnf install -y upx 2>/dev/null || true
+            # Nuitka detects ccache automatically. Its cache is mounted by
+            # build.yml, avoiding another full C compilation on later runs.
+            yum install -y upx ccache 2>/dev/null || dnf install -y upx ccache 2>/dev/null || true
             ;;
         mac)
             brew install upx
@@ -314,18 +316,30 @@ test_binary() {
         uv venv --python 3.14 /tmp/tox-env
         . /tmp/tox-env/bin/activate
         uv pip install tox tox-uv
-        PXBIN="$PXBIN" tox --installpkg "$PXWHEEL" \
+        # The Python tox environments exercise the installed release wheel at
+        # each supported Python version. Only the binary environment receives
+        # PXBIN, so it alone runs the compiled executable instead of repeating
+        # that same binary suite once per Python.
+        tox --parallel 2 -e py310,py311,py312,py313,py314 --installpkg "$PXWHEEL" \
+            --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" \
+            --workdir /tmp
+        PXBIN="$PXBIN" tox -e binary --installpkg "$PXWHEEL" \
             --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" \
             --workdir /tmp
     else
         # Native runner (macOS/Windows)
         ensure_uv
-        PYTEST_CMD="pytest -n 2 tests"
+        PYTEST_CMD="pytest -n 2 tests --durations=30"
         if [ "${PX_CI_MINIMAL:-}" = "1" ]; then
-            PYTEST_CMD="pytest -n 2 tests --ignore=tests/test_network.py"
+            # Keep macOS artifact testing aligned with ci.yml's full matrix:
+            # only its unsupported network test is excluded; slow tests run.
+            PYTEST_CMD="pytest -n 2 tests --ignore=tests/test_network.py --durations=30"
         fi
         uv pip install tox tox-uv
-        PXBIN="$PXBIN" uv run --locked tox --installpkg "$PXWHEEL" \
+        uv run --locked tox --parallel 2 -e py310,py311,py312,py313,py314 --installpkg "$PXWHEEL" \
+            --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" \
+            --override "tool.tox.env_run_base.commands=$PYTEST_CMD"
+        PXBIN="$PXBIN" uv run --locked tox -e binary --installpkg "$PXWHEEL" \
             --override "tool.tox.env_run_base.install_command=uv pip install --no-index -f $WHEELS" \
             --override "tool.tox.env_run_base.commands=$PYTEST_CMD"
     fi

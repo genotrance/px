@@ -151,10 +151,17 @@ summary without pushing a branch, dispatching CI, or publishing.
 
 ### Build (`build.yml`)
 
-Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`). All CI
-scaffolding (environment setup, wheel building, binary building, archive
-extraction, and test execution) is implemented as shell functions in `build.sh`
-and called from the workflow steps.
+Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`). A
+manual dispatch on `devel` is the single pre-release gate: it calls `ci.yml`
+with its full matrix at the same time as the release artifact jobs, so it
+checks every CI configuration plus every wheel, binary and built-artifact test
+before a merge to `master`. Master pushes do not call CI again. Automatic
+release already runs the full matrix against its exact candidate before
+fast-forwarding master, so calling it twice would add delay without covering a
+new revision. Publishing remains guarded by the `release` job's master-only
+condition. All CI scaffolding (environment setup, wheel building, binary
+building, archive extraction, and test execution) is implemented as shell
+functions in `build.sh` and called from the workflow steps.
 
 Release builds deliberately refresh `quickjs-ng` from PyPI on every run,
 subject only to the minimum version declared in `pyproject.toml`, and print the
@@ -179,6 +186,12 @@ resolve the newest release from PyPI.
   distribution (Windows) using `tools.py --nuitka` / `tools.py --embed`.
   Also packages dependency wheel archives with `tools.py --depspkg`.
   Uses `build_binary` from `build.sh`.
+  Linux jobs restore and save separate `actions/cache` entries for Nuitka's
+  compiler cache and uv downloads. The cache keys include the Nuitka version,
+  target platform and relevant source or lock-file hashes; prefix restores let
+  Nuitka invalidate changed inputs itself. Both cache directories are mounted
+  into the glibc and Alpine containers, so they survive ephemeral runners
+  without mixing architectures or compiler environments.
   Every job first prints and checks the interpreter version that it will
   bundle against the newest published CPython 3.13 patch release on
   python.org. The check is run again when the build selects its interpreter,
@@ -212,18 +225,26 @@ resolve the newest release from PyPI.
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
-  versions (3.10–3.14). Tests run inside musllinux and Ubuntu containers
-  on Linux and on the `macos-latest`/Windows test runners. Aarch64 Linux tests
-  run on native `ubuntu-24.04-arm` runners. Uses `extract_archives`
-  and `test_binary` from `build.sh`. The `PXBIN` environment variable is
-  set so the `binary` tox environment can test the Nuitka binary directly.
+  versions (3.10–3.14). The five Python tox environments install and execute
+  the release wheel from the offline archive; the separate `binary`
+  environment executes the compiled Nuitka or embedded binary through
+  `PXBIN`. This avoids running the same binary suite five extra times while
+  retaining every test of every wheel and binary artifact. The wheel
+  environments run two at a time, then the binary environment runs, which
+  safely shortens the slow macOS and Windows stages without sharing a binary
+  configuration file between concurrent tests. Tests run inside musllinux and
+  Ubuntu containers on Linux and on the `macos-latest`/Windows test runners.
+  Aarch64 Linux tests run on native `ubuntu-24.04-arm` runners. Uses
+  `extract_archives` and `test_binary` from `build.sh`.
   `build.sh` ensures the tox driver venv is created with a non-free-threaded
   Python 3.14 (`/opt/python/cp314-cp314/bin` is preferred when present; the
   version is pinned because the glibc test container has no Python and uv
   would otherwise download 3.15, for which no wheels exist) so the
   `binary` environment does not default to a free-threaded ABI (`cp314t`) that
-  abi3 wheels like `psutil` cannot satisfy. macOS excludes `test_network.py`
-  via `PX_CI_MINIMAL`.
+  abi3 wheels like `psutil` cannot satisfy. macOS uses the same policy as
+  ci.yml's full matrix: it excludes only `test_network.py` via
+  `PX_CI_MINIMAL`, retains slow tests, and records the 30 slowest test
+  durations. Linux and Windows retain their complete artifact tests.
 - **release** — on `master` only: publishes the sdist and wheel to PyPI using
   trusted publishing, creates and pushes a version tag, creates a GitHub
   release with changelog notes extracted via `tools.py --history`, submits

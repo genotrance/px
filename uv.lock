@@ -1519,7 +1519,6 @@ dev = [
     { name = "pytest-httpbin" },
     { name = "pytest-xdist" },
     { name = "ruff" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.metadata]
@@ -1547,7 +1546,6 @@ dev = [
     { name = "pytest-httpbin" },
     { name = "pytest-xdist" },
     { name = "ruff", specifier = "==0.17.1" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [[package]]

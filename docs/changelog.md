@@ -88,10 +88,6 @@
   resolved version rather than using an older locked release.
 - Added the reviewed `uv.lock` dependency lockfile so CI, developer checkouts,
   and ORC verification use identical dependency versions.
-- `tools/auto_release.py` falls back to `tomli` where `tomllib` is missing
-  (Python 3.10), and the test environments install `tomli` explicitly on
-  Python before 3.11, so `tests/test_auto_release.py` collects on every
-  supported Python instead of failing with `ModuleNotFoundError`.
 
 ---
 

@@ -41,6 +41,10 @@
   the problem.
 
 ### Bug fixes
+- Fixed macOS Nuitka binaries omitting pyspnego's NTLM dependencies, which
+  prevented authenticated proxy use. Missing dependency messages now show the
+  original import error, and binary builds smoke-check those imports before
+  artifact tests run.
 - `px --quit` now flushes its successful shutdown response before exiting, so
   Nuitka and Windows embedded binaries reliably stop instead of leaving their
   proxy port bound.
@@ -62,9 +66,6 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
-- Linux and macOS Nuitka binaries now bundle `spnego` (pyspnego); the build
-  fails if `spnego` or `uvloop` is missing from the output. Previously the
-  macOS binary failed with `Requires module pyspnego`.
 - A manual `build.yml` dispatch now calls the full `ci.yml` matrix as the
   complete pre-release gate. Linux Nuitka and uv container caches persist
   safely between release runs, and artifact testing now runs each offline wheel

@@ -13,7 +13,7 @@ import time
 import urllib.parse
 
 from . import wproxy
-from .debug import Debug, dprint, pprint
+from .debug import Debug, dprint, missing_module_message, pprint
 from .help import HELP
 
 if sys.platform == "win32":
@@ -34,8 +34,8 @@ PxErrors = int
 
 try:
     import mcurl
-except ImportError:
-    pprint("Requires module pymcurl")
+except ImportError as error:
+    pprint(missing_module_message("pymcurl", error))
     sys.exit(ERROR_IMPORT)
 
 try:
@@ -49,32 +49,32 @@ try:
         import keyring.backends.SecretService
     elif sys.platform == "darwin":
         import keyring.backends.macOS
-except ImportError:
-    pprint("Requires module keyring")
+except ImportError as error:
+    pprint(missing_module_message("keyring", error))
     sys.exit(ERROR_IMPORT)
 
 try:
     import keyrings.alt.file
-except ImportError:
-    pprint("Requires module keyrings.alt")
+except ImportError as error:
+    pprint(missing_module_message("keyrings.alt", error))
     sys.exit(ERROR_IMPORT)
 
 try:
     import netaddr
-except ImportError:
-    pprint("Requires module netaddr")
+except ImportError as error:
+    pprint(missing_module_message("netaddr", error))
     sys.exit(ERROR_IMPORT)
 
 try:
     import psutil
-except ImportError:
-    pprint("Requires module psutil")
+except ImportError as error:
+    pprint(missing_module_message("psutil", error))
     sys.exit(ERROR_IMPORT)
 
 try:
     import dotenv
-except ImportError:
-    pprint("Requires module python-dotenv")
+except ImportError as error:
+    pprint(missing_module_message("python-dotenv", error))
     sys.exit(ERROR_IMPORT)
 
 # Realms for keyring and authentication

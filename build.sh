@@ -181,6 +181,18 @@ check_bundled_python() {
     echo "Python bundled in ${NAME}: $("$PY" -V) ($PY)"
 }
 
+smoke_binary() {
+    NAME="$1"
+    OS=$(get_os)
+    PXBIN="px.dist-${NAME}/px.dist/px"
+    if [ "$OS" = "windows" ]; then
+        PXBIN="px.dist-${NAME}/px.dist/px.exe"
+    fi
+
+    echo "Smoke check auth imports: $PXBIN --help"
+    "$PXBIN" --help > /dev/null
+}
+
 # Set up manylinux static libs
 setup_manylinux() {
     if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
@@ -238,6 +250,9 @@ build_binary() {
             "$PY" tools.py --depspkg
             ;;
     esac
+
+    # Keep local release checks aligned with the CI smoke step.
+    smoke_binary "$NAME"
 }
 
 # --- Archive extraction ---

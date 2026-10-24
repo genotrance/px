@@ -15,14 +15,14 @@ import mcurl
 
 from . import config, wproxy
 from .config import CLIENT_REALM, STATE
-from .debug import dprint, pprint
+from .debug import dprint, missing_module_message, pprint
 
 try:
     import spnego._ntlm
     import spnego._ntlm_raw.messages
     from spnego._ntlm_raw.crypto import lmowfv1, ntowfv1
-except ImportError:
-    pprint("Requires module pyspnego")
+except ImportError as error:
+    pprint(missing_module_message("pyspnego", error))
     sys.exit(config.ERROR_IMPORT)
 
 ###

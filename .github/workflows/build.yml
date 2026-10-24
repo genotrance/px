@@ -215,6 +215,20 @@ jobs:
         shell: bash
         run: . ./build.sh && build_binary ${{ matrix.name }}
 
+      # Importing px.handler occurs before --help is processed, so this catches
+      # omitted auth dependencies before the much longer artifact test job.
+      - name: Smoke binary auth imports (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          SHELL_BIN="${{ matrix.alpine && '/bin/sh' || '/bin/bash' }}"
+          docker run --rm -v ${{ github.workspace }}:/px -w /px \
+            ${{ matrix.image }} $SHELL_BIN -c '. /px/build.sh && smoke_binary ${{ matrix.name }}'
+
+      - name: Smoke binary auth imports (macOS, Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: . ./build.sh && smoke_binary ${{ matrix.name }}
+
       - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.name }}

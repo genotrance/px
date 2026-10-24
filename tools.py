@@ -346,13 +346,6 @@ def nuitka():
         print(f"Nuitka build failed with exit code {ret}")
         sys.exit(1)
 
-    # Verify required packages were bundled
-    if sys.platform != "win32":
-        for pkg in ["spnego", "uvloop"]:
-            if not os.path.isdir(os.path.join(dist, pkg)):
-                print(f"Nuitka build is missing required package: {pkg}")
-                sys.exit(1)
-
     # Copy files
     copy("px.ini LICENSE.txt README.md", dist)
     if sys.platform != "win32":

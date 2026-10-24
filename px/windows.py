@@ -6,12 +6,12 @@ import sys
 import winreg
 
 from . import config
-from .debug import dprint, pprint
+from .debug import dprint, missing_module_message, pprint
 
 try:
     import psutil
-except ImportError:
-    pprint("Requires module psutil")
+except ImportError as error:
+    pprint(missing_module_message("psutil", error))
     sys.exit(config.ERROR_IMPORT)
 
 ###

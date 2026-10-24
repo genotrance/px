@@ -60,6 +60,11 @@ dependencies locally, run `uv lock --upgrade` for all packages or
 and commit both `pyproject.toml` (when changed) and `uv.lock`. Review and test
 Dependabot pull requests in the same way.
 
+The automatic release workflow also runs `uv lock --upgrade` against the last
+release on `master`. A changed lock is treated as a release candidate, including
+changes to transitive dependencies that do not have a minimum in
+`pyproject.toml`.
+
 ## GitHub Actions
 
 All CI and release builds run via GitHub Actions. The workflows live in
@@ -88,6 +93,40 @@ Runs on pushes to the `devel` branch and on pull requests (fast feedback loop).
   the Kerberos integration tests against local MIT and Heimdal KDCs on
   Ubuntu. Exercises real ticket acquisition, renewal, expiry parsing, and
   Heimdal detection.
+
+### Automatic release (`auto-release.yml`)
+
+Runs every Tuesday after mcurl's Monday dependency check and can also be
+started manually. Scheduled workflows run from the default `devel` branch, but
+this workflow explicitly checks out `master`; unreleased work on `devel` can
+therefore never enter an automatic release.
+
+`tools/auto_release.py` upgrades `uv.lock` and uses the same python.org lookup
+as the release build guard to compare the newest CPython 3.13 patch with
+`.github/bundled-python-version`, which records the patch bundled by the last
+release. If neither the lock nor CPython changed, the workflow exits
+successfully. Otherwise it:
+
+1. Raises the `pymcurl` and `quickjs-ng` minimums to their newly resolved
+   versions, bumps Px's patch version, records the CPython patch, and inserts a
+   changelog section listing every changed locked dependency.
+2. Pushes that single candidate commit to `release/auto-<version>` and
+   dispatches the existing `ci.yml` workflow on that exact branch. It does not
+   add or duplicate CI matrix jobs.
+3. On CI success, verifies that the version still has no tag or GitHub release
+   and that `master` has not moved, then fast-forwards `master` to the tested
+   commit. That push starts `build.yml`, whose CPython freshness guards run
+   again before anything is published.
+4. Merges the released `master` back into `devel` without forcing. A merge
+   conflict or concurrent `devel` update emits a warning for manual follow-up
+   but does not rewrite either branch.
+
+If CI fails, nothing reaches `master`. The workflow opens or updates the single
+GitHub issue titled `auto-release blocked` with the run and failing job names;
+a later successful automatic release closes it. A manual dispatch defaults to
+`dry_run: true`: it performs dependency and CPython detection, prepares the
+candidate in the runner, and writes the proposed versions to the workflow
+summary without pushing a branch, dispatching CI, or publishing.
 
 ### Build (`build.yml`)
 

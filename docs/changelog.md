@@ -59,6 +59,11 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- Added a weekly automatic patch-release workflow that prepares dependency and
+  CPython updates from `master`, gates the exact candidate through the existing
+  CI matrix, and only then fast-forwards `master` to start release builds.
+  Manual dry runs report candidates without pushing or publishing, and failed
+  CI runs update a single `auto-release blocked` issue.
 - The test helper now starts every Px instance with an explicit empty config
   file so a `px.ini` that `test_config` temporarily writes next to the px
   script under `pytest -n auto` can no longer leak into other tests' Px

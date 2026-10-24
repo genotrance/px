@@ -62,6 +62,11 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- A manual `build.yml` dispatch now calls the full `ci.yml` matrix as the
+  complete pre-release gate. Linux Nuitka and uv container caches persist
+  safely between release runs, and artifact testing now runs each offline wheel
+  on Python 3.10–3.14 plus the compiled binary once rather than repeating the
+  binary suite for every Python environment.
 - New `tools/release-check.sh` replays `build.yml`'s Linux x86_64 release jobs
   (sdist, wheels, Nuitka binary and binary tests for glibc and musl) locally
   with Docker; it is the required check before dispatching `build.yml` on

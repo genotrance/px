@@ -10,6 +10,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A manual devel build is the complete pre-release gate. Master is already
+  # gated by auto-release's full CI run for its exact release candidate.
+  ci-full:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/ci.yml
+    with:
+      full: true
+
   # Extract version from pyproject.toml
   setup:
     runs-on: ubuntu-latest
@@ -133,6 +141,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Prepare Linux build caches
+        if: runner.os == 'Linux'
+        run: mkdir -p ".cache/nuitka/${{ matrix.name }}" ".cache/uv/${{ matrix.name }}"
+
+      - name: Restore Nuitka cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6
+        with:
+          path: .cache/nuitka/${{ matrix.name }}
+          key: nuitka-4.1.3-${{ matrix.name }}-${{ hashFiles('build.sh', 'tools.py', 'px/**', 'pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            nuitka-4.1.3-${{ matrix.name }}-
+
+      - name: Restore uv download cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6
+        with:
+          path: .cache/uv/${{ matrix.name }}
+          key: release-uv-${{ matrix.name }}-${{ hashFiles('uv.lock', 'build.sh') }}
+          restore-keys: |
+            release-uv-${{ matrix.name }}-
+
       - name: Set up the environment
         if: runner.os != 'Linux'
         uses: ./.github/actions/setup-python-env
@@ -171,6 +201,8 @@ jobs:
         run: |
           SHELL_BIN="${{ matrix.alpine && '/bin/sh' || '/bin/bash' }}"
           docker run --rm -v ${{ github.workspace }}:/px -w /px \
+            -v ${{ github.workspace }}/.cache/nuitka/${{ matrix.name }}:/root/.cache/Nuitka \
+            -v ${{ github.workspace }}/.cache/uv/${{ matrix.name }}:/root/.cache/uv \
             ${{ matrix.image }} $SHELL_BIN -c '. /px/build.sh && build_binary ${{ matrix.name }}'
 
       - name: Build Nuitka binary (macOS)

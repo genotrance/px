@@ -12,9 +12,7 @@ import sys
 
 import tomllib
 
-ROOT = pathlib.Path(
-    os.environ.get("PX_RELEASE_ROOT", pathlib.Path(__file__).resolve().parents[1])
-).resolve()
+ROOT = pathlib.Path(os.environ.get("PX_RELEASE_ROOT", pathlib.Path(__file__).resolve().parents[1])).resolve()
 PYTHON_VERSION_FILE = ROOT / ".github" / "bundled-python-version"
 INITIAL_BUNDLED_PYTHON = "3.13.17"
 
@@ -43,9 +41,7 @@ def replace_requirement(text: str, name: str, version: str) -> str:
     return updated
 
 
-def dependency_changes(
-    old: dict[str, tuple[str, ...]], new: dict[str, tuple[str, ...]]
-) -> list[str]:
+def dependency_changes(old: dict[str, tuple[str, ...]], new: dict[str, tuple[str, ...]]) -> list[str]:
     changes = []
     for name in sorted(old.keys() | new.keys()):
         before = ", ".join(old.get(name, ("not locked",)))
@@ -67,12 +63,10 @@ def insert_changelog(version: str, dependencies: list[str], old_python: str, new
         lines.append("- Refreshed locked dependencies:")
         lines.extend(f"  - {change}" for change in dependencies)
     if old_python != new_python:
-        lines.extend(
-            [
-                f"- Updated standalone binaries and Docker images from CPython {old_python}",
-                f"  to the newest published CPython {new_python} patch release.",
-            ]
-        )
+        lines.extend([
+            f"- Updated standalone binaries and Docker images from CPython {old_python}",
+            f"  to the newest published CPython {new_python} patch release.",
+        ])
     lines.extend(["", "---", ""])
     marker = "---\n"
     if marker not in text:
@@ -98,11 +92,7 @@ def newest_python() -> str:
 def prepare() -> dict[str, object]:
     old_lock = (ROOT / "uv.lock").read_bytes()
     old_packages = package_versions(old_lock)
-    old_python = (
-        PYTHON_VERSION_FILE.read_text().strip()
-        if PYTHON_VERSION_FILE.exists()
-        else INITIAL_BUNDLED_PYTHON
-    )
+    old_python = PYTHON_VERSION_FILE.read_text().strip() if PYTHON_VERSION_FILE.exists() else INITIAL_BUNDLED_PYTHON
 
     subprocess.run(["uv", "lock", "--upgrade"], cwd=ROOT, check=True)  # noqa: S607
     new_lock = (ROOT / "uv.lock").read_bytes()
@@ -121,9 +111,7 @@ def prepare() -> dict[str, object]:
     pyproject = pyproject_path.read_text()
     current_version = tomllib.loads(pyproject)["project"]["version"]
     version = bump_patch(current_version)
-    pyproject = re.sub(
-        r'(?m)^version = "[^"]+"$', f'version = "{version}"', pyproject, count=1
-    )
+    pyproject = re.sub(r'(?m)^version = "[^"]+"$', f'version = "{version}"', pyproject, count=1)
     for dependency in ("pymcurl", "quickjs-ng"):
         resolved = new_packages.get(dependency)
         if not resolved or len(resolved) != 1:

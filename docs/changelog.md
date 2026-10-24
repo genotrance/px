@@ -62,6 +62,9 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- Linux and macOS Nuitka binaries now bundle `spnego` (pyspnego); the build
+  fails if `spnego` or `uvloop` is missing from the output. Previously the
+  macOS binary failed with `Requires module pyspnego`.
 - A manual `build.yml` dispatch now calls the full `ci.yml` matrix as the
   complete pre-release gate. Linux Nuitka and uv container caches persist
   safely between release runs, and artifact testing now runs each offline wheel

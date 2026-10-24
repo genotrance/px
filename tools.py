@@ -337,12 +337,21 @@ def nuitka():
     else:
         # uvloop is imported inside try/except so Nuitka may not detect it
         flags = "--include-package=uvloop"
+        # spnego is imported by px.handler inside a try/except, so Nuitka may skip it
+        flags += " --include-package=spnego"
     ret = os.system(
         sys.executable + f" -m nuitka --standalone {flags} --prefer-source-code --output-dir={outdir} px.py"
     )
     if ret != 0:
         print(f"Nuitka build failed with exit code {ret}")
         sys.exit(1)
+
+    # Verify required packages were bundled
+    if sys.platform != "win32":
+        for pkg in ["spnego", "uvloop"]:
+            if not os.path.isdir(os.path.join(dist, pkg)):
+                print(f"Nuitka build is missing required package: {pkg}")
+                sys.exit(1)
 
     # Copy files
     copy("px.ini LICENSE.txt README.md", dist)

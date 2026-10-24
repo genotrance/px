@@ -123,7 +123,7 @@ jobs:
               . ~/.local/bin/env
               "$PY" -m venv /tmp/test-env
               . /tmp/test-env/bin/activate
-              uv pip install --upgrade "quickjs-ng>=0.17.0.1"
+              uv pip install --upgrade "quickjs-ng>=0.17.0.2"
               uv pip install -e .
               uv pip install keyring keyrings.alt psutil pytest pytest-xdist pytest-httpbin pytest-cov
               python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"

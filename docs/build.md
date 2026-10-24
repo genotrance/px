@@ -99,11 +99,12 @@ and called from the workflow steps.
 Release builds deliberately refresh `quickjs-ng` from PyPI on every run,
 subject only to the minimum version declared in `pyproject.toml`, and print the
 resolved version. This is the explicit exception to locked dependency installs.
-`build_wheels` does the same before creating dependency archives, so the Linux,
-macOS, and Windows binary jobs consume the newly resolved wheel. The Docker
-builders also print the installed version; CI Docker images install from that
-generated wheel archive while local images resolve the newest release from
-PyPI.
+`build_wheels` uses `pip wheel --no-cache-dir` with the same minimum so each
+Python job fetches the newest available wheel before creating dependency
+archives. The Linux, macOS, and Windows binary jobs therefore consume the
+newly resolved wheel. The Docker builders also print the installed version; CI
+Docker images install from that generated wheel archive while local images
+resolve the newest release from PyPI.
 
 - **setup** — extracts the version from `pyproject.toml` and makes it available
   to downstream jobs.

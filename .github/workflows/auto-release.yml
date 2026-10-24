@@ -1,0 +1,223 @@
+name: Automatic release
+
+on:
+  schedule:
+    - cron: "17 6 * * 2"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Prepare and report the candidate without pushing or publishing
+        type: boolean
+        default: true
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    steps:
+      - name: Check out release automation
+        uses: actions/checkout@v7
+        with:
+          path: automation
+
+      - name: Check out the last release
+        uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+          path: release
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Install the locked release environment
+        working-directory: release
+        run: uv sync --locked
+
+      - name: Detect and prepare updates
+        id: prepare
+        working-directory: release
+        env:
+          PX_RELEASE_ROOT: ${{ github.workspace }}/release
+        run: |
+          BASE_SHA=$(git rev-parse HEAD)
+          python3 ../automation/tools/auto_release.py --output /tmp/auto-release.json
+          {
+            echo "changed=$(jq -r .changed /tmp/auto-release.json)"
+            echo "version=$(jq -r '.version // empty' /tmp/auto-release.json)"
+            echo "branch=$(jq -r '.branch // empty' /tmp/auto-release.json)"
+            echo "base_sha=$BASE_SHA"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Automatic release detection"
+            echo
+            echo '```json'
+            cat /tmp/auto-release.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop when everything is current
+        if: steps.prepare.outputs.changed != 'true'
+        working-directory: release
+        run: echo "Master already has the newest lock and bundled CPython patch."
+
+      - name: Validate candidate version
+        if: steps.prepare.outputs.changed == 'true'
+        working-directory: release
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1 ||
+             gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::v$VERSION already exists; refusing to publish it"
+            exit 1
+          fi
+
+      - name: Finish dry run
+        if: steps.prepare.outputs.changed == 'true' && env.DRY_RUN == 'true'
+        working-directory: release
+        run: |
+          echo "Dry run: candidate v${{ steps.prepare.outputs.version }} was not pushed."
+          git diff --stat
+
+      - name: Commit and push candidate branch
+        if: steps.prepare.outputs.changed == 'true' && env.DRY_RUN != 'true'
+        id: candidate
+        working-directory: release
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add pyproject.toml uv.lock docs/changelog.md .github/bundled-python-version
+          git commit -m "Prepare automatic release v$VERSION"
+          REMOTE_SHA=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+          if [ -n "$REMOTE_SHA" ]; then
+            git push --force-with-lease="refs/heads/$BRANCH:$REMOTE_SHA" \
+              origin "HEAD:refs/heads/$BRANCH"
+          else
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch CI for the exact candidate
+        if: steps.candidate.outcome == 'success'
+        id: ci
+        continue-on-error: true
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+        run: |
+          DISPATCHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run ci.yml --ref "$BRANCH"
+          RUN_ID=""
+          for attempt in $(seq 1 20); do
+            RUN_ID=$(gh run list --workflow ci.yml --branch "$BRANCH" \
+              --event workflow_dispatch --created ">=$DISPATCHED" \
+              --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$RUN_ID" ] && break
+            sleep 15
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find the dispatched CI run" > /tmp/ci-failure.txt
+            exit 1
+          fi
+          echo "CI run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+          if ! gh run watch "$RUN_ID" --exit-status --interval 30; then
+            {
+              echo "CI run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+              echo
+              echo "Failing jobs:"
+              gh run view "$RUN_ID" --json jobs \
+                --jq '.jobs[] | select(.conclusion != "success" and .conclusion != "skipped") | "- \(.name): \(.conclusion)"'
+            } > /tmp/ci-failure.txt
+            exit 1
+          fi
+
+      - name: Open or update blocked issue
+        if: steps.ci.outcome == 'failure'
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          {
+            echo "Automatic release v$VERSION from \`$BRANCH\` was not published."
+            echo
+            cat /tmp/ci-failure.txt
+          } > /tmp/issue.md
+          ISSUE=$(gh issue list --state all --search '"auto-release blocked" in:title' \
+            --json number,title --jq '.[] | select(.title == "auto-release blocked") | .number' | head -1)
+          if [ -n "$ISSUE" ]; then
+            gh issue edit "$ISSUE" --body-file /tmp/issue.md
+            gh issue reopen "$ISSUE" || true
+          else
+            gh issue create --title "auto-release blocked" --body-file /tmp/issue.md
+          fi
+
+      - name: Fast-forward master
+        if: steps.ci.outcome == 'success'
+        id: publish
+        working-directory: release
+        env:
+          BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
+          SHA: ${{ steps.candidate.outputs.sha }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          git fetch origin master
+          if [ "$(git rev-parse origin/master)" != "$BASE_SHA" ]; then
+            echo "::error::master moved while CI ran; refusing to update it"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1 ||
+             gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::v$VERSION appeared while CI ran; refusing to publish it"
+            exit 1
+          fi
+          git push origin "$SHA:refs/heads/master"
+
+      - name: Merge released master into devel
+        if: steps.publish.outcome == 'success'
+        working-directory: release
+        env:
+          SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          git fetch origin devel master
+          git checkout -B auto-release-sync origin/devel
+          if ! git merge --no-edit "$SHA"; then
+            git merge --abort
+            echo "::warning::Could not merge master into devel; resolve the conflict manually."
+            echo "Master could not be merged into devel automatically." >> "$GITHUB_STEP_SUMMARY"
+          elif ! git push origin HEAD:devel; then
+            echo "::warning::devel moved; merge master into devel manually."
+            echo "devel moved before the synchronization push." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Close resolved blocked issue
+        if: steps.publish.outcome == 'success'
+        run: |
+          ISSUE=$(gh issue list --state open --search '"auto-release blocked" in:title' \
+            --json number,title --jq '.[] | select(.title == "auto-release blocked") | .number' | head -1)
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --body "Automatic release v${{ steps.prepare.outputs.version }} passed CI and updated master."
+            gh issue close "$ISSUE"
+          fi
+
+      - name: Fail after recording blocked CI
+        if: steps.ci.outcome == 'failure'
+        run: exit 1

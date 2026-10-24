@@ -1015,6 +1015,9 @@ class ConnectionHandler:
         for listen in STATE.listen:
             if (len(listen) == 0 and self.client_address[0] in hostips) or (self.client_address[0] == listen):
                 self._send_response(200, [("Content-Length", "0")])
+                # os._exit() bypasses the loop's normal transport cleanup.  Drain
+                # first so frozen event loops deliver the successful quit response.
+                await self.writer.drain()
                 STATE.cleanup_kerberos()
                 # Give time for the response to be sent
                 await asyncio.sleep(0.1)

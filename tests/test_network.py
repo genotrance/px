@@ -4,11 +4,15 @@ These tests exercise Px as a running process and verify socket-level
 behavior. They are ported from the legacy test.py.
 """
 
+import asyncio
 import os
 import time
+import unittest.mock
 
 import pytest
 from helpers import can_connect, find_free_port, is_port_free, quit_px, run_px
+
+from px import handler
 
 
 def _worker_port(request, test_index):
@@ -28,6 +32,35 @@ def _worker_port(request, test_index):
 
 
 class TestQuit:
+    def test_quit_drains_response_before_exiting(self):
+        """The quit client must receive 200 before a frozen process exits."""
+        events = []
+
+        class Writer:
+            async def drain(self):
+                events.append("drain")
+
+        connection = handler.ConnectionHandler.__new__(handler.ConnectionHandler)
+        connection.writer = Writer()
+        connection.client_address = ("127.0.0.1", 0)
+        connection._send_response = lambda *_args: events.append("response")
+
+        async def sleep(_seconds):
+            events.append("sleep")
+
+        with (
+            unittest.mock.patch.object(handler.config, "get_host_ips", return_value={"127.0.0.1"}),
+            unittest.mock.patch.object(handler.STATE, "listen", ["127.0.0.1"]),
+            unittest.mock.patch.object(handler.STATE, "cleanup_kerberos"),
+            unittest.mock.patch.object(handler.asyncio, "sleep", sleep),
+            unittest.mock.patch.object(handler.os, "_exit", side_effect=SystemExit) as exit_mock,
+            pytest.raises(SystemExit),
+        ):
+            asyncio.run(connection._handle_quit())
+
+        assert events == ["response", "drain", "sleep"]
+        exit_mock.assert_called_once_with(handler.config.ERROR_SUCCESS)
+
     def test_quit_stops_px(self, request, tmp_path):
         port = _worker_port(request, 0)
         if port is None:

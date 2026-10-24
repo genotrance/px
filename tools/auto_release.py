@@ -10,10 +10,7 @@ import re
 import subprocess
 import sys
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
+import tomllib
 
 ROOT = pathlib.Path(os.environ.get("PX_RELEASE_ROOT", pathlib.Path(__file__).resolve().parents[1])).resolve()
 PYTHON_VERSION_FILE = ROOT / ".github" / "bundled-python-version"

@@ -1,6 +1,10 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("tomllib")
+
 _spec = importlib.util.spec_from_file_location("auto_release", Path(__file__).parents[1] / "tools" / "auto_release.py")
 auto_release = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None

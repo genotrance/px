@@ -44,7 +44,9 @@ back to `asyncio` when either loop cannot be imported at runtime.
 
 Package metadata, dependencies, and all tool configuration (ruff, mypy, pytest,
 coverage, tox) live in `pyproject.toml`. The build backend is
-`setuptools.build_meta`.
+`setuptools.build_meta`. The dev dependency group and the tox test environments
+install `tomli` before Python 3.11, where `tomllib` is missing; the release
+helper `tools/auto_release.py` uses it as the TOML fallback on Python 3.10.
 
 ## Dependency lock
 

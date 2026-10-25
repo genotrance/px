@@ -41,6 +41,11 @@
   the problem.
 
 ### Bug fixes
+- The macOS binary no longer links Homebrew's OpenSSL by absolute path, which
+  made SSL and pyspnego fail to load on Macs without that exact Homebrew
+  version. It is now built with a self-contained python-build-standalone
+  CPython, and the release build rejects any Mach-O file that links a library
+  outside `/usr/lib` and `/System` by absolute path.
 - Fixed macOS Nuitka binaries omitting pyspnego's NTLM dependencies, which
   prevented authenticated proxy use. Missing dependency messages now show the
   original import error, and binary builds smoke-check those imports before
@@ -75,10 +80,28 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- macOS test jobs (the CI test and benchmark jobs and `test-binary`) now run on
+  uv-managed CPython instead of setup-python's. On the macOS 15+ runners
+  (`macos-latest` is `macos-26`) Python from setup-python or Homebrew stalls
+  every reverse lookup of `127.0.0.1` for about 35 seconds because it lacks
+  the Local Network permission. Every px start, `px --quit` and stdlib test
+  server (`http.server`, pytest-httpbin) paid that stall, so each macOS
+  3.10-3.14 suite took about 19m31s against 15s once the interpreter was
+  unaffected. uv-managed CPython is not affected.
+- The test suite now fails fast on macOS CI: a session-start probe times
+  `gethostbyaddr`, `urllib.request.getproxies` and px's `parse_config` in fresh
+  interpreters, prints the timings in the pytest header, and stops the run if
+  one takes over 10 seconds. `tests/test_startup.py` also bounds px start and
+  `--quit`. Test servers no longer reverse-resolve loopback addresses.
+- `test-binary` launches the extracted binary (`smoke_binary`: `--help`, the
+  auth import check and, on macOS, the portability check) on the clean test
+  runner before any tox environment, so a missing library fails in seconds.
 - macOS release builds fail early if the build interpreter's `_ssl` or
   `_hashlib` link host libraries, and fail after the build if any Mach-O file
-  in `px.dist` references `/opt/homebrew` or `/usr/local`. The binary smoke
-  check also fails on `Requires module` import errors.
+  in `px.dist` links a library by an absolute path outside `/usr/lib`,
+  `/System` and `/Library/Apple` once the bundled OpenSSL and libcurl dylibs
+  have been relocated. The binary smoke check also fails on `Requires module`
+  import errors.
 - A manual `build.yml` dispatch now calls the full `ci.yml` matrix as the
   complete pre-release gate. Linux Nuitka and uv container caches persist
   safely between release runs, and artifact testing now runs each offline wheel

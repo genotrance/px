@@ -280,6 +280,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           refresh-quickjs: "true"
+          managed-python: "true"
 
       - name: Test (Linux container)
         if: runner.os == 'Linux'

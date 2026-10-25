@@ -14,6 +14,10 @@ inputs:
     description: "Resolve the newest quickjs-ng release for a release build"
     required: false
     default: "false"
+  managed-python:
+    description: "On macOS, run tests on uv-managed CPython instead of setup-python's (no effect elsewhere)"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -30,13 +34,25 @@ runs:
         enable-cache: "true"
         cache-suffix: ${{ inputs.python-version }}
 
+    # macOS 15+ runners stall name lookups for about 35 seconds in Python from
+    # setup-python or Homebrew (no Local Network permission), which made each
+    # px startup take that long. uv-managed CPython is not affected.
+    - name: Use uv-managed CPython (macOS)
+      if: runner.os == 'macOS' && inputs.managed-python == 'true'
+      shell: bash
+      run: echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
+
     - name: Install locked dependencies
       run: |
+        PYARG=""
+        if [ "$RUNNER_OS" = "macOS" ] && [ "${{ inputs.managed-python }}" = "true" ]; then
+          PYARG="--python ${{ inputs.python-version }}"
+        fi
         if [ "${{ inputs.refresh-quickjs }}" = "true" ]; then
           # Release builds deliberately resolve the latest quickjs-ng.
-          uv sync --upgrade-package quickjs-ng
+          uv sync --upgrade-package quickjs-ng $PYARG
         else
-          uv sync --locked
+          uv sync --locked $PYARG
         fi
         uv pip install -e .
         uv run --locked python -c "from importlib.metadata import version; print(f'quickjs-ng version: {version(\"quickjs-ng\")}')"

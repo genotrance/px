@@ -8,7 +8,7 @@ Tests live in `tests/`.
 
 | File | Scope |
 |------|-------|
-| `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, event-loop selection, xdist auto-parallelism hook |
+| `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, event-loop selection, xdist auto-parallelism hook, loopback `getfqdn()` shortcut, macOS CI startup probe |
 | `fixtures.py` | Shared test fixtures — port allocation, Px server instances (launched with `--verbose`), auth parametrisation |
 | `helpers.py` | Utility functions — subprocess management (`run_px` launches Px with `--verbose`), port checks, keyring setup |
 | `test_benchmark.py` | Concurrency benchmarks — HTTP/CONNECT throughput, thread count, memory at various concurrency levels (marked `benchmark`, run via `make benchmark`) |
@@ -22,6 +22,8 @@ Tests live in `tests/`.
 | `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
 | `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
+| `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
+| `test_build_python.py` | Build tooling — CPython freshness guards, macOS Mach-O portability check, macOS CI interpreter choice |
 | `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |
 | `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 
@@ -263,11 +265,12 @@ locally before pushing.
 
 ## Reduced test matrix for macOS CI
 
-macOS GitHub Actions runners are significantly slower than Linux/Windows runners
-for the chain and upstream proxy tests. These tests spawn multiple Px processes
-and involve real network authentication flows that take much longer on macOS GHA
-than on local hardware. To keep CI times reasonable, macOS uses a reduced test
-matrix controlled by the `PX_CI_MINIMAL` environment variable.
+macOS GitHub Actions runners are scarce and the chain and upstream proxy tests
+spawn multiple Px processes with real network authentication flows, so macOS
+uses a reduced test matrix controlled by the `PX_CI_MINIMAL` environment
+variable. The reduction is not what made macOS jobs take about 19 minutes;
+that was an interpreter-specific name-lookup stall, described under
+"macOS-specific reasoning" below.
 
 When `PX_CI_MINIMAL=1` is set:
 
@@ -384,26 +387,60 @@ only because of waits the test itself didn't need:
 
 ### macOS-specific reasoning
 
-The macOS GitHub Actions `test macos-latest py3.14 auto` job
-(`PX_CI_MINIMAL=1 --ignore=tests/test_network.py`) takes roughly 18.5 minutes
-against ~1 minute on Linux for the same selection. Its progress log shows two
-very different phases: the bulk of the collected tests (most of them skipped
-by `PX_CI_MINIMAL`'s auth pairing and the chain-test skip) complete in a few
-minutes, then the last ~5% of tests (~20 of them, not skipped) take about 6
-more minutes on their own — roughly 15-20s each. That magnitude (tens of
-seconds per test, not milliseconds) points at real timeouts or slow syscalls
-rather than ordinary process-startup overhead, which is why DNS and
-`--allow`/`--quit` interactions were the first things worth checking locally:
-unqualified or unresolvable hostnames and "localhost" resolving to `::1`
-first are both specifically slower on macOS's `mDNSResponder`-backed
-resolver than on Linux's glibc resolver, and the `test_allow_specific_subnet`
-bug above produces exactly this kind of ~15-20s-per-test cost through a
-completely different path (a doomed `--quit`, not DNS) — it cannot be
-reproduced on macOS directly in this environment, but the fix removes a
-guaranteed-to-fail code path regardless of platform, so it helps there too.
-`test_network.py` is excluded entirely from the macOS CI job today; once a
-follow-up task re-enables it there (this task does not touch CI config), the
-fix here means it no longer carries that cost.
+Run 40139662524 (build.yml dispatch on devel at a72ce5d) gave real
+`--durations` data for the macOS jobs, all on `macos-26-arm64`:
+
+| Job | Before |
+|---|---|
+| ci-full `test macos-latest py3.10` / `py3.14` | 19m34s each (1175.79s of pytest) |
+| `test-binary mac-arm64` py311, py312, py313, py314 | 19m31s each (1171.25s, 1170.93s, 1170.61s, 1171.24s of pytest) |
+| `test-binary mac-arm64` py310 | 15.04s of pytest (20.71s tox) |
+
+The same selection takes about 13s on Linux and took 15s for py310. In the
+slow runs the unit tests finished in seconds, then every test that starts px
+(or imports it and calls `parse_config()`) took 35.3-35.5s, and tests that
+start and quit px took 72s (two stalls): `test_proxy`, `test_proxy_auth`,
+`test_multiprocessing_workers*`, the `test_config.py::TestEventLoopSelection`
+cases and all six `test_auth_retry.py` tests. A first-use `setup` of 35.0s on
+the stdlib test servers (`http.server`'s fake upstream and pytest-httpbin)
+pointed at a name lookup: those servers call `socket.getfqdn()` on the address
+they bind.
+
+The cause is the macOS 15+ runner image (`macos-latest` is `macos-26`), not
+px or the test selection: since macOS 15 a process without the Local Network
+permission pauses for about 35s on reverse lookups such as
+`socket.getfqdn("127.0.0.1")` (actions/runner-images#10924,
+actions/setup-python#1223). Pythons from setup-python and the image's
+Homebrew/toolcache installs are affected; uv-managed (python-build-standalone)
+CPython is not. That is also why only py310 was fast in `test-binary`: no
+system Python 3.10 exists on the image, so tox-uv downloaded a uv-managed one,
+while py311-py314 used the system interpreters. In ci-full, py3.10 comes from
+setup-python and was slow like py3.14.
+
+Fixes:
+
+- macOS test jobs use uv-managed CPython (`managed-python` input of
+  `.github/actions/setup-python-env`, which also sets
+  `UV_PYTHON_PREFERENCE=only-managed` for tox-uv; `build.sh` `test_binary`
+  exports the same on macOS). `tests/test_build_python.py` checks that the
+  workflows keep passing the input.
+- `tests/conftest.py` makes `socket.getfqdn()` return loopback names
+  unchanged, so the fake upstream and pytest-httpbin no longer reverse-resolve
+  the address they bind on any interpreter. This removes only a lookup the
+  tests never needed.
+- A session-start probe (`helpers.probe_startup`) runs only on macOS CI. It
+  times `socket.gethostbyaddr('127.0.0.1')`, `urllib.request.getproxies()` and
+  px's `parse_config()` in fresh interpreters, prints the timings in the
+  pytest header (`px startup probe: ...`) and exits with a message if any
+  takes over 10s. A regression of the interpreter choice now fails in under a
+  minute instead of after 19 minutes of 35s waits, and the header shows which
+  step stalls. The exact lookup inside a px start that waits was not
+  identified without a macOS host; the probe's `parse_config` step and
+  `tests/test_startup.py::test_px_start_and_quit_are_bounded` (px listens and
+  quits within 15s) are the diagnostics for it.
+
+Expected after: macOS wheel environments in the minutes-or-less range like
+py310's 15s and Linux's ~1 minute, instead of 19m31s each.
 
 ---
 

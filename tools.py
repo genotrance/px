@@ -253,7 +253,7 @@ def check_embed():
     return embed
 
 
-HOST_LIB_PREFIXES = ("/opt/homebrew", "/usr/local")
+SYSTEM_LIB_PREFIXES = ("/usr/lib/", "/System/", "/Library/Apple/")
 MACHO_MAGICS = {
     bytes.fromhex(m)
     for m in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")
@@ -270,7 +270,7 @@ def is_macho(path):
 
 
 def host_lib_refs(path):
-    "Return the Homebrew or /usr/local libraries that the Mach-O file path links against"
+    "Return the libraries outside the macOS system locations that the Mach-O file path links against by absolute path"
     out = subprocess.check_output(["otool", "-L", path], text=True)
     refs = []
     for line in out.splitlines():
@@ -280,7 +280,7 @@ def host_lib_refs(path):
         # A dylib's first entry is its own install name, not a dependency
         if path.endswith(".dylib") and not refs and os.path.basename(lib) == os.path.basename(path):
             continue
-        if lib.startswith(HOST_LIB_PREFIXES):
+        if lib.startswith("/") and not lib.startswith(SYSTEM_LIB_PREFIXES):
             refs.append(lib)
     return refs
 
@@ -361,7 +361,7 @@ def relocate_macos_dylibs(root):
 
 
 def check_portable(root):
-    "Fail if any Mach-O file under root links a library from /opt/homebrew or /usr/local"
+    "Fail if any Mach-O file under root links a library by an absolute path outside /usr/lib and /System"
     if sys.platform != "darwin":
         print("--check-portable requires macOS (otool)")
         sys.exit(1)
@@ -387,7 +387,7 @@ def check_portable(root):
                 print(f"ERROR: {path} links {ref}")
         print("ERROR: the binary depends on libraries that only exist on the build host")
         sys.exit(1)
-    print("No Homebrew or /usr/local library references")
+    print("No host library references")
 
 
 def check_ssl():
@@ -396,6 +396,8 @@ def check_ssl():
     import _ssl
     import hashlib
     import ssl
+
+    import spnego  # noqa: F401
 
     print(f"{ssl.OPENSSL_VERSION} ({sys.executable})")
     hashlib.sha256(b"px").hexdigest()
@@ -860,8 +862,8 @@ def main():
 Build:
 --check-python	Fail unless this Python is the newest published {PY_MINOR}.x
 --check-embed	Fail unless the Windows embeddable zip is the newest published {PY_MINOR}.x
---check-ssl	Fail unless ssl and spnego import and do not link Homebrew libraries (macOS)
---check-portable DIR	Fail if a Mach-O file under DIR links /opt/homebrew or /usr/local
+--check-ssl	Fail unless ssl and spnego import and do not link host libraries (macOS)
+--check-portable DIR	Fail if a Mach-O file under DIR links a library outside /usr/lib and /System by absolute path
 --wheel		Build wheels for pypi.org
 --nuitka	Build px distribution using Nuitka
 --embed		Build px distribution using Python Embeddable distro

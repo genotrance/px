@@ -77,6 +77,8 @@ OTOOL_OUTPUT = {
     "_pymcurl.so": "_pymcurl.so:\n\t@rpath/libcurl.4.dylib (compatibility version 4.0.0)\n",
     "_ssl.so": "_ssl.so:\n\t@rpath/libssl.3.dylib (compatibility version 3.0.0)\n",
     "libcurl.4.dylib": "libcurl.4.dylib:\n\t@rpath/libcurl.4.dylib (compatibility version 4.0.0)\n\t/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib (compatibility version 3.0.0)\n",
+    "framework": "framework:\n\t/Library/Frameworks/Python.framework/Versions/3.13/Python (compatibility version 3.13.0)\n",
+    "runner": "runner:\n\t/Users/runner/work/px/px/build/libssl.3.dylib (compatibility version 3.0.0)\n",
     "libcrypto.3.dylib": "libcrypto.3.dylib:\n\t/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib (compatibility version 3.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
     "libssl.3.dylib": "libssl.3.dylib:\n\t@rpath/libssl.3.dylib (compatibility version 3.0.0)\n\t/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.3.dylib (compatibility version 3.0.0)\n",
 }
@@ -101,10 +103,10 @@ def test_check_portable_accepts_bundled_libraries(fake_otool, tmp_path, capsys):
 
     tools.check_portable(str(dist))
 
-    assert "No Homebrew" in capsys.readouterr().out
+    assert "No host library references" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("name", ["bad", "local"])
+@pytest.mark.parametrize("name", ["bad", "local", "framework", "runner"])
 def test_check_portable_rejects_host_library_references(fake_otool, tmp_path, capsys, name):
     dist = make_dist(tmp_path / "dist", ["good", name])
 
@@ -166,3 +168,26 @@ def test_relocate_macos_dylibs_rejects_unbundled_host_library(fake_otool, tmp_pa
 def test_check_portable_rejects_empty_dist(fake_otool, tmp_path):
     with pytest.raises(SystemExit):
         tools.check_portable(str(make_dist(tmp_path / "dist", [])))
+
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_macos_test_jobs_use_uv_managed_python():
+    action = (ROOT / ".github/actions/setup-python-env/action.yml").read_text()
+    assert "UV_PYTHON_PREFERENCE=only-managed" in action
+    assert "runner.os == 'macOS' && inputs.managed-python == 'true'" in action
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    build = (ROOT / ".github/workflows/build.yml").read_text()
+    # tests, benchmark and test-binary; build, wheels and binary jobs keep setup-python
+    assert ci.count('managed-python: "true"') == 2
+    assert build.count('managed-python: "true"') == 1
+    assert "UV_PYTHON_PREFERENCE=only-managed" in (ROOT / "build.sh").read_text()
+
+
+def test_binary_is_launched_on_the_test_runner_before_the_suite():
+    script = (ROOT / "build.sh").read_text()
+    body = script[script.index("test_binary() {") :]
+
+    assert body.index('smoke_binary "$NAME"') < body.index("tox ")

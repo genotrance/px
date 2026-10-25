@@ -23,7 +23,9 @@ Tests live in `tests/`.
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
 | `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
 | `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
-| `test_build_python.py` | Build tooling — CPython freshness guards, macOS Mach-O portability check, macOS CI interpreter choice |
+| `test_build_python.py` | Build tooling — CPython freshness guards, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks |
+| `test_ci_matrix.py` | `tools/ci_matrix.py` — fast vs full mode, marker expression and matrix contents |
+| `test_auto_release.py` | `tools/auto_release.py` — version bump and dependency-change helpers for the automatic release |
 | `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |
 | `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 
@@ -62,9 +64,45 @@ uv run python -m pytest tests -n auto
 PX_EVENT_LOOP=asyncio uv run python -m pytest tests -n auto
 ```
 
-The upgrade command refreshes `quickjs-ng` from PyPI while preserving every
-other locked package. The shared CI setup runs it too and prints the resolved
-version before PAC tests execute.
+`uv sync --upgrade-package quickjs-ng` refreshes `quickjs-ng` from PyPI while
+keeping every other locked package. CI does not do this: it installs the locked
+versions (`uv sync --locked`) and prints the resolved `quickjs-ng` version. Only
+release builds refresh it (`refresh-quickjs` in
+`.github/actions/setup-python-env`), and the musl test container upgrades it
+explicitly.
+
+### Selections
+
+Local runs and CI use the same marker expressions. A plain run uses the
+`addopts` filter in `pyproject.toml`, which deselects `integration`,
+`benchmark` and `largedata`; a `-m` expression replaces that filter. Counts
+come from `--collect-only` on the current tree and change as tests are added.
+
+| Selection | Command (`uv run --locked python -m pytest ...`) | Tests |
+|---|---|---|
+| Default (`make test`, without coverage) | `tests -n auto` | 496 |
+| Fast (push and PR CI) | `tests -n auto -m "not integration and not benchmark and not largedata and not slow"` | 346 |
+| Slow only | `tests -n auto -m slow` | 150 |
+| Kerberos (`make test-kerberos`) | `tests/test_kerberos.py -m integration` | 14 |
+| Large data (`make test-large-data`) | `tests/test_large_data.py -m largedata` | 22 |
+| Benchmarks (`make benchmark`) | `tests/test_benchmark.py -m benchmark` | 6 |
+| Everything (full CI set) | all rows above | 538 |
+| macOS CI | `tests -n auto --ignore=tests/test_network.py`, with `PX_CI_MINIMAL=1` | 486 |
+
+The markers registered in `pyproject.toml` are:
+
+| Marker | Used by | Run by default |
+|---|---|---|
+| `integration` | `test_kerberos.py` (Docker KDCs) | no |
+| `benchmark` | `test_benchmark.py` | no |
+| `largedata` | `test_large_data.py` | no |
+| `slow` | `test_auth_retry.py` (all tests), `test_proxy.py` chain tests | yes |
+
+There is no `smoke` marker. The artifact smoke check is `smoke_binary` in
+`build.sh`, which runs outside pytest.
+
+Prefix any row with `PX_EVENT_LOOP=asyncio` to run it on the standard asyncio
+loop; the asyncio CI jobs do exactly that.
 
 ### Windows testing via WSL2
 
@@ -115,15 +153,16 @@ $PY -m pytest tests/test_large_data.py -m largedata -v -s
 uv run -p 3.14 python -m pytest tests -q
 ```
 
-### Full test matrix via tox
+### Artifact tests via tox
 
-```bash
-uv run -p 3.13 tox
-```
-
-The `tox` configuration in `pyproject.toml` defines environments for Python
-3.10–3.14 and a "binary" environment. All environments use `pytest -n auto`
-for parallel test execution, auto-scaled by the `conftest.py` hook.
+The `[tool.tox]` configuration in `pyproject.toml` defines py310–py314 and a
+`binary` environment. Each Python environment installs the release wheel and
+runs the default selection; the `binary` environment runs the same suite
+against the compiled binary named by `PXBIN`. Linux runs `pytest -n auto`, and
+the native macOS and Windows runs use `-n 2`. tox and tox-uv are not dev
+dependencies: the `test-binary` job in `build.yml` installs them, and
+`make test-glibc` or `make test-musl` (`build_local` in `build.sh`) run the same
+matrix locally in the build containers. See [Build](build.md#github-actions).
 
 ### Developer machine notes
 
@@ -148,7 +187,8 @@ px. Check these before debugging a test:
 
 ## Parallel test execution
 
-Tests use `pytest-xdist` with `-n auto` everywhere — Makefile, tox, and CI.
+Tests use `pytest-xdist` with `-n auto` in the Makefile, in tox on Linux and in
+CI; the native macOS and Windows artifact runs use `-n 2`.
 The `pytest_xdist_auto_num_workers` hook in `conftest.py` computes the worker
 count based on CPU count and platform:
 
@@ -172,8 +212,10 @@ To override the auto-computed value, either pass an explicit `-n N` or set the
 
 ## CI testing
 
-`.github/workflows/ci.yml` has two modes so day-to-day feedback is quick while
-nothing is dropped from coverage. A `plan` job runs `tools/ci_matrix.py`, which
+`.github/workflows/ci.yml` runs in two modes. Pushes and pull requests run a fast
+set so feedback is quick; the full set runs weekly, on manual dispatch, as the
+pre-release gate and on the automatic-release candidate, so every configuration
+is still covered before a release. A `plan` job runs `tools/ci_matrix.py`, which
 holds the single list of test configurations (each flagged fast or not) and
 emits the matrices; `tests/test_ci_matrix.py` checks the selection logic.
 
@@ -184,41 +226,56 @@ emits the matrices; `tests/test_ci_matrix.py` checks the selection logic.
 | weekly `schedule` (Sundays 05:37 UTC, runs on `devel`) | full |
 | `workflow_call` (`full` input, default true) | full unless `full: false` |
 
-Run the full matrix by hand with `gh workflow run ci.yml --ref devel` (add
-`-f full=false` for a fast run on demand). `auto-release.yml` dispatches CI on
-the release candidate with `-f full=true`, and `build.yml` is meant to call
-`ci.yml` through `workflow_call` for release dry runs.
+Callers: a manual `build.yml` dispatch on `devel` calls `ci.yml` through
+`workflow_call` with `full: true`, and `auto-release.yml` dispatches it on the
+release candidate branch with `-f full=true`. To run the full set by hand, use
+`gh workflow run ci.yml --ref devel`; add `-f full=false` for a fast run.
 
-**Fast mode** runs `quality`, `kerberos` and these test jobs, with the
-`slow` marker deselected (`-m "not integration and not benchmark and not
-largedata and not slow"`, see [Slow tests](#slow-tests)):
+**Fast mode** runs `quality` (pre-commit and mypy), `kerberos` and these test
+jobs, with the `slow` marker deselected (`-m "not integration and not benchmark
+and not largedata and not slow"`, see [Slow tests](#slow-tests)):
 
-- Ubuntu x86_64 Python 3.10 and 3.14: oldest and newest supported Python.
-- Ubuntu Python 3.14 with `PX_EVENT_LOOP=asyncio`: the only coverage of the
-  standard-library event loop fallback on Linux; every other Linux job uses
-  uvloop.
-- Windows Python 3.14: the only Windows coverage of SSPI, Windows paths and
-  winloop; Windows is also the slowest fast job, so it sets the wall time.
-- Windows Python 3.14 with `PX_EVENT_LOOP=asyncio`: Proactor (asyncio) and
-  winloop are different code paths and the CPython Proactor accept-loop bug
-  that motivated winloop only appears there. It runs in parallel with the other
-  Windows job, so it costs no wall time.
-- `tests-musl` x86_64 Python 3.14: musl is a distinct libc with its own
-  wheels (the musllinux image, uvloop and psutil builds); one job is enough to
-  catch breakage there.
-- `kerberos` is cheap (about 1 minute) and is the only job exercising real
-  MIT/Heimdal KDCs.
+- Ubuntu x86_64 Python 3.10 and 3.14: the oldest and newest supported Python.
+- Ubuntu Python 3.14 with `PX_EVENT_LOOP=asyncio`: the fast set's coverage of
+  the standard-library event loop; the other Linux jobs use uvloop.
+- Windows Python 3.14: the fast set's coverage of SSPI, Windows paths and
+  winloop. It is the slowest fast job and sets the wall time.
+- Windows Python 3.14 with `PX_EVENT_LOOP=asyncio`: asyncio's Proactor loop is a
+  different code path from winloop, and the CPython Proactor accept-loop bug
+  that motivated winloop only appears there. It runs alongside the other
+  Windows job.
+- `tests-musl` x86_64 Python 3.14: musl has its own wheels (the musllinux image,
+  uvloop and psutil builds), so one job covers it.
+- `kerberos` (about a minute) is the only job that runs against real MIT and
+  Heimdal KDCs. It runs in both modes.
 
-Left out of fast mode and only covered in full mode: Ubuntu Python 3.11–3.13
-(neighbouring versions of the two tested ends), ARM64 and musl aarch64 (same
-Python code, only a different wheel build), musl Python 3.10, Windows Python
-3.10, both macOS jobs, large-data, benchmarks and the `slow` tests. macOS is
-excluded from fast mode because the macOS runners are slow and scarce: even
-with `PX_CI_MINIMAL` the jobs took about 19 minutes, and that has not been
-re-measured since the slow-test fixes. `px/config.py` has darwin-only paths, so
-a regression there is caught by the weekly or release full run rather than per
-push; if a macOS minimal job drops to a few minutes it can be given
-`"fast": True` in `tools/ci_matrix.py` (and the fast list updated here).
+Only the full set runs Ubuntu Python 3.11–3.13, ARM64 and musl aarch64 (same
+Python code, different wheel build), musl Python 3.10, Windows Python 3.10, both
+macOS jobs, large-data, benchmarks and the `slow` tests.
+
+Why the split:
+
+- **Small project, bounded CI.** Every push would pay for the whole matrix, but
+  the extra versions add little signal per push. The fast set keeps the two ends
+  of the supported range and the platforms with distinct code paths.
+- **macOS.** GitHub's macOS runners are expensive, slow and few, so macOS jobs
+  queue behind each other. Both macOS jobs are full-only. `px/config.py` has
+  darwin-only paths, so macOS regressions are caught by the weekly or release
+  run. The earlier 19-minute macOS jobs were traced to an interpreter DNS stall,
+  fixed by uv-managed CPython (see
+  [macOS-specific reasoning](#macos-specific-reasoning)). Those jobs have not
+  been re-measured, so macOS stays out of the fast set. If a minimal macOS job
+  takes a few minutes, add `"fast": True` to its entry in `tools/ci_matrix.py`
+  and update this list.
+- **Python versions.** px's Python code is the same on 3.10–3.14, so differences
+  come from the interpreter and native wheels. Stable-ABI (abi3) wheels, such as
+  psutil's `cp36-abi3` wheels, need testing only at the oldest and newest
+  supported Python, plus free-threaded and PyPy builds where a project ships
+  them. px ships neither, so there is no free-threaded or PyPy job. The `binary`
+  tox environment deliberately avoids free-threaded 3.14 (see
+  [Build](build.md#github-actions)).
+- **Architectures.** ARM64 and musl aarch64 run the same Python code with a
+  different wheel build, so they are full-only.
 
 **Full mode** runs everything: 13 test jobs (Ubuntu x86_64 on Python
 3.10–3.14 plus asyncio on 3.14, Ubuntu ARM64 (`ubuntu-24.04-arm`) on 3.10 and
@@ -230,17 +287,18 @@ tests run too. The asyncio jobs set `PX_EVENT_LOOP=asyncio`; all other jobs
 cover automatic winloop/uvloop selection.
 
 Every pytest invocation in CI passes `--durations=30`, so each job log lists
-the 30 slowest tests; use it to spot tests that grow slow. All Python versions
-(3.10–3.14) are additionally tested via tox in the build workflow's
-`test-binary` job.
+the 30 slowest tests; use it to spot tests that grow slow.
 
-The build workflow (`.github/workflows/build.yml`) triggers on pushes to
-`master` and manual dispatch. It tests built artifacts using tox across all
-Python versions (3.10–3.14) inside musllinux and Ubuntu Docker containers and on
-the `macos-latest`/Windows test runners. Aarch64 Linux jobs run on native
-`ubuntu-24.04-arm` runners with containers running natively, avoiding QEMU
-emulation overhead. Release wheels and binaries are built separately on the
-pinned `macos-15` runner.
+### Coverage before a release
+
+The CI set does not cover every Python, OS and architecture combination, but
+every supported one is covered before each release. The full set runs on the
+devel dry run and on the automatic-release candidate. Then `test-binary` in
+`build.yml` runs tox on py310–py314 against the built release artifacts for six
+platforms: glibc and musl on x86_64 and aarch64, macOS arm64 and Windows amd64.
+`test-binary` runs on the devel dry run and on the master push that publishes,
+and the `release` job needs it to pass. The mechanics are in
+[Build](build.md#github-actions).
 
 ---
 
@@ -290,12 +348,13 @@ When `PX_CI_MINIMAL=1` is set:
 3. **Network tests excluded**: `test_network.py` is excluded on macOS CI as these
    tests fail in the GitHub Actions environment but pass on real macOS hardware.
 
-**Result**: The test count drops from 186 to 24 tests (87% reduction) while
-maintaining full auth diversity (NTLM, DIGEST, BASIC) and both config modes (cli, env).
+**Result**: the macOS selection collects 486 tests, which is the default 496
+minus the 10 network tests. The skips above reduce what actually runs, while
+keeping every auth type (NTLM, DIGEST, BASIC) and both config modes (cli, env).
 
-The pairing logic is implemented in `tests/fixtures.py` via `PARAMS_AUTH_PAIRED`
-that conditionally modifies fixture parametrization based on the `PX_CI_MINIMAL`
-environment variable. Chain tests are skipped using `@pytest.mark.skipif` decorators
+`tests/fixtures.py` builds `PARAMS_AUTH_PAIRED` from `PX_CI_MINIMAL`, and the
+`px_auth` fixture skips the combinations outside it at setup. Those tests are
+still collected but skipped. Chain tests are skipped with `@pytest.mark.skipif`
 in `tests/test_proxy.py`.
 
 ---
@@ -312,17 +371,18 @@ a fast inner-loop run:
 pytest tests -m "not integration and not benchmark and not largedata and not slow"
 ```
 
-Measured on Linux/Python 3.14 with `pytest -n auto` (default `addopts`
-already excludes `integration`/`benchmark`/`largedata`; absolute numbers vary
-with host load, but the relative drop is the point):
+Test counts are from `--collect-only` on the current tree. The wall times are
+from an earlier run on Linux/Python 3.14 with `pytest -n auto` on a smaller
+test count, and they vary with host load, so read them only for the relative
+drop:
 
-| Selection | Tests | Wall time |
+| Selection | Tests | Wall time (earlier run) |
 |---|---|---|
-| Full (`pytest tests`) | 459 passed, 6 skipped | ~21-27s |
-| `PX_CI_MINIMAL=1 --ignore=tests/test_network.py` (macOS CI selection) | 281 passed, 174 skipped | ~13s |
-| `-m "... and not slow"` (fast selection) | 309 passed, 6 skipped | ~6s |
+| Default (`pytest tests`) | 496 | ~21-27s |
+| macOS CI (`PX_CI_MINIMAL=1 --ignore=tests/test_network.py`) | 486 | ~13s |
+| Fast (`-m "... and not slow"`) | 346 | ~6s |
 
-The fast selection runs in roughly a quarter of the full suite's time. Two
+In that run the fast selection took roughly a quarter of the full suite's time. Two
 specific fixes (below) also measured cleanly in isolation, independent of
 host load: `test_network.py::test_allow_specific_subnet` dropped from 17.4-
 17.7s to 0.5s, and `test_network.py::test_quit_stops_px` dropped from 2.0-
@@ -568,9 +628,10 @@ uv run python -m pytest tests/test_kerberos.py -m integration -v
 
 ### CI
 
-The `kerberos` job in `ci.yml` runs the integration tests on every push to
-`devel`/`working` and on pull requests. It builds the Docker images and runs
-`make test-kerberos` on `ubuntu-latest`.
+The `kerberos` job in `ci.yml` runs in both modes, on push, on pull request and
+in the full set. On `ubuntu-latest` it builds the images with
+`make docker-kerberos` and runs the `integration` selection, the same tests as
+`make test-kerberos`.
 
 ### Requirements
 
@@ -692,6 +753,11 @@ Results are printed as a table with columns for concurrency, success/failure
 counts, latency percentiles (avg, p50, p99), requests/sec, thread count, and
 RSS memory.
 
+### CI
+
+The `benchmark` job in `ci.yml` runs this selection on Ubuntu, macOS and
+Windows. It runs in full mode only, not on push or pull request.
+
 ---
 
 ## Large data transfer tests
@@ -723,5 +789,6 @@ uv run python -m pytest tests/test_large_data.py -m largedata -v -s
 ### CI
 
 The `large-data-linux` and `large-data-windows` jobs in `ci.yml` run these
-tests on every push to `devel`/`working` and on pull requests, ensuring
-cross-platform reliability for large transfers.
+tests in full mode only: the weekly run, a manual full dispatch and the
+pre-release dry run. They are not part of the fast set, so they do not run on
+push or pull request.

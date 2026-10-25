@@ -77,14 +77,13 @@ All CI and release builds run via GitHub Actions. The workflows live in
 
 ### CI (`ci.yml`)
 
-Runs in a fast mode on pushes to `devel`/`working` and on pull requests, and
-in a full mode on `workflow_dispatch` (`full` boolean input, default true), a
-weekly `schedule` (Sundays 05:37 UTC, on the default `devel` branch) and
-`workflow_call` (so a release build can run the complete matrix; `full`
-defaults to true). Start the full matrix with
-`gh workflow run ci.yml --ref devel`. The reason for the split is that the macOS
-runners are slow, expensive and few, and used to hold every push for about 19
-minutes. The policy, per-mode job lists and rationale are in
+Runs a fast set on pushes to `devel`/`working` and on pull requests, and the
+full set on `workflow_dispatch` (`full` boolean input, default true), a weekly
+`schedule` (Sundays 05:37 UTC, on the default `devel` branch) and
+`workflow_call`. A manual `build.yml` dispatch and the automatic release
+candidate call it with `full: true`. Start the full set with
+`gh workflow run ci.yml --ref devel`. The split exists because macOS runners
+are expensive, slow and few. The policy, per-mode job lists and rationale are in
 [Testing](testing.md#ci-testing).
 
 - **plan** — runs `tools/ci_matrix.py`, which resolves the mode (an explicit
@@ -99,8 +98,9 @@ minutes. The policy, per-mode job lists and rationale are in
   (`ubuntu-24.04-arm`) on 3.10 and 3.14, macOS on 3.10 and 3.14, Windows on
   3.10 and 3.14 plus asyncio on 3.14 (13 jobs). Uses the shared
   `.github/actions/setup-python-env` action for consistent environment
-  setup. macOS test jobs use `macos-latest` and exclude `test_network.py` due
-  to GitHub Actions environment limitations.
+  setup. macOS test jobs use `macos-latest`, set `PX_CI_MINIMAL=1` and exclude
+  `test_network.py` due to GitHub Actions environment limitations (see
+  [Testing](testing.md#reduced-test-matrix-for-macos-ci)).
 - **tests-musl** — runs `pytest` inside musllinux Docker containers. Fast:
   x86_64 on Python 3.14. Full: x86_64 (`ubuntu-latest`) and aarch64
   (`ubuntu-24.04-arm`) with Python 3.10 and 3.14 (4 jobs). This verifies Px
@@ -121,7 +121,7 @@ the slowest tests.
 
 ### Automatic release (`auto-release.yml`)
 
-Runs every Tuesday after mcurl's Monday dependency check and can also be
+Runs on Tuesdays at 06:17 UTC (the cron in `auto-release.yml`) and can also be
 started manually. Scheduled workflows run from the default `devel` branch, but
 this workflow explicitly checks out `master`; unreleased work on `devel` can
 therefore never enter an automatic release.
@@ -160,8 +160,10 @@ Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`). A
 manual dispatch on `devel` is the single pre-release gate: it calls `ci.yml`
 with its full matrix at the same time as the release artifact jobs, so it
 checks every CI configuration plus every wheel, binary and built-artifact test
-before a merge to `master`. Master pushes do not call CI again. Automatic
-release already runs the full matrix against its exact candidate before
+before a merge to `master`. Run it with `gh workflow run build.yml --ref devel`
+after `tools/release-check.sh` passes, and do not merge until it is green.
+Master pushes do not call CI again. Automatic release already runs the full
+matrix against its exact candidate before
 fast-forwarding master, so calling it twice would add delay without covering a
 new revision. Publishing remains guarded by the `release` job's master-only
 condition. All CI scaffolding (environment setup, wheel building, binary
@@ -270,8 +272,9 @@ resolve the newest release from PyPI.
   `managed-python` input and `UV_PYTHON_PREFERENCE=only-managed` for the tox
   environments) rather than setup-python's or Homebrew's: on the macOS 15+
   runners those interpreters stall name lookups for about 35 seconds each (see
-  `docs/testing.md`), which made every macOS wheel environment run for about
-  19.5 minutes. The wheels, binary and release build jobs are unchanged.
+  [Testing](testing.md#macos-specific-reasoning)), which made every macOS wheel
+  environment run for about 19.5 minutes. The wheels, binary and release build
+  jobs are unchanged.
   `build.sh` ensures the tox driver venv is created with a non-free-threaded
   Python 3.14 (`/opt/python/cp314-cp314/bin` is preferred when present; the
   version is pinned because the glibc test container has no Python and uv
@@ -291,13 +294,16 @@ resolve the newest release from PyPI.
 
 ### Local release check (`tools/release-check.sh`)
 
-CI on `devel` and `working` only runs the fast `ci.yml` matrix (tests from source), so the
-`build.yml` release jobs are never exercised until they are dispatched. Run
-`tools/release-check.sh` before dispatching `build.yml` on `devel` (and before
-any merge to `master`); it is the required step before that dry run. The first
-release build failed in every wheels job on a problem that only the real jobs
-reveal, and the dry run is slow and shared, so failures should be found
-locally first.
+CI on `devel` and `working` runs only the fast `ci.yml` set. It never runs
+`build_wheels` or the binary builds from `build.sh`, so the release jobs run only
+when `build.yml` is dispatched or pushed to `master`. Before merging `devel` into
+`master` for a release, run `tools/release-check.sh`, then the dry run
+`gh workflow run build.yml --ref devel`, which must pass. The dry run does not
+publish, because the `release` job is `master`-only. The first release build for
+v0.13.0 failed in every wheels job because `build.sh` used `pip wheel --upgrade`,
+an option `pip wheel` does not have. Nothing was published, but only the real
+jobs revealed the failure, and the dry run is slow and shared, so failures should
+be found locally first.
 
 The script replays the Linux x86_64 jobs of `build.yml` with Docker, using the
 same containers, `build.sh` functions and artifact hand-offs:
@@ -342,7 +348,11 @@ stays concise. Functions include:
   interpreter a binary job will bundle, and rejects it if it is behind the
   newest published CPython 3.13 patch release.
 - `extract_archives` — unpacks binary and wheel archives for the test-binary job.
-- `test_binary` — sets up tox and runs the test suite against the built artifacts.
+- `smoke_binary` — launches `px --help` on an artifact, failing if `ssl` or
+  `spnego` cannot load; on macOS it also runs `tools.py --check-portable`.
+  `build_binary` and `test_binary` both call it.
+- `test_binary` — runs `smoke_binary`, then the tox matrix against the built
+  artifacts.
 - `build_local` — end-to-end local build and test using Docker containers.
   Accepts `musl` or `glibc` as argument. Builds the sdist, wheels, binary, and
   runs the full tox test suite in the appropriate container images. Invoked via
@@ -354,9 +364,13 @@ Local build helper used by both developers and the GitHub Actions workflows:
 
 - `--wheel` — builds sdist and wheel into `wheel/`.
 - `--nuitka` — builds a standalone Nuitka binary for the current platform.
-  On Linux/macOS, adds `--include-package=uvloop`; on Windows, adds
-  `--include-package=winloop` alongside the keyring package. The guarded loop
-  imports may not be detected automatically by Nuitka.
+  On Linux/macOS, adds `--include-package=uvloop` and `--include-package=spnego`;
+  on Windows, adds `--include-package=win32ctypes` (keyring) and
+  `--include-package=winloop`. Guarded imports may not be detected automatically
+  by Nuitka.
+- `--check-python` / `--check-embed` — fail unless the interpreter (or the
+  Windows embeddable zip) is the newest published CPython 3.13 release. Used by
+  `check_bundled_python`.
 - `--check-ssl` — fails unless `ssl`, `hashlib` and `spnego` import in this
   interpreter and, on macOS, `_ssl`/`_hashlib` have no `/opt/homebrew` or
   `/usr/local` library reference.

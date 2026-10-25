@@ -145,6 +145,10 @@ def test_relocate_macos_dylibs_rewrites_openssl_and_libcurl_stack(fake_otool, tm
             "@loader_path/libcrypto.3.dylib",
             str(dist / "libssl.3.dylib"),
         ],
+        ["codesign", "--force", "--sign", "-", str(dist / "libcurl.4.dylib")],
+        ["codesign", "--verify", "--strict", str(dist / "libcurl.4.dylib")],
+        ["codesign", "--force", "--sign", "-", str(dist / "libssl.3.dylib")],
+        ["codesign", "--verify", "--strict", str(dist / "libssl.3.dylib")],
     ]
 
 

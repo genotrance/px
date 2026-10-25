@@ -326,6 +326,7 @@ def relocate_macos_dylibs(root):
         print("ERROR: cannot make the macOS binary self-contained")
         sys.exit(1)
 
+    modified = {}
     for path, old, new in changes:
         print(f"Relocating {path}: {old} -> {new}")
         mode = os.stat(path).st_mode
@@ -336,6 +337,23 @@ def relocate_macos_dylibs(root):
             subprocess.run(["install_name_tool", "-change", old, new, path], check=True)
         except subprocess.CalledProcessError:
             print(f"ERROR: could not relocate {old} in {path}")
+            sys.exit(1)
+        finally:
+            if writable != mode:
+                os.chmod(path, mode)
+        modified[path] = mode
+
+    for path, mode in sorted(modified.items()):
+        # install_name_tool invalidates signatures; arm64 dyld rejects unsigned/invalid code
+        writable = mode | stat.S_IWUSR
+        if writable != mode:
+            os.chmod(path, writable)
+        try:
+            print(f"Re-signing {path}")
+            subprocess.run(["codesign", "--force", "--sign", "-", path], check=True)
+            subprocess.run(["codesign", "--verify", "--strict", path], check=True)
+        except subprocess.CalledProcessError:
+            print(f"ERROR: could not re-sign {path}")
             sys.exit(1)
         finally:
             if writable != mode:

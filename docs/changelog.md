@@ -50,6 +50,10 @@
   bundled dylibs and rejects any remaining host-library reference before
   archiving, so SSL and pyspnego load on clean Macs regardless of Homebrew's
   OpenSSL patch version.
+- The macOS binary no longer links Homebrew's OpenSSL by absolute path, which
+  made SSL and pyspnego fail to load on Macs without that exact Homebrew
+  version. It is now built with a self-contained python-build-standalone
+  CPython. Relocated dylibs are re-signed ad-hoc so Apple Silicon accepts them.
 - `px --quit` now flushes its successful shutdown response before exiting, so
   Nuitka and Windows embedded binaries reliably stop instead of leaving their
   proxy port bound.
@@ -71,6 +75,10 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- macOS release builds fail early if the build interpreter's `_ssl` or
+  `_hashlib` link host libraries, and fail after the build if any Mach-O file
+  in `px.dist` references `/opt/homebrew` or `/usr/local`. The binary smoke
+  check also fails on `Requires module` import errors.
 - A manual `build.yml` dispatch now calls the full `ci.yml` matrix as the
   complete pre-release gate. Linux Nuitka and uv container caches persist
   safely between release runs, and artifact testing now runs each offline wheel

@@ -77,10 +77,7 @@ OTOOL_OUTPUT = {
     "_pymcurl.so": "_pymcurl.so:\n\t@rpath/libcurl.4.dylib (compatibility version 4.0.0)\n",
     "_ssl.so": "_ssl.so:\n\t@rpath/libssl.3.dylib (compatibility version 3.0.0)\n",
     "libcurl.4.dylib": "libcurl.4.dylib:\n\t@rpath/libcurl.4.dylib (compatibility version 4.0.0)\n\t/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib (compatibility version 3.0.0)\n",
-    "framework": "framework:\n\t/Library/Frameworks/Python.framework/Versions/3.13/Python (compatibility version 3.13.0)\n",
-    "runner": "runner:\n\t/Users/runner/work/px/px/build/libssl.3.dylib (compatibility version 3.0.0)\n",
     "libcrypto.3.dylib": "libcrypto.3.dylib:\n\t/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib (compatibility version 3.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
-    "libssl.3.dylib": "libssl.3.dylib:\n\t@rpath/libssl.3.dylib (compatibility version 3.0.0)\n\t/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.3.dylib (compatibility version 3.0.0)\n",
 }
 
 
@@ -98,15 +95,15 @@ def make_dist(root, names):
     return root
 
 
-def test_check_portable_accepts_bundled_libraries(fake_otool, tmp_path, capsys):
+def test_check_portable_ignores_non_macho_files(fake_otool, tmp_path, capsys):
     dist = make_dist(tmp_path / "dist", ["good"])
 
     tools.check_portable(str(dist))
 
-    assert "No host library references" in capsys.readouterr().out
+    assert "No Homebrew or /usr/local library references" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("name", ["bad", "local", "framework", "runner"])
+@pytest.mark.parametrize("name", ["bad", "local"])
 def test_check_portable_rejects_host_library_references(fake_otool, tmp_path, capsys, name):
     dist = make_dist(tmp_path / "dist", ["good", name])
 
@@ -122,47 +119,8 @@ def test_check_portable_ignores_dylib_own_install_name(fake_otool, tmp_path):
     assert tools.host_lib_refs(str(dist / "libcrypto.3.dylib")) == []
 
 
-def test_relocate_macos_dylibs_rewrites_openssl_and_libcurl_stack(fake_otool, tmp_path, monkeypatch):
-    dist = make_dist(
-        tmp_path / "dist",
-        ["_ssl.so", "_pymcurl.so", "libcrypto.3.dylib", "libssl.3.dylib", "libcurl.4.dylib"],
-    )
-    commands = []
-    monkeypatch.setattr(tools.subprocess, "run", lambda command, **_kw: commands.append(command))
-
-    tools.relocate_macos_dylibs(str(dist))
-
-    assert commands == [
-        [
-            "install_name_tool",
-            "-change",
-            "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
-            "@loader_path/libssl.3.dylib",
-            str(dist / "libcurl.4.dylib"),
-        ],
-        [
-            "install_name_tool",
-            "-change",
-            "/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.3.dylib",
-            "@loader_path/libcrypto.3.dylib",
-            str(dist / "libssl.3.dylib"),
-        ],
-        ["codesign", "--force", "--sign", "-", str(dist / "libcurl.4.dylib")],
-        ["codesign", "--verify", "--strict", str(dist / "libcurl.4.dylib")],
-        ["codesign", "--force", "--sign", "-", str(dist / "libssl.3.dylib")],
-        ["codesign", "--verify", "--strict", str(dist / "libssl.3.dylib")],
-    ]
-
-
-def test_relocate_macos_dylibs_rejects_unbundled_host_library(fake_otool, tmp_path, monkeypatch):
-    dist = make_dist(tmp_path / "dist", ["libssl.3.dylib"])
-    commands = []
-    monkeypatch.setattr(tools.subprocess, "run", lambda command, **_kw: commands.append(command))
-
-    with pytest.raises(SystemExit):
-        tools.relocate_macos_dylibs(str(dist))
-
-    assert commands == []
+def test_portability_check_has_no_dylib_relocation_step():
+    assert not hasattr(tools, "relocate_macos_dylibs")
 
 
 def test_check_portable_rejects_empty_dist(fake_otool, tmp_path):
@@ -191,3 +149,12 @@ def test_binary_is_launched_on_the_test_runner_before_the_suite():
     body = script[script.index("test_binary() {") :]
 
     assert body.index('smoke_binary "$NAME"') < body.index("tox ")
+
+
+def test_binary_smoke_check_imports_ssl_and_spnego_before_artifact_tests():
+    script = (ROOT / "build.sh").read_text()
+    smoke = script[script.index("smoke_binary() {") : script.index("# Set up manylinux static libs")]
+
+    assert '"$PXBIN" --help' in smoke
+    assert "Smoke check ssl and spnego imports" in smoke
+    assert 'grep -q "Requires module"' in smoke

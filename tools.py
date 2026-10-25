@@ -5,7 +5,6 @@ import os
 import platform
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import time
@@ -253,7 +252,7 @@ def check_embed():
     return embed
 
 
-SYSTEM_LIB_PREFIXES = ("/usr/lib/", "/System/", "/Library/Apple/")
+HOST_LIB_PREFIXES = ("/opt/homebrew", "/usr/local")
 MACHO_MAGICS = {
     bytes.fromhex(m)
     for m in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")
@@ -270,7 +269,7 @@ def is_macho(path):
 
 
 def host_lib_refs(path):
-    "Return the libraries outside the macOS system locations that the Mach-O file path links against by absolute path"
+    "Return the Homebrew or /usr/local libraries that the Mach-O file path links against"
     out = subprocess.check_output(["otool", "-L", path], text=True)
     refs = []
     for line in out.splitlines():
@@ -280,7 +279,7 @@ def host_lib_refs(path):
         # A dylib's first entry is its own install name, not a dependency
         if path.endswith(".dylib") and not refs and os.path.basename(lib) == os.path.basename(path):
             continue
-        if lib.startswith("/") and not lib.startswith(SYSTEM_LIB_PREFIXES):
+        if lib.startswith(HOST_LIB_PREFIXES):
             refs.append(lib)
     return refs
 
@@ -296,72 +295,8 @@ def macho_files(root):
     return sorted(files)
 
 
-def relocate_macos_dylibs(root):
-    """Rewrite bundled Homebrew dylib references to their bundled copies.
-
-    Nuitka copies the dylibs that native extensions need, but does not always
-    adjust a copied dylib's own dependencies. In particular, Homebrew's
-    libssl can retain an absolute libcrypto install name.
-    """
-    bundled = {}
-    for path in macho_files(root):
-        if path.endswith(".dylib"):
-            bundled.setdefault(os.path.basename(path), []).append(path)
-
-    changes = []
-    missing = {}
-    for path in macho_files(root):
-        for lib in host_lib_refs(path):
-            targets = bundled.get(os.path.basename(lib), [])
-            if len(targets) == 1:
-                relative = os.path.relpath(targets[0], os.path.dirname(path))
-                changes.append((path, lib, "@loader_path/" + relative.replace(os.sep, "/")))
-            else:
-                missing.setdefault(path, []).append(lib)
-
-    if missing:
-        for path, refs in sorted(missing.items()):
-            for ref in refs:
-                print(f"ERROR: {path} needs {ref}, which is not uniquely bundled")
-        print("ERROR: cannot make the macOS binary self-contained")
-        sys.exit(1)
-
-    modified = {}
-    for path, old, new in changes:
-        print(f"Relocating {path}: {old} -> {new}")
-        mode = os.stat(path).st_mode
-        writable = mode | stat.S_IWUSR
-        if writable != mode:
-            os.chmod(path, writable)
-        try:
-            subprocess.run(["install_name_tool", "-change", old, new, path], check=True)
-        except subprocess.CalledProcessError:
-            print(f"ERROR: could not relocate {old} in {path}")
-            sys.exit(1)
-        finally:
-            if writable != mode:
-                os.chmod(path, mode)
-        modified[path] = mode
-
-    for path, mode in sorted(modified.items()):
-        # install_name_tool invalidates signatures; arm64 dyld rejects unsigned/invalid code
-        writable = mode | stat.S_IWUSR
-        if writable != mode:
-            os.chmod(path, writable)
-        try:
-            print(f"Re-signing {path}")
-            subprocess.run(["codesign", "--force", "--sign", "-", path], check=True)
-            subprocess.run(["codesign", "--verify", "--strict", path], check=True)
-        except subprocess.CalledProcessError:
-            print(f"ERROR: could not re-sign {path}")
-            sys.exit(1)
-        finally:
-            if writable != mode:
-                os.chmod(path, mode)
-
-
 def check_portable(root):
-    "Fail if any Mach-O file under root links a library by an absolute path outside /usr/lib and /System"
+    "Fail if any Mach-O file under root links a library from /opt/homebrew or /usr/local"
     if sys.platform != "darwin":
         print("--check-portable requires macOS (otool)")
         sys.exit(1)
@@ -387,7 +322,7 @@ def check_portable(root):
                 print(f"ERROR: {path} links {ref}")
         print("ERROR: the binary depends on libraries that only exist on the build host")
         sys.exit(1)
-    print("No host library references")
+    print("No Homebrew or /usr/local library references")
 
 
 def check_ssl():
@@ -527,12 +462,6 @@ def nuitka():
     # Fix binary name on Linux/Mac
     with contextlib.suppress(FileNotFoundError):
         os.rename("px.bin", "px")
-
-    if sys.platform == "darwin":
-        # Nuitka copied the dylibs, but their nested install names can still
-        # point at the build runner's Homebrew cellar.
-        relocate_macos_dylibs(os.getcwd())
-        check_portable(os.getcwd())
 
     # Compress some binaries
     if shutil.which("upx") is not None:
@@ -862,8 +791,8 @@ def main():
 Build:
 --check-python	Fail unless this Python is the newest published {PY_MINOR}.x
 --check-embed	Fail unless the Windows embeddable zip is the newest published {PY_MINOR}.x
---check-ssl	Fail unless ssl and spnego import and do not link host libraries (macOS)
---check-portable DIR	Fail if a Mach-O file under DIR links a library outside /usr/lib and /System by absolute path
+--check-ssl	Fail unless ssl and spnego import and do not link Homebrew or /usr/local libraries (macOS)
+--check-portable DIR	Fail if a Mach-O file under DIR links /opt/homebrew or /usr/local
 --wheel		Build wheels for pypi.org
 --nuitka	Build px distribution using Nuitka
 --embed		Build px distribution using Python Embeddable distro

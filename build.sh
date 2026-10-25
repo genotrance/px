@@ -190,8 +190,9 @@ smoke_binary() {
         PXBIN="px.dist-${NAME}/px.dist/px.exe"
     fi
 
-    echo "Smoke check auth imports: $PXBIN --help"
-    # px reports a missing or unloadable ssl/pyspnego module and exits non-zero
+    echo "Smoke check ssl and spnego imports: $PXBIN --help"
+    # Px imports ssl and pyspnego before handling --help, reporting a missing
+    # or unloadable dependency before artifact tests begin.
     if ! OUT=$("$PXBIN" --help 2>&1); then
         echo "$OUT" | head -20
         echo "ERROR: $PXBIN --help failed"

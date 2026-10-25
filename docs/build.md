@@ -205,14 +205,8 @@ resolve the newest release from PyPI.
   `actions/setup-python`'s macOS CPython links Homebrew's OpenSSL by absolute
   path (`/opt/homebrew/Cellar/openssl@3/<version>/lib/libcrypto.3.dylib`), so
   the Nuitka binary built from it ran only on Macs with that exact Homebrew
-  version. python-build-standalone avoids that interpreter dependency. Nuitka
-  can still copy Homebrew-built `libssl.3.dylib` and libcurl-stack dylibs whose
-  nested dependencies retain a cellar path. After compiling, `tools.py`
-  rewrites every such reference to its uniquely bundled dylib using
-  `@loader_path`, making the finished distribution relocatable without
-  depending on a particular Homebrew patch version. Because install-name
-  rewriting invalidates code signatures, each rewritten Mach-O file is ad-hoc
-  re-signed and verified. Linux glibc uses the manylinux interpreter when it
+  version. python-build-standalone avoids that interpreter dependency. Linux
+  glibc uses the manylinux interpreter when it
   passes the check, otherwise it installs the newest managed CPython through
   the current uv release. Linux musl always uses that managed CPython because
   Alpine's system Python can have a different minor version; its
@@ -240,15 +234,13 @@ resolve the newest release from PyPI.
   The macOS build creates a fresh venv from the managed CPython, installs the
   wheels archive into it, and runs `tools.py --check-ssl` (imports `ssl`,
   `hashlib` and `spnego`, and fails if `_ssl` or `_hashlib` link a library
-  outside `/usr/lib` and `/System`) before the slow Nuitka compile. After the
-  build, `smoke_binary` fails if `px --help` exits non-zero or reports
-  `Requires module`, and on macOS runs `tools.py --check-portable` over
-  `px.dist` (the Nuitka step has already relocated the bundled OpenSSL and
-  libcurl dylibs to `@loader_path`). The guard uses `otool -L` on
-  every Mach-O file and fails on any library referenced by an absolute path
-  outside `/usr/lib`, `/System` and `/Library/Apple` (Homebrew, `/usr/local`,
-  python.org frameworks, runner build directories), including `_ssl.so`,
-  OpenSSL dylibs, and the libcurl/pymcurl stack. The build runner has
+  from `/opt/homebrew` or `/usr/local`) before the slow Nuitka compile. After the
+  build, `smoke_binary` launches `px --help`, which imports `ssl` and
+  `spnego` before processing the option, and fails if either import reports
+  `Requires module`. On macOS it also runs `tools.py --check-portable` over
+  `px.dist`. The guard uses `otool -L` on every Mach-O file and fails on any
+  `/opt/homebrew` or `/usr/local` reference, including `_ssl.so`, OpenSSL
+  dylibs, and the libcurl/pymcurl stack. The build runner has
   Homebrew, so the binary loads fine there and a host library dependency is
   invisible to a launch check; the install-name check is the one that catches
   it on the build job. `test-binary` also launches the extracted binary
@@ -366,11 +358,10 @@ Local build helper used by both developers and the GitHub Actions workflows:
   `--include-package=winloop` alongside the keyring package. The guarded loop
   imports may not be detected automatically by Nuitka.
 - `--check-ssl` — fails unless `ssl`, `hashlib` and `spnego` import in this
-  interpreter and, on macOS, `_ssl`/`_hashlib` link no library by an absolute
-  path outside `/usr/lib`, `/System` and `/Library/Apple`.
-- `--check-portable DIR` — macOS only; fails if any Mach-O file under `DIR`
-  links a library by an absolute path outside `/usr/lib`, `/System` and
-  `/Library/Apple` (`otool -L`).
+  interpreter and, on macOS, `_ssl`/`_hashlib` have no `/opt/homebrew` or
+  `/usr/local` library reference.
+- `--check-portable DIR` — macOS only; scans every Mach-O file under `DIR`
+  with `otool -L` and fails on `/opt/homebrew` or `/usr/local` references.
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
   and packages `px.exe` (Windows only). It selects the highest versioned
   amd64 embeddable zip published for the newest CPython 3.13 release rather

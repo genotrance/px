@@ -205,8 +205,12 @@ resolve the newest release from PyPI.
   `actions/setup-python`'s macOS CPython links Homebrew's OpenSSL by absolute
   path (`/opt/homebrew/Cellar/openssl@3/<version>/lib/libcrypto.3.dylib`), so
   the Nuitka binary built from it ran only on Macs with that exact Homebrew
-  version. python-build-standalone statically links OpenSSL into `_ssl` and
-  `_hashlib`, making the binary self-contained. Linux glibc uses the manylinux interpreter when it
+  version. python-build-standalone avoids that interpreter dependency. Nuitka
+  can still copy Homebrew-built `libssl.3.dylib` and libcurl-stack dylibs whose
+  nested dependencies retain a cellar path. After compiling, `tools.py`
+  rewrites every such reference to its uniquely bundled dylib using
+  `@loader_path`, making the finished distribution relocatable without
+  depending on a particular Homebrew patch version. Linux glibc uses the manylinux interpreter when it
   passes the check, otherwise it installs the newest managed CPython through
   the current uv release. Linux musl always uses that managed CPython because
   Alpine's system Python can have a different minor version; its
@@ -236,12 +240,14 @@ resolve the newest release from PyPI.
   `hashlib` and `spnego`, and fails if `_ssl` or `_hashlib` link a Homebrew
   or `/usr/local` library) before the slow Nuitka compile. After the build,
   `smoke_binary` fails if `px --help` exits non-zero or reports
-  `Requires module`, and on macOS runs `tools.py --check-portable` over
-  `px.dist`, which runs `otool -L` on every Mach-O file and fails on any
-  reference to `/opt/homebrew` or `/usr/local`. The check is needed because
-  the build runner has Homebrew, so the binary loads fine there and the
-  failure otherwise only appears on the clean `test-binary` runner, where
-  every auth test timed out (about 20 minutes per tox environment).
+  `Requires module`, and on macOS rewrites and then runs
+  `tools.py --check-portable` over `px.dist`. The guard uses `otool -L` on
+  every Mach-O file and fails on any remaining reference to `/opt/homebrew` or
+  `/usr/local`, including `_ssl.so`, OpenSSL dylibs, and the libcurl/pymcurl
+  stack. The check is needed because the build runner has Homebrew, so the
+  binary loads fine there and the failure otherwise only appears on the clean
+  `test-binary` runner, where every auth test timed out (about 20 minutes per
+  tox environment).
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python

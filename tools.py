@@ -5,6 +5,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -284,6 +285,63 @@ def host_lib_refs(path):
     return refs
 
 
+def macho_files(root):
+    "Return every non-symlink Mach-O file below root in a stable order"
+    files = []
+    for dirpath, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(dirpath, name)
+            if not os.path.islink(path) and is_macho(path):
+                files.append(path)
+    return sorted(files)
+
+
+def relocate_macos_dylibs(root):
+    """Rewrite bundled Homebrew dylib references to their bundled copies.
+
+    Nuitka copies the dylibs that native extensions need, but does not always
+    adjust a copied dylib's own dependencies. In particular, Homebrew's
+    libssl can retain an absolute libcrypto install name.
+    """
+    bundled = {}
+    for path in macho_files(root):
+        if path.endswith(".dylib"):
+            bundled.setdefault(os.path.basename(path), []).append(path)
+
+    changes = []
+    missing = {}
+    for path in macho_files(root):
+        for lib in host_lib_refs(path):
+            targets = bundled.get(os.path.basename(lib), [])
+            if len(targets) == 1:
+                relative = os.path.relpath(targets[0], os.path.dirname(path))
+                changes.append((path, lib, "@loader_path/" + relative.replace(os.sep, "/")))
+            else:
+                missing.setdefault(path, []).append(lib)
+
+    if missing:
+        for path, refs in sorted(missing.items()):
+            for ref in refs:
+                print(f"ERROR: {path} needs {ref}, which is not uniquely bundled")
+        print("ERROR: cannot make the macOS binary self-contained")
+        sys.exit(1)
+
+    for path, old, new in changes:
+        print(f"Relocating {path}: {old} -> {new}")
+        mode = os.stat(path).st_mode
+        writable = mode | stat.S_IWUSR
+        if writable != mode:
+            os.chmod(path, writable)
+        try:
+            subprocess.run(["install_name_tool", "-change", old, new, path], check=True)
+        except subprocess.CalledProcessError:
+            print(f"ERROR: could not relocate {old} in {path}")
+            sys.exit(1)
+        finally:
+            if writable != mode:
+                os.chmod(path, mode)
+
+
 def check_portable(root):
     "Fail if any Mach-O file under root links a library from /opt/homebrew or /usr/local"
     if sys.platform != "darwin":
@@ -295,15 +353,11 @@ def check_portable(root):
 
     checked = 0
     bad = {}
-    for dirpath, _, files in os.walk(root):
-        for name in files:
-            path = os.path.join(dirpath, name)
-            if os.path.islink(path) or not is_macho(path):
-                continue
-            checked += 1
-            refs = host_lib_refs(path)
-            if refs:
-                bad[path] = refs
+    for path in macho_files(root):
+        checked += 1
+        refs = host_lib_refs(path)
+        if refs:
+            bad[path] = refs
 
     print(f"Checked {checked} Mach-O files under {root}")
     if checked == 0:
@@ -453,6 +507,12 @@ def nuitka():
     # Fix binary name on Linux/Mac
     with contextlib.suppress(FileNotFoundError):
         os.rename("px.bin", "px")
+
+    if sys.platform == "darwin":
+        # Nuitka copied the dylibs, but their nested install names can still
+        # point at the build runner's Homebrew cellar.
+        relocate_macos_dylibs(os.getcwd())
+        check_portable(os.getcwd())
 
     # Compress some binaries
     if shutil.which("upx") is not None:

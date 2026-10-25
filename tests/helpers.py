@@ -12,6 +12,21 @@ import keyring
 
 _port_reservations = set()
 
+# Longest a fresh interpreter may take for each startup step before the CI
+# macOS guard stops the run. The stall it exists for lasts about 35 seconds.
+STARTUP_LIMIT = 10.0
+
+# Steps of a px start that can block on a name or proxy lookup, each run in a
+# fresh interpreter (argv[1] is an empty px.ini)
+STARTUP_PROBES = {
+    "gethostbyaddr": "import socket; socket.gethostbyaddr('127.0.0.1')",
+    "getproxies": "import urllib.request; urllib.request.getproxies()",
+    "parse_config": (
+        "import sys; sys.argv = ['px', '--noproxy=', '--config=' + sys.argv[1]]; "
+        "from px import main; main.STATE.parse_config()"
+    ),
+}
+
 
 class PxStartupError(AssertionError):
     def __init__(self, listen_ip, port):
@@ -245,3 +260,27 @@ def touch(path):
     print("Writing " + path)
     with open(path, "w") as f:
         f.write("")
+
+
+def probe_startup(timeout=2 * STARTUP_LIMIT):
+    """Time each STARTUP_PROBES step in a fresh interpreter; returns {name: seconds}.
+
+    A step that does not finish within timeout is reported as timeout."""
+    results = {}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("PX_")}
+    with tempfile.TemporaryDirectory() as tmp:
+        ini = os.path.join(tmp, "px.ini")
+        open(ini, "w").close()
+        for name, code in STARTUP_PROBES.items():
+            start = time.monotonic()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                subprocess.run(  # noqa: S603
+                    [sys.executable, "-c", code, ini], cwd=tmp, env=env, timeout=timeout, capture_output=True
+                )
+            results[name] = min(time.monotonic() - start, timeout)
+    return results
+
+
+def slow_startup_steps(timings, limit=STARTUP_LIMIT):
+    "Return the probe steps in timings that took longer than limit seconds"
+    return {name: seconds for name, seconds in timings.items() if seconds > limit}

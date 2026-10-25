@@ -76,6 +76,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           python-version: ${{ matrix.python-version }}
+          managed-python: "true"
 
       - name: Run tests
         timeout-minutes: 60
@@ -172,6 +173,8 @@ jobs:
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
+        with:
+          managed-python: "true"
 
       - name: Run benchmarks
         timeout-minutes: 15

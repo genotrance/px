@@ -326,6 +326,10 @@ test_binary() {
         return 1
     fi
 
+    # Load the artifact on this clean runner or container before the long
+    # suite so a missing library fails in seconds rather than as timeouts
+    smoke_binary "$NAME" || return 1
+
     if [ "$OS" = "linux-musl" ] || [ "$OS" = "linux-glibc" ]; then
         # Inside container — install curl if needed (before ensure_uv)
         if ! command -v curl > /dev/null 2>&1; then
@@ -366,6 +370,11 @@ test_binary() {
     else
         # Native runner (macOS/Windows)
         ensure_uv
+        if [ "$OS" = "mac" ]; then
+            # Python from setup-python or Homebrew stalls every name lookup
+            # on macOS 15+ runners; uv-managed CPython does not
+            export UV_PYTHON_PREFERENCE=only-managed
+        fi
         PYTEST_CMD="pytest -n 2 tests --durations=30"
         if [ "${PX_CI_MINIMAL:-}" = "1" ]; then
             # Keep macOS artifact testing aligned with ci.yml's full matrix:

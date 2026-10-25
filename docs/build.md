@@ -237,17 +237,22 @@ resolve the newest release from PyPI.
   `macos-latest` moves to a newer image.
   The macOS build creates a fresh venv from the managed CPython, installs the
   wheels archive into it, and runs `tools.py --check-ssl` (imports `ssl`,
-  `hashlib` and `spnego`, and fails if `_ssl` or `_hashlib` link a Homebrew
-  or `/usr/local` library) before the slow Nuitka compile. After the build,
-  `smoke_binary` fails if `px --help` exits non-zero or reports
-  `Requires module`, and on macOS rewrites and then runs
-  `tools.py --check-portable` over `px.dist`. The guard uses `otool -L` on
-  every Mach-O file and fails on any remaining reference to `/opt/homebrew` or
-  `/usr/local`, including `_ssl.so`, OpenSSL dylibs, and the libcurl/pymcurl
-  stack. The check is needed because the build runner has Homebrew, so the
-  binary loads fine there and the failure otherwise only appears on the clean
-  `test-binary` runner, where every auth test timed out (about 20 minutes per
-  tox environment).
+  `hashlib` and `spnego`, and fails if `_ssl` or `_hashlib` link a library
+  outside `/usr/lib` and `/System`) before the slow Nuitka compile. After the
+  build, `smoke_binary` fails if `px --help` exits non-zero or reports
+  `Requires module`, and on macOS runs `tools.py --check-portable` over
+  `px.dist` (the Nuitka step has already relocated the bundled OpenSSL and
+  libcurl dylibs to `@loader_path`). The guard uses `otool -L` on
+  every Mach-O file and fails on any library referenced by an absolute path
+  outside `/usr/lib`, `/System` and `/Library/Apple` (Homebrew, `/usr/local`,
+  python.org frameworks, runner build directories), including `_ssl.so`,
+  OpenSSL dylibs, and the libcurl/pymcurl stack. The build runner has
+  Homebrew, so the binary loads fine there and a host library dependency is
+  invisible to a launch check; the install-name check is the one that catches
+  it on the build job. `test-binary` also launches the extracted binary
+  (`smoke_binary`) on the clean test runner before any tox environment, so a
+  missing library fails in seconds instead of as about 20 minutes of auth
+  timeouts per tox environment.
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
@@ -262,6 +267,17 @@ resolve the newest release from PyPI.
   Ubuntu containers on Linux and on the `macos-latest`/Windows test runners.
   Aarch64 Linux tests run on native `ubuntu-24.04-arm` runners. Uses
   `extract_archives` and `test_binary` from `build.sh`.
+  `test_binary` first runs `smoke_binary` on the extracted artifact inside the
+  clean test container or runner (the same `--help` launch and auth import
+  check, plus the macOS portability check), so a library that only exists on
+  the build host fails the job in seconds instead of as 28 failing tests after
+  the wheel suites.
+  On macOS the test job uses uv-managed CPython (the setup action's
+  `managed-python` input and `UV_PYTHON_PREFERENCE=only-managed` for the tox
+  environments) rather than setup-python's or Homebrew's: on the macOS 15+
+  runners those interpreters stall name lookups for about 35 seconds each (see
+  `docs/testing.md`), which made every macOS wheel environment run for about
+  19.5 minutes. The wheels, binary and release build jobs are unchanged.
   `build.sh` ensures the tox driver venv is created with a non-free-threaded
   Python 3.14 (`/opt/python/cp314-cp314/bin` is preferred when present; the
   version is pinned because the glibc test container has no Python and uv
@@ -348,10 +364,11 @@ Local build helper used by both developers and the GitHub Actions workflows:
   `--include-package=winloop` alongside the keyring package. The guarded loop
   imports may not be detected automatically by Nuitka.
 - `--check-ssl` — fails unless `ssl`, `hashlib` and `spnego` import in this
-  interpreter and, on macOS, `_ssl`/`_hashlib` link no Homebrew or
-  `/usr/local` library.
+  interpreter and, on macOS, `_ssl`/`_hashlib` link no library by an absolute
+  path outside `/usr/lib`, `/System` and `/Library/Apple`.
 - `--check-portable DIR` — macOS only; fails if any Mach-O file under `DIR`
-  links a library under `/opt/homebrew` or `/usr/local` (`otool -L`).
+  links a library by an absolute path outside `/usr/lib`, `/System` and
+  `/Library/Apple` (`otool -L`).
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
   and packages `px.exe` (Windows only). It selects the highest versioned
   amd64 embeddable zip published for the newest CPython 3.13 release rather

@@ -2,20 +2,6 @@
 
 ---
 
-## Unreleased
-
-### Bug fixes
-- The macOS binary no longer links Homebrew's OpenSSL by absolute path, which
-  made SSL and pyspnego fail to load on Macs without that exact Homebrew
-  version. It is now built with a self-contained python-build-standalone
-  CPython.
-
-### Internal
-- macOS release builds fail early if the build interpreter's `_ssl` or
-  `_hashlib` link host libraries, and fail after the build if any Mach-O file
-  in `px.dist` references `/opt/homebrew` or `/usr/local`. The binary smoke
-  check also fails on `Requires module` import errors.
-
 ## v0.13.0 — 2026-10-24
 
 ### Improvements
@@ -59,6 +45,11 @@
   prevented authenticated proxy use. Missing dependency messages now show the
   original import error, and binary builds smoke-check those imports before
   artifact tests run.
+- Fixed macOS Nuitka binaries copying OpenSSL and libcurl-stack dylibs with
+  nested absolute Homebrew cellar paths. The build now rewrites those paths to
+  bundled dylibs and rejects any remaining host-library reference before
+  archiving, so SSL and pyspnego load on clean Macs regardless of Homebrew's
+  OpenSSL patch version.
 - `px --quit` now flushes its successful shutdown response before exiting, so
   Nuitka and Windows embedded binaries reliably stop instead of leaving their
   proxy port bound.

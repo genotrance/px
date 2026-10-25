@@ -210,7 +210,9 @@ resolve the newest release from PyPI.
   nested dependencies retain a cellar path. After compiling, `tools.py`
   rewrites every such reference to its uniquely bundled dylib using
   `@loader_path`, making the finished distribution relocatable without
-  depending on a particular Homebrew patch version. Linux glibc uses the manylinux interpreter when it
+  depending on a particular Homebrew patch version. Because install-name
+  rewriting invalidates code signatures, each rewritten Mach-O file is ad-hoc
+  re-signed and verified. Linux glibc uses the manylinux interpreter when it
   passes the check, otherwise it installs the newest managed CPython through
   the current uv release. Linux musl always uses that managed CPython because
   Alpine's system Python can have a different minor version; its

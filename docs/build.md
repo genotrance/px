@@ -142,9 +142,14 @@ CPython changed, the workflow exits successfully. Otherwise it:
    duplicate CI matrix jobs.
 3. On CI success, verifies that the version still has no tag or GitHub release
    and that `master` has not moved, then fast-forwards `master` to the tested
-   commit. That push starts `build.yml`, which bundles and logs whatever
-   CPython patch its own build tools provide at that point before anything is
-   published.
+   commit. Pushes made with `GITHUB_TOKEN` do not trigger workflows, so the
+   workflow then explicitly dispatches `build.yml` on `master` and logs the
+   run URL to the step summary without waiting for it. That build bundles and
+   logs whatever CPython patch its own build tools provide at that point
+   before anything is published. A dispatch also runs `build.yml`'s `ci-full`
+   job in parallel; the release only needs `test-binary`, so this is redundant
+   but harmless. A dispatch failure fails the job after the devel sync and
+   issue-close steps have run.
 4. Merges the released `master` back into `devel` without forcing. A merge
    conflict or concurrent `devel` update emits a warning for manual follow-up
    but does not rewrite either branch.

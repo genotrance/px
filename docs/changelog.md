@@ -2,6 +2,13 @@
 
 ---
 
+## Unreleased
+
+### Internal
+- `auto-release.yml` now dispatches `build.yml` on `master` after fast-forwarding
+  it, because `GITHUB_TOKEN` pushes do not start workflows and the release
+  would otherwise never be built or published.
+
 ## v0.13.0 — 2026-10-24
 
 ### Improvements

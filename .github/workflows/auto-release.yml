@@ -191,6 +191,29 @@ jobs:
           fi
           git push origin "$SHA:refs/heads/master"
 
+      - name: Dispatch release build on master
+        if: steps.publish.outcome == 'success'
+        id: release_build
+        continue-on-error: true
+        run: |
+          DISPATCHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run build.yml --ref master
+          RUN_ID=""
+          for attempt in $(seq 1 20); do
+            RUN_ID=$(gh run list --workflow build.yml --branch master \
+              --event workflow_dispatch --created ">=$DISPATCHED" \
+              --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$RUN_ID" ] && break
+            sleep 15
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::Could not find the dispatched release build run"
+            exit 1
+          fi
+          URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+          echo "Release build run: $URL"
+          echo "Release build run: $URL" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Merge released master into devel
         if: steps.publish.outcome == 'success'
         working-directory: release
@@ -220,4 +243,8 @@ jobs:
 
       - name: Fail after recording blocked CI
         if: steps.ci.outcome == 'failure'
+        run: exit 1
+
+      - name: Fail if the release build was not dispatched
+        if: steps.release_build.outcome == 'failure'
         run: exit 1

@@ -35,6 +35,6 @@ def test_workflow_dispatches_release_build_after_master_push():
     push = text.index("name: Fast-forward master")
     step = text.index("name: Dispatch release build on master")
     assert push < step
-    block = text[step:text.index("name: Merge released master into devel")]
+    block = text[step : text.index("name: Merge released master into devel")]
     assert "if: steps.publish.outcome == 'success'" in block
     assert "gh workflow run build.yml --ref master" in block

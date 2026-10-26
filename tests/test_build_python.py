@@ -166,6 +166,8 @@ def test_release_workflow_skips_already_published_release_outputs():
     assert "steps.release_exists.outputs.exists != 'true'" in build
     assert "skip-existing: true" in build
     assert "id: docker_tags" in build
+    assert 'push_tags=$(python3 tools.py --docker-plan="$VERSION")' in build
+    assert 'echo "push_tags=$push_tags" >> "$GITHUB_OUTPUT"' in build
     assert "--push-tags=${{ steps.docker_tags.outputs.push_tags }}" in build
     assert "id: winget" in build
     assert "steps.winget.outputs.publish == 'true'" in build
@@ -302,3 +304,22 @@ def test_docker_plan_version_tag_wrong_px_version():
     images = _good()
     images["0.13.0"] = ("sha:a", "Px v0.12.0\n")
     assert _plan(images) == ["0.13.0", "latest"]
+
+
+def test_main_docker_plan_cli_prints_requested_tags(monkeypatch, capsys):
+    monkeypatch.setattr(tools, "docker_plan", lambda version: [version, f"{version}-mini", "latest"])
+    monkeypatch.setattr(tools.sys, "argv", ["tools.py", "--docker-plan=0.13.0"])
+
+    tools.main()
+
+    assert capsys.readouterr().out == "0.13.0,0.13.0-mini,latest\n"
+
+
+def test_main_docker_plan_cli_requires_a_version(monkeypatch, capsys):
+    monkeypatch.setattr(tools.sys, "argv", ["tools.py", "--docker-plan"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        tools.main()
+
+    assert exc_info.value.code == 1
+    assert "--docker-plan requires a version" in capsys.readouterr().err

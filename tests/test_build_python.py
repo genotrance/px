@@ -165,7 +165,9 @@ def test_release_workflow_skips_already_published_release_outputs():
     assert "id: release_exists" in build
     assert "steps.release_exists.outputs.exists != 'true'" in build
     assert "skip-existing: true" in build
-    assert 'python3 tools.py --release-plan="$VERSION"' in build
+    assert "inputs.mode" not in build
+    assert "outputs.mode" not in build
+    assert "--release-plan" not in build
 
 
 def test_build_workflow_leaves_docker_and_winget_to_publish_workflow():
@@ -173,8 +175,7 @@ def test_build_workflow_leaves_docker_and_winget_to_publish_workflow():
 
     for publishing in ("DOCKERHUB", "WINGET", "docker/login-action", "winget", "--docker", "--push"):
         assert publishing not in build
-    # publish.yml skips dispatched dry runs by this title.
-    assert "dry_run={2}" in build
+    assert "workflow_dispatch:\n\nconcurrency:" in build
 
 
 def test_publish_workflow_follows_master_builds_and_manual_dispatch():
@@ -183,7 +184,6 @@ def test_publish_workflow_follows_master_builds_and_manual_dispatch():
     assert "workflows: [Build]" in publish
     assert "github.event.workflow_run.conclusion == 'success'" in publish
     assert "github.event.workflow_run.head_branch == 'master'" in publish
-    assert "!contains(github.event.workflow_run.display_title, 'dry_run=true')" in publish
     assert "version:" in publish and "required: true" in publish
     assert "dry_run:" in publish
     assert "permissions: {}" in publish

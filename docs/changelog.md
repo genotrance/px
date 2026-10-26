@@ -8,6 +8,12 @@
 - `auto-release.yml` now dispatches `build.yml` on `master` after fast-forwarding
   it, because `GITHUB_TOKEN` pushes do not start workflows and the release
   would otherwise never be built or published.
+- Removed `build.yml`'s `mode`/`dry_run` dispatch inputs, the `setup` job's
+  release-plan step, and `tools.py --release-plan`: `build.yml` now always
+  builds, tests, and publishes a new version, relying on simple idempotence
+  (PyPI `skip-existing`, skip an existing tag/GitHub release) so a re-run
+  cannot double-publish. `publish.yml` keeps re-publishing Docker and Winget
+  for an existing version.
 
 ## v0.13.0 — 2026-10-24
 

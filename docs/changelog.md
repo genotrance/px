@@ -45,6 +45,11 @@
   images without pulling their not-yet-published tags, then publishes only
   missing or stale Docker tags. Existing GitHub releases, PyPI distributions,
   and Winget submissions are left unchanged.
+
+### Internal
+- Split release automation into new, finish, and complete plans. Partial
+  releases now reuse and verify GitHub release artifacts without rebuilding or
+  rerunning CI, while dry-run dispatches report missing publication targets.
 - The macOS binary no longer links Homebrew's OpenSSL by absolute path, which
   made SSL and pyspnego fail to load on Macs without that exact Homebrew
   version. It is now built with a self-contained python-build-standalone

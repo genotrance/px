@@ -4,6 +4,16 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Select release mode automatically or force a new/finish run
+        type: choice
+        options: [auto, new, finish]
+        default: auto
+      dry_run:
+        description: Compute and display the plan without publishing
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -13,7 +23,8 @@ jobs:
   # A manual devel build is the complete pre-release gate. Master is already
   # gated by auto-release's full CI run for its exact release candidate.
   ci-full:
-    if: github.event_name == 'workflow_dispatch'
+    needs: setup
+    if: github.event_name == 'workflow_dispatch' && needs.setup.outputs.mode == 'new'
     uses: ./.github/workflows/ci.yml
     with:
       full: true
@@ -23,6 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      mode: ${{ steps.plan.outputs.mode }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+      pypi_exists: ${{ steps.plan.outputs.pypi_exists }}
+      github_release_exists: ${{ steps.plan.outputs.github_release_exists }}
+      missing_assets: ${{ steps.plan.outputs.missing_assets }}
+      docker_tags: ${{ steps.plan.outputs.docker_tags }}
+      winget_exists: ${{ steps.plan.outputs.winget_exists }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -35,8 +53,37 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
+      - name: Plan release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'auto' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          PLAN=$(python3 tools.py --release-plan="$VERSION" --mode="$MODE" --dry-run="$DRY_RUN")
+          echo "$PLAN" | jq .
+          {
+            echo "mode=$(echo "$PLAN" | jq -r .mode)"
+            echo "dry_run=$(echo "$PLAN" | jq -r .dry_run)"
+            echo "pypi_exists=$(echo "$PLAN" | jq -r .pypi_exists)"
+            echo "github_release_exists=$(echo "$PLAN" | jq -r .github_release_exists)"
+            echo "missing_assets=$(echo "$PLAN" | jq -c .missing_assets)"
+            echo "docker_tags=$(echo "$PLAN" | jq -r '.docker_tags | join(",")')"
+            echo "winget_exists=$(echo "$PLAN" | jq -r .winget_exists)"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Release plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`json" >> "$GITHUB_STEP_SUMMARY"
+          echo "$PLAN" | jq . >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(echo "$PLAN" | jq -r .mode)" = complete ]; then
+            echo "::notice::v$VERSION is already fully published; nothing to do."
+          fi
+
   # Build sdist and pure-Python wheel
   sdist:
+    needs: setup
+    if: needs.setup.outputs.mode == 'new'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,6 +106,8 @@ jobs:
   # Build dependency wheels for each platform
   # Platforms limited to intersection of pymcurl and quickjs-ng wheel availability
   wheels:
+    needs: setup
+    if: needs.setup.outputs.mode == 'new'
     strategy:
       fail-fast: false
       matrix:
@@ -136,7 +185,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     name: binary ${{ matrix.name }}
-    needs: [sdist, wheels]
+    needs: [setup, sdist, wheels]
 
     steps:
       - uses: actions/checkout@v7
@@ -260,7 +309,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     name: test-binary ${{ matrix.name }} ${{ matrix.container }}
-    needs: [binary]
+    needs: [setup, binary]
 
     steps:
       - uses: actions/checkout@v7
@@ -298,7 +347,11 @@ jobs:
 
   # Tag, create GitHub release, and publish to PyPI
   release:
-    if: github.ref == 'refs/heads/master'
+    if: >-
+      always() && github.ref == 'refs/heads/master' &&
+      needs.setup.outputs.mode != 'complete' &&
+      needs.setup.outputs.dry_run != 'true' &&
+      (needs.setup.outputs.mode == 'finish' || needs.test-binary.result == 'success')
     runs-on: ubuntu-latest
     needs: [setup, test-binary]
     permissions:
@@ -312,28 +365,74 @@ jobs:
           fetch-depth: 0
 
       - name: Download all binary artifacts
+        if: needs.setup.outputs.mode == 'new'
         uses: actions/download-artifact@v8
         with:
           path: artifacts/
           pattern: binary-*
 
       - name: Download sdist
+        if: needs.setup.outputs.mode == 'new'
         uses: actions/download-artifact@v8
         with:
           name: sdist
           path: artifacts/sdist/
 
       - name: Collect release assets
+        if: needs.setup.outputs.mode == 'new'
         run: |
           mkdir -p release
           find artifacts/binary-* -name 'px-v*' -exec cp {} release/ \;
           cp artifacts/sdist/*.tar.gz release/ || true
           cp artifacts/sdist/*.whl release/ || true
 
+      - name: Download and verify published release assets
+        if: needs.setup.outputs.mode == 'finish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          if [ "${{ needs.setup.outputs.github_release_exists }}" != true ]; then
+            echo "::error::v$VERSION exists on PyPI but has no GitHub release; binary artifacts cannot be recovered without rebuilding."
+            exit 1
+          fi
+          mkdir -p release
+          gh release download "v$VERSION" --repo genotrance/px --dir release
+          cd release
+          shopt -s nullglob
+          for checksum in *.sha256; do
+            archive=${checksum%.sha256}
+            [ -f "$archive" ] || { echo "::error::$archive is missing"; exit 1; }
+            printf '%s  %s\n' "$(cat "$checksum")" "$archive" | sha256sum --check -
+          done
+          mkdir -p px.dist-linux-musl-x86_64-wheels
+          tar -xzf "px-v$VERSION-linux-musl-x86_64-wheels.tar.gz" \
+            -C px.dist-linux-musl-x86_64-wheels
+
+      - name: Restore missing checksums and PyPI assets
+        if: needs.setup.outputs.mode == 'finish' && needs.setup.outputs.missing_assets != '[]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          python3 -m pip download --no-deps --dest release "px-proxy==$VERSION"
+          python3 -m pip download --no-deps --no-binary=:all: --dest release "px-proxy==$VERSION"
+          missing='${{ needs.setup.outputs.missing_assets }}'
+          for name in $(echo "$missing" | jq -r '.[]'); do
+            if [[ "$name" == *.sha256 && -f "release/${name%.sha256}" ]]; then
+              sha256sum "release/${name%.sha256}" | cut -d' ' -f1 > "release/$name"
+            elif [ ! -f "release/$name" ]; then
+              echo "::error::Missing release archive $name cannot be recovered without rebuilding."
+              exit 1
+            fi
+            gh release upload "v$VERSION" "release/$name" --repo genotrance/px
+          done
+
       - name: Extract release notes
         run: python3 tools.py --history > /tmp/notes.md
 
       - name: Create and push tag
+        if: needs.setup.outputs.mode == 'new'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -346,6 +445,7 @@ jobs:
           fi
 
       - name: Check for existing GitHub release
+        if: needs.setup.outputs.mode == 'new'
         id: release_exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -358,7 +458,7 @@ jobs:
           fi
 
       - name: Create release
-        if: steps.release_exists.outputs.exists != 'true'
+        if: needs.setup.outputs.mode == 'new' && steps.release_exists.outputs.exists != 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.setup.outputs.version }}
@@ -368,6 +468,7 @@ jobs:
           prerelease: true
 
       - name: Publish to PyPI
+        if: needs.setup.outputs.mode == 'new' && needs.setup.outputs.pypi_exists != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: artifacts/sdist/
@@ -383,19 +484,16 @@ jobs:
 
       - name: Check Docker tags
         id: docker_tags
-        env:
-          VERSION: ${{ needs.setup.outputs.version }}
-        run: |
-          push_tags=$(python3 tools.py --docker-plan="$VERSION")
-          echo "push_tags=$push_tags" >> "$GITHUB_OUTPUT"
+        run: echo "push_tags=${{ needs.setup.outputs.docker_tags }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker images
         if: steps.docker_tags.outputs.push_tags != ''
-        run: python3 tools.py --docker --push --wheels-dir=artifacts/binary-linux-musl-x86_64/px.dist-linux-musl-x86_64-wheels
+        run: python3 tools.py --docker --push --wheels-dir=${{ needs.setup.outputs.mode == 'new' && 'artifacts/binary-linux-musl-x86_64/px.dist-linux-musl-x86_64-wheels' || 'release/px.dist-linux-musl-x86_64-wheels' }}
           --push-tags=${{ steps.docker_tags.outputs.push_tags }}
 
       - name: Check Winget submission
         id: winget
+        if: needs.setup.outputs.winget_exists != 'true'
         env:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
           VERSION: ${{ needs.setup.outputs.version }}

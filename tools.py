@@ -838,8 +838,12 @@ def main():
     if "--depspkg" in sys.argv:
         depspkg()
 
-    if "--docker-plan" in sys.argv:
-        print(",".join(docker_plan(get_argval("docker-plan"))))
+    if "--docker-plan" in sys.argv or any(arg.startswith("--docker-plan=") for arg in sys.argv):
+        version = get_argval("docker-plan")
+        if not version:
+            print("ERROR: --docker-plan requires a version (use --docker-plan=VER)", file=sys.stderr)
+            sys.exit(1)
+        print(",".join(docker_plan(version)))
 
     if "--history" in sys.argv:
         print(get_history())

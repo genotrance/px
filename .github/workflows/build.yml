@@ -386,7 +386,8 @@ jobs:
         env:
           VERSION: ${{ needs.setup.outputs.version }}
         run: |
-          echo "push_tags=$(python3 tools.py --docker-plan="$VERSION")" >> "$GITHUB_OUTPUT"
+          push_tags=$(python3 tools.py --docker-plan="$VERSION")
+          echo "push_tags=$push_tags" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker images
         if: steps.docker_tags.outputs.push_tags != ''

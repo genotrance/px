@@ -75,6 +75,9 @@
   `Kerberos: kinit not found` and keeps running.
 
 ### Internal
+- Fixed the release workflow's Docker tag planning invocation so a failed or
+  malformed `--docker-plan=VERSION` command cannot silently skip the Docker
+  push step.
 - macOS test jobs (the CI test and benchmark jobs and `test-binary`) now run on
   uv-managed CPython instead of setup-python's. On the macOS 15+ runners
   (`macos-latest` is `macos-26`) Python from setup-python or Homebrew stalls

@@ -176,7 +176,12 @@ The release job is safe to re-run a version whose publishing stopped partway
 through: it leaves an existing GitHub tag and release untouched, lets PyPI
 ignore an already-uploaded distribution, and only pushes Docker tags that are
 missing or do not identify the release version. `latest` and `latest-mini` are
-updated when missing, when their digest differs from the version tag, or when the version tag is being pushed. This decision lives in `docker_plan()` in `tools.py` (`python3 tools.py --docker-plan=VERSION` prints the tags to push) and is unit tested in `tests/test_build_python.py`. It also
+updated when missing, when their digest differs from the version tag, or when
+the version tag is being pushed. This decision lives in `docker_plan()` in
+`tools.py` (`python3 tools.py --docker-plan=VERSION` prints the tags to push)
+and is tested through the CLI path in `tests/test_build_python.py`. The
+workflow computes the plan before writing its GitHub output, so a planning
+failure stops the release instead of silently skipping the Docker push. It also
 does not open a duplicate Winget submission when the manifest exists or an
 open `genotrance.px` pull request for that version exists. `docker manifest
 inspect --verbose genotrance/px:0.12.0` reports one `linux/amd64` manifest, so

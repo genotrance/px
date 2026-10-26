@@ -28,9 +28,8 @@ except Exception:
 
 WHEEL = "px_proxy-" + __version__ + "-py3-none-any.whl"
 
-# CPython minor version bundled in every release binary and Docker image. The
-# newest published patch release of this minor is always used, never a pinned
-# patch version.
+# CPython minor version bundled in every release binary and Docker image.
+# Build tools select their newest available patch version of this minor.
 PY_MINOR = "3.13"
 PY_FTP = "https://www.python.org/ftp/python/"
 PY_EMBED = "python-{}-embed-amd64.zip"
@@ -231,6 +230,34 @@ def latest_python(minor=PY_MINOR, asset=None):
     sys.exit(1)
 
 
+def check_python():
+    """Validate the selected interpreter and warn when python.org is newer."""
+    have = platform.python_version()
+    newest = latest_python()
+    print(f"Bundled CPython {have} ({sys.executable}), newest published {PY_MINOR}.x is {newest}")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", have) or have.rsplit(".", 1)[0] != PY_MINOR:
+        print(f"ERROR: bundled CPython {have or 'unknown'} is not a {PY_MINOR}.x release")
+        sys.exit(1)
+    if version_tuple(have) < version_tuple(newest):
+        print(f"WARNING: bundled CPython {have} is older than newest published {PY_MINOR}.x release {newest}")
+
+
+def check_embed():
+    """Select the newest Windows embed zip and warn if it lags python.org."""
+    newest = latest_python()
+    embed = latest_python(asset=PY_EMBED)
+    print(f"Windows embed will bundle CPython {embed}, newest published {PY_MINOR}.x is {newest}")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", embed) or embed.rsplit(".", 1)[0] != PY_MINOR:
+        print(f"ERROR: Windows embed CPython {embed or 'unknown'} is not a {PY_MINOR}.x release")
+        sys.exit(1)
+    if version_tuple(embed) < version_tuple(newest):
+        print(
+            f"WARNING: python.org has no {PY_EMBED.format(newest)} for newest "
+            f"{PY_MINOR}.x release {newest}; bundling available {embed}"
+        )
+    return embed
+
+
 HOST_LIB_PREFIXES = ("/opt/homebrew", "/usr/local")
 MACHO_MAGICS = {
     bytes.fromhex(m)
@@ -329,8 +356,19 @@ def check_ssl():
             sys.exit(1)
 
 
+def check_bundled_version(have, target):
+    """Validate a bundled interpreter and warn when python.org is newer."""
+    newest = latest_python()
+    print(f"{target} bundles CPython {have}, newest published {PY_MINOR}.x is {newest}")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", have) or have.rsplit(".", 1)[0] != PY_MINOR:
+        print(f"ERROR: {target} CPython {have or 'unknown'} is not a {PY_MINOR}.x release")
+        sys.exit(1)
+    if version_tuple(have) < version_tuple(newest):
+        print(f"WARNING: {target} CPython {have} is older than newest published {PY_MINOR}.x release {newest}")
+
+
 def docker_python(image, target):
-    """Pull an image and log its bundled CPython version (informational only)."""
+    """Pull a Docker base or output image and validate its bundled interpreter."""
     ret = subprocess.run(["docker", "pull", image])
     if ret.returncode != 0:
         print(f"Failed to pull {image}")
@@ -352,7 +390,7 @@ def docker_python(image, target):
     if res.returncode != 0:
         print(f"Failed to get the Python version from {target}: {res.stderr.strip()}")
         sys.exit(1)
-    print(f"{target} bundles CPython {res.stdout.strip()}")
+    check_bundled_version(res.stdout.strip(), target)
 
 
 # Build
@@ -483,10 +521,13 @@ def embed():
     rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
 
-    # Select the newest published release of PY_MINOR that has an embeddable
-    # zip on python.org; --tag overrides it for callers that want a specific
-    # version instead.
-    version = get_argval("tag").lstrip("v") or latest_python(asset=PY_EMBED)
+    # Select the newest PY_MINOR release that has an embeddable zip. A tag is
+    # accepted only when it names the version selected above.
+    newest = check_embed()
+    version = get_argval("tag").lstrip("v") or newest
+    if version != newest:
+        print(f"ERROR: requested CPython {version}, but newest available Windows embed is {newest}")
+        sys.exit(1)
     dlurl = PY_FTP + f"{version}/" + PY_EMBED.format(version)
     print(f"Bundling CPython {version} (Windows embeddable): {dlurl}")
 
@@ -725,6 +766,12 @@ def main():
     elif sys.platform == "linux":
         if "--docker" in sys.argv:
             docker()
+
+    if "--check-python" in sys.argv:
+        check_python()
+
+    if "--check-embed" in sys.argv:
+        check_embed()
 
     if "--check-ssl" in sys.argv:
         check_ssl()

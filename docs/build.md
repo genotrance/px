@@ -202,16 +202,17 @@ resolve the newest release from PyPI.
   into the glibc and Alpine containers, so they survive ephemeral runners
   without mixing architectures or compiler environments.
   Every job bundles the newest CPython 3.13 patch available to its own build
-  tools and logs the interpreter version (and path) it selected, purely as
-  information — nothing fails a build because python.org has published a
-  newer patch than uv's python-build-standalone, `actions/setup-python`, the
-  Windows embeddable zip index, or the `python:3.13-alpine` Docker image
-  provide yet. A release build previously failed this way in all six binary
-  jobs (dry run 40266792761) the day python.org published 3.13.18 before any
-  of those tools did; weekly automatic releases (see "Automatic release"
-  above) now keep the bundled patch current on their own, which is also what
-  fixed issue #275's months-long release gap, so a hard python.org gate on
-  every build added delay without adding safety.
+  tools and logs the interpreter version (and path) it selected. The release
+  guards still reject a missing, unparsable, or wrong-minor interpreter, but
+  only warn when python.org has published a newer patch than uv's
+  python-build-standalone, `actions/setup-python`, the Windows embeddable zip
+  index, or the `python:3.13-alpine` Docker image provide yet. A release build
+  previously failed this way in all six binary jobs (dry run 40266792761) the
+  day python.org published 3.13.18 before any of those tools did; weekly
+  automatic releases (see "Automatic release" above) now keep the bundled
+  patch current on their own, which is also what fixed issue #275's
+  months-long release gap, so a hard python.org gate on every build added
+  delay without adding safety.
   macOS and Linux musl always use the newest uv-managed python-build-standalone
   CPython. For macOS this also sidesteps `actions/setup-python`'s CPython,
   which links Homebrew's OpenSSL by absolute path
@@ -419,11 +420,11 @@ The CI image uses the Linux musl wheel archive, including its `uvloop` wheel;
 local source installs resolve the same dependency. Thus both image variants use
 the Linux default event loop, with Px retaining its runtime `asyncio` fallback.
 The moving `python:3.13-alpine` base tag is pulled fresh (`docker build --pull`)
-before each image build, and its bundled interpreter version is logged. The
-completed mini and full images are logged again after they build. None of this
-compares against python.org, so a build never fails because python.org has
-published a newer patch than the Alpine image provides yet; weekly automatic
-releases keep the bundled patch current instead.
+before each image build, and its bundled interpreter version is validated and
+logged. The completed mini and full images are checked again after they build.
+A wrong, missing, or unparsable Python version fails the build; an older patch
+than python.org only emits a warning, because weekly automatic releases keep
+the bundled patch current instead.
 Run `make docker` to build both images locally.
 
 Three additional Dockerfiles support the Kerberos integration test

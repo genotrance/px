@@ -367,12 +367,13 @@ def check_bundled_version(have, target):
         print(f"WARNING: {target} CPython {have} is older than newest published {PY_MINOR}.x release {newest}")
 
 
-def docker_python(image, target):
-    """Pull a Docker base or output image and validate its bundled interpreter."""
-    ret = subprocess.run(["docker", "pull", image])
-    if ret.returncode != 0:
-        print(f"Failed to pull {image}")
-        sys.exit(1)
+def docker_python(image, target, pull=True):
+    """Validate a Docker image's bundled interpreter, pulling only base images."""
+    if pull:
+        ret = subprocess.run(["docker", "pull", image])
+        if ret.returncode != 0:
+            print(f"Failed to pull {image}")
+            sys.exit(1)
     res = subprocess.run(
         [
             "docker",
@@ -699,6 +700,7 @@ def docker():
         dbuild += f" --build-arg WHEELS_DIR={wheels_dir}"
     dbuild += " -f docker/Dockerfile"
     push = "--push" in sys.argv
+    requested_tags = set(filter(None, get_argval("push-tags").split(",")))
 
     # docker build --pull below always fetches the current tag; log its
     # version before doing either expensive image build.
@@ -713,10 +715,12 @@ def docker():
         sys.exit(1)
 
     # Verify the completed image as well, before pushing anything.
-    docker_python(mtag, "Docker image")
+    docker_python(mtag, "Docker image", pull=False)
 
     if push:
         for t in [mtag, ltag]:
+            if requested_tags and t.rsplit(":", 1)[1] not in requested_tags:
+                continue
             if os.system(f"docker push {t}") != 0:
                 print(f"Failed to push {t}")
                 sys.exit(1)
@@ -729,10 +733,12 @@ def docker():
         print("Failed to build full image")
         sys.exit(1)
 
-    docker_python(ftag, "Docker image")
+    docker_python(ftag, "Docker image", pull=False)
 
     if push:
         for t in [ftag, lftag]:
+            if requested_tags and t.rsplit(":", 1)[1] not in requested_tags:
+                continue
             if os.system(f"docker push {t}") != 0:
                 print(f"Failed to push {t}")
                 sys.exit(1)
@@ -806,6 +812,8 @@ Build:
 --depspkg	Build an archive of all dependencies
 --docker	Build Docker images
   --push	Push images to Docker Hub
+  --push-tags=TAGS
+		Comma-separated Docker tags to push (default: all)
   --wheels-dir=DIR	Wheels directory (default: px.dist-linux-musl-x86_64-wheels)
 --history	Print latest changelog section
 """)

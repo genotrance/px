@@ -96,8 +96,11 @@ def test_embed_rejects_requested_version_other_than_newest_available_zip(monkeyp
         tools.embed()
 
 
-def test_docker_python_warns_when_upstream_is_newer(monkeypatch, capsys):
+def test_docker_python_pulls_base_image_and_warns_when_upstream_is_newer(monkeypatch, capsys):
+    commands = []
+
     def fake_run(cmd, **_kwargs):
+        commands.append(cmd)
         if cmd[:2] == ["docker", "pull"]:
             return subprocess.CompletedProcess(cmd, 0)
         return subprocess.CompletedProcess(cmd, 0, stdout="3.13.10\n", stderr="")
@@ -111,22 +114,61 @@ def test_docker_python_warns_when_upstream_is_newer(monkeypatch, capsys):
         "WARNING: Docker base image CPython 3.13.10 is older than newest published 3.13.x release 3.13.18"
         in capsys.readouterr().out
     )
+    assert commands[0] == ["docker", "pull", f"python:{tools.PY_MINOR}-alpine"]
+
+
+def test_docker_python_checks_local_output_without_pulling(monkeypatch):
+    commands = []
+
+    def fake_run(cmd, **_kwargs):
+        commands.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="3.13.17\n", stderr="")
+
+    monkeypatch.setattr(tools.subprocess, "run", fake_run)
+    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.17")
+
+    tools.docker_python("genotrance/px:0.13.0-mini", "Docker image", pull=False)
+
+    assert commands == [
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "python",
+            "genotrance/px:0.13.0-mini",
+            "-c",
+            "import platform;print(platform.python_version())",
+        ]
+    ]
 
 
 def test_docker_checks_base_and_each_built_image(monkeypatch):
     checked = []
     monkeypatch.setattr(tools, "get_argval", lambda _name: "")
-    monkeypatch.setattr(tools, "docker_python", lambda image, _target: checked.append(image))
+    monkeypatch.setattr(tools, "docker_python", lambda image, _target, pull=True: checked.append((image, pull)))
     monkeypatch.setattr(tools.os, "system", lambda _command: 0)
     monkeypatch.setattr(tools.sys, "argv", ["tools.py", "--docker"])
 
     tools.docker()
 
     assert checked == [
-        f"python:{tools.PY_MINOR}-alpine",
-        f"genotrance/px:{tools.__version__}-mini",
-        f"genotrance/px:{tools.__version__}",
+        (f"python:{tools.PY_MINOR}-alpine", True),
+        (f"genotrance/px:{tools.__version__}-mini", False),
+        (f"genotrance/px:{tools.__version__}", False),
     ]
+
+
+def test_release_workflow_skips_already_published_release_outputs():
+    build = (ROOT / ".github/workflows/build.yml").read_text()
+
+    assert "id: release_exists" in build
+    assert "steps.release_exists.outputs.exists != 'true'" in build
+    assert "skip-existing: true" in build
+    assert "id: docker_tags" in build
+    assert "--push-tags=${{ steps.docker_tags.outputs.push_tags }}" in build
+    assert "id: winget" in build
+    assert "steps.winget.outputs.publish == 'true'" in build
 
 
 MACHO = bytes.fromhex("cffaedfe") + b"\0" * 16

@@ -12,8 +12,6 @@ def state(**changes):
         "pypi": False,
         "github_release": False,
         "assets": set(),
-        "docker_tags": ["0.13.0", "latest"],
-        "winget": False,
     }
     result.update(changes)
     return result
@@ -35,26 +33,25 @@ def test_finish_for_every_existing_primary_publication_combination():
     assert plan(pypi=True, github_release=True)["mode"] == "finish"
 
 
-def test_complete_requires_every_publication_target():
+def test_complete_requires_pypi_and_every_github_asset():
     assert len(tools.expected_release_assets("0.13.0")) == 26
-    result = plan(
-        pypi=True,
-        github_release=True,
-        assets=tools.expected_release_assets("0.13.0"),
-        docker_tags=[],
-        winget=True,
-    )
+    result = plan(pypi=True, github_release=True, assets=tools.expected_release_assets("0.13.0"))
     assert result["mode"] == "complete"
     assert result["missing_assets"] == []
+    assert plan(pypi=False, github_release=True, assets=tools.expected_release_assets("0.13.0"))["mode"] == "finish"
 
 
-def test_partial_assets_docker_and_winget_are_reported():
+def test_partial_assets_are_reported():
     assets = tools.expected_release_assets("0.13.0") - {"px-v0.13.0-windows-amd64.zip.sha256"}
-    result = plan(pypi=True, github_release=True, assets=assets, docker_tags=["latest"], winget=False)
+    result = plan(pypi=True, github_release=True, assets=assets)
     assert result["mode"] == "finish"
     assert result["missing_assets"] == ["px-v0.13.0-windows-amd64.zip.sha256"]
-    assert result["docker_tags"] == ["latest"]
-    assert result["winget_exists"] is False
+
+
+def test_build_plan_leaves_docker_and_winget_to_publish_workflow():
+    result = plan(pypi=True, github_release=True, assets=tools.expected_release_assets("0.13.0"))
+    assert "docker_tags" not in result
+    assert "winget_exists" not in result
 
 
 def test_forced_modes_override_automatic_mode():
@@ -62,8 +59,6 @@ def test_forced_modes_override_automatic_mode():
         "pypi": True,
         "github_release": True,
         "assets": tools.expected_release_assets("0.13.0"),
-        "docker_tags": [],
-        "winget": True,
     }
     assert plan(forced="new", **complete)["mode"] == "new"
     assert plan(forced="finish")["mode"] == "finish"

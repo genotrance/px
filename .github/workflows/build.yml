@@ -1,4 +1,10 @@
 name: Build
+# publish.yml follows successful master runs and reads this title to skip
+# dry-run dispatches; push runs keep the commit message GitHub shows by default.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('Build {0} mode={1} dry_run={2}', github.ref_name, inputs.mode, inputs.dry_run)
+  || github.event.head_commit.message }}
 
 on:
   push:
@@ -39,8 +45,6 @@ jobs:
       pypi_exists: ${{ steps.plan.outputs.pypi_exists }}
       github_release_exists: ${{ steps.plan.outputs.github_release_exists }}
       missing_assets: ${{ steps.plan.outputs.missing_assets }}
-      docker_tags: ${{ steps.plan.outputs.docker_tags }}
-      winget_exists: ${{ steps.plan.outputs.winget_exists }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,8 +73,6 @@ jobs:
             echo "pypi_exists=$(echo "$PLAN" | jq -r .pypi_exists)"
             echo "github_release_exists=$(echo "$PLAN" | jq -r .github_release_exists)"
             echo "missing_assets=$(echo "$PLAN" | jq -c .missing_assets)"
-            echo "docker_tags=$(echo "$PLAN" | jq -r '.docker_tags | join(",")')"
-            echo "winget_exists=$(echo "$PLAN" | jq -r .winget_exists)"
           } >> "$GITHUB_OUTPUT"
           echo "### Release plan" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`json" >> "$GITHUB_STEP_SUMMARY"
@@ -345,7 +347,8 @@ jobs:
           PX_CI_MINIMAL: ${{ runner.os == 'macOS' && '1' || '' }}
         run: . ./build.sh && test_binary ${{ matrix.name }}
 
-  # Tag, create GitHub release, and publish to PyPI
+  # Tag, create GitHub release, and publish to PyPI. Docker Hub and Winget
+  # are published by publish.yml once this workflow succeeds on master.
   release:
     if: >-
       always() && github.ref == 'refs/heads/master' &&
@@ -405,9 +408,6 @@ jobs:
             [ -f "$archive" ] || { echo "::error::$archive is missing"; exit 1; }
             printf '%s  %s\n' "$(cat "$checksum")" "$archive" | sha256sum --check -
           done
-          mkdir -p px.dist-linux-musl-x86_64-wheels
-          tar -xzf "px-v$VERSION-linux-musl-x86_64-wheels.tar.gz" \
-            -C px.dist-linux-musl-x86_64-wheels
 
       - name: Restore missing checksums and PyPI assets
         if: needs.setup.outputs.mode == 'finish' && needs.setup.outputs.missing_assets != '[]'
@@ -473,49 +473,3 @@ jobs:
         with:
           packages-dir: artifacts/sdist/
           skip-existing: true
-
-      # v0.12.0's Docker Hub tag is a single amd64 manifest, so retain its
-      # architecture rather than silently dropping or adding a platform.
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Check Docker tags
-        id: docker_tags
-        run: echo "push_tags=${{ needs.setup.outputs.docker_tags }}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push Docker images
-        if: steps.docker_tags.outputs.push_tags != ''
-        run: python3 tools.py --docker --push --wheels-dir=${{ needs.setup.outputs.mode == 'new' && 'artifacts/binary-linux-musl-x86_64/px.dist-linux-musl-x86_64-wheels' || 'release/px.dist-linux-musl-x86_64-wheels' }}
-          --push-tags=${{ steps.docker_tags.outputs.push_tags }}
-
-      - name: Check Winget submission
-        id: winget
-        if: needs.setup.outputs.winget_exists != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          VERSION: ${{ needs.setup.outputs.version }}
-        run: |
-          manifest="manifests/g/genotrance/px/$VERSION"
-          if gh api "repos/microsoft/winget-pkgs/contents/$manifest" >/dev/null 2>&1; then
-            echo "Winget manifest for $VERSION already exists"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          elif test "$(gh pr list --repo microsoft/winget-pkgs --state open \
-            --search "genotrance.px $VERSION in:title" --json number --jq 'length')" != 0; then
-            echo "An open Winget submission for $VERSION already exists"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish to Winget
-        if: steps.winget.outputs.publish == 'true'
-        uses: vedantmgoyal9/winget-releaser@main
-        with:
-          identifier: genotrance.px
-          version: ${{ needs.setup.outputs.version }}
-          installers-regex: '-windows-amd64\.zip$'
-          release-tag: v${{ needs.setup.outputs.version }}
-          token: ${{ secrets.WINGET_TOKEN }}

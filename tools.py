@@ -828,36 +828,10 @@ def release_lookups(version):
 
     release = _command_json("gh", "release", "view", f"v{version}", "--repo", "genotrance/px", "--json", "assets")
     assets = {asset["name"] for asset in release["assets"]} if release else set()
-    manifest = (
-        subprocess.run(
-            (
-                "gh",
-                "api",
-                f"repos/microsoft/winget-pkgs/contents/manifests/g/genotrance/px/{version}",
-            ),
-            capture_output=True,
-        ).returncode
-        == 0
-    )
-    prs = _command_json(
-        "gh",
-        "pr",
-        "list",
-        "--repo",
-        "microsoft/winget-pkgs",
-        "--state",
-        "open",
-        "--search",
-        f"genotrance.px {version} in:title",
-        "--json",
-        "number",
-    )
     return {
         "pypi": pypi,
         "github_release": release is not None,
         "assets": assets,
-        "docker_tags": docker_plan(version),
-        "winget": manifest or bool(prs),
     }
 
 
@@ -865,13 +839,8 @@ def release_plan(version, forced="auto", dry_run=False, lookup=None):
     state = (lookup or release_lookups)(version)
     expected = expected_release_assets(version)
     missing_assets = sorted(expected - set(state["assets"]))
-    complete = (
-        state["pypi"]
-        and state["github_release"]
-        and not missing_assets
-        and not state["docker_tags"]
-        and state["winget"]
-    )
+    # Docker Hub and Winget are published by publish.yml after this build.
+    complete = state["pypi"] and state["github_release"] and not missing_assets
     if forced == "new":
         mode = "new"
     elif forced == "finish":
@@ -889,8 +858,6 @@ def release_plan(version, forced="auto", dry_run=False, lookup=None):
         "pypi_exists": state["pypi"],
         "github_release_exists": state["github_release"],
         "missing_assets": missing_assets,
-        "docker_tags": state["docker_tags"],
-        "winget_exists": state["winget"],
     }
 
 
@@ -989,7 +956,7 @@ Build:
 		Comma-separated Docker tags to push (default: all)
   --wheels-dir=DIR	Wheels directory (default: px.dist-linux-musl-x86_64-wheels)
 --docker-plan=VER	Print comma-separated Docker tags that need pushing for VER
---release-plan=VER	Print the release mode and missing publication targets as JSON
+--release-plan=VER	Print the release mode and missing PyPI/GitHub release assets as JSON
 --history	Print latest changelog section
 """)
 

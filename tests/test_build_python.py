@@ -165,12 +165,58 @@ def test_release_workflow_skips_already_published_release_outputs():
     assert "id: release_exists" in build
     assert "steps.release_exists.outputs.exists != 'true'" in build
     assert "skip-existing: true" in build
-    assert "id: docker_tags" in build
     assert 'python3 tools.py --release-plan="$VERSION"' in build
-    assert 'echo "push_tags=${{ needs.setup.outputs.docker_tags }}" >> "$GITHUB_OUTPUT"' in build
-    assert "--push-tags=${{ steps.docker_tags.outputs.push_tags }}" in build
-    assert "id: winget" in build
-    assert "steps.winget.outputs.publish == 'true'" in build
+
+
+def test_build_workflow_leaves_docker_and_winget_to_publish_workflow():
+    build = (ROOT / ".github/workflows/build.yml").read_text()
+
+    for publishing in ("DOCKERHUB", "WINGET", "docker/login-action", "winget", "--docker", "--push"):
+        assert publishing not in build
+    # publish.yml skips dispatched dry runs by this title.
+    assert "dry_run={2}" in build
+
+
+def test_publish_workflow_follows_master_builds_and_manual_dispatch():
+    publish = (ROOT / ".github/workflows/publish.yml").read_text()
+
+    assert "workflows: [Build]" in publish
+    assert "github.event.workflow_run.conclusion == 'success'" in publish
+    assert "github.event.workflow_run.head_branch == 'master'" in publish
+    assert "!contains(github.event.workflow_run.display_title, 'dry_run=true')" in publish
+    assert "version:" in publish and "required: true" in publish
+    assert "dry_run:" in publish
+    assert "permissions: {}" in publish
+
+
+def test_publish_workflow_uses_release_assets_without_building_or_testing():
+    publish = (ROOT / ".github/workflows/publish.yml").read_text()
+
+    for forbidden in ("download-artifact", "build.sh", "pytest", "tox", "uv run", "--wheel", "--nuitka", "--embed"):
+        assert forbidden not in publish
+    assert '--pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256"' in publish
+    assert 'ARCHIVE="px-v$VERSION-linux-musl-x86_64-wheels.tar.gz"' in publish
+    assert '"px-v$VERSION-windows-amd64.zip"' in publish
+
+
+def test_publish_workflow_pushes_only_planned_docker_tags_outside_dry_run():
+    publish = (ROOT / ".github/workflows/publish.yml").read_text()
+
+    assert 'TAGS=$(python3 tools.py --docker-plan="$VERSION")' in publish
+    assert 'python3 tools.py --docker --push --push-tags="$TAGS"' in publish
+    assert publish.count("python3 tools.py --docker --push") == 1
+    assert "steps.plan.outputs.tags != '' && env.DRY_RUN != 'true'" in publish
+    assert publish.count("secrets.DOCKERHUB_") == 2
+
+
+def test_publish_workflow_submits_winget_once_outside_dry_run():
+    publish = (ROOT / ".github/workflows/publish.yml").read_text()
+
+    assert 'gh api "repos/microsoft/winget-pkgs/contents/$manifest"' in publish
+    assert "gh pr list --repo microsoft/winget-pkgs --state open" in publish
+    assert "steps.winget.outputs.publish == 'true' && env.DRY_RUN != 'true'" in publish
+    assert 'komac update genotrance.px --version "$VERSION" --urls "$URL" --submit' in publish
+    assert publish.count("secrets.WINGET_TOKEN") == 1
 
 
 MACHO = bytes.fromhex("cffaedfe") + b"\0" * 16

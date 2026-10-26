@@ -1,0 +1,259 @@
+name: Publish
+# Publishes an existing GitHub release to Docker Hub and Winget. Nothing is
+# built or tested here except the Docker images, which install the released
+# linux-musl-x86_64 wheel archive; every input comes from the GitHub release.
+
+on:
+  # Follows every successful build.yml run on master, including the push made
+  # by auto-release.yml, so a new or completed release is published next.
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+  # Finishes or repeats publication of a release that already exists.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version to publish, for example 0.13.0
+        type: string
+        required: true
+      dry_run:
+        description: Report the Docker tags and Winget decision without publishing
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    # build.yml's run-name marks dispatched dry runs, which never publish.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      (github.event.workflow_run.event == 'push' ||
+      (github.event.workflow_run.event == 'workflow_dispatch' &&
+      !contains(github.event.workflow_run.display_title, 'dry_run=true'))))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.version.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
+      dry_run: ${{ steps.version.outputs.dry_run }}
+      windows_zip_url: ${{ steps.release.outputs.windows_zip_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The Docker build context and latest tags come from this checkout, so it
+      # must carry the requested version and descend from its release tag.
+      - name: Resolve version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: |
+          SOURCE=$(python3 -c "import re, pathlib; text = pathlib.Path('pyproject.toml').read_text(); m = re.search(r'version = \"(.+?)\"', text); print(m.group(1))")
+          if [ "$EVENT" = workflow_dispatch ]; then
+            VERSION=$(printf '%s' "$INPUT_VERSION" | tr -d '[:space:]')
+            VERSION=${VERSION#v}
+          else
+            VERSION=$SOURCE
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must look like 0.13.0 (got '$VERSION')."
+            exit 1
+          fi
+          if [ "$VERSION" != "$SOURCE" ]; then
+            echo "::error::$(git rev-parse --short HEAD) has version $SOURCE in pyproject.toml, not $VERSION; publish from the branch that released $VERSION."
+            exit 1
+          fi
+          if [ "$DRY_RUN" != true ] && [ "$EVENT" = workflow_dispatch ] && [ "$GITHUB_REF" != refs/heads/master ]; then
+            echo "::error::Publishing is master-only; dispatch from master or use dry_run."
+            exit 1
+          fi
+          git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null || {
+            echo "::error::Tag v$VERSION does not exist."
+            exit 1
+          }
+          git merge-base --is-ancestor "v$VERSION" HEAD || {
+            echo "::error::$(git rev-parse --short HEAD) does not contain tag v$VERSION."
+            exit 1
+          }
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "version=$VERSION"
+            echo "dry_run=$DRY_RUN"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing v$VERSION from $(git rev-parse --short HEAD) (dry run: $DRY_RUN)"
+
+      - name: Check release assets
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ASSETS=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets')
+          for name in "px-v$VERSION-linux-musl-x86_64-wheels.tar.gz" "px-v$VERSION-windows-amd64.zip"; do
+            for asset in "$name" "$name.sha256"; do
+              echo "$ASSETS" | jq -e --arg n "$asset" 'any(.[]; .name == $n)' >/dev/null || {
+                echo "::error::GitHub release v$VERSION has no $asset."
+                exit 1
+              }
+            done
+          done
+          URL=$(echo "$ASSETS" | jq -r --arg n "px-v$VERSION-windows-amd64.zip" '.[] | select(.name == $n) | .url')
+          echo "windows_zip_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Windows installer: $URL"
+
+  # v0.12.0's Docker Hub tag is a single amd64 manifest, so retain its
+  # architecture rather than silently dropping or adding a platform.
+  docker:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      # tools.py --docker builds from px.dist-linux-musl-x86_64-wheels/ by default.
+      - name: Download released wheel archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCHIVE="px-v$VERSION-linux-musl-x86_64-wheels.tar.gz"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --dir px.dist-linux-musl-x86_64-wheels \
+            --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256"
+          cd px.dist-linux-musl-x86_64-wheels
+          printf '%s  %s\n' "$(cat "$ARCHIVE.sha256")" "$ARCHIVE" | sha256sum --check -
+
+      - name: Plan Docker tags
+        id: plan
+        run: |
+          TAGS=$(python3 tools.py --docker-plan="$VERSION")
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "### Docker tags to push for v$VERSION: ${TAGS:-none}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Docker tags to push: ${TAGS:-none}"
+
+      - name: Log in to Docker Hub
+        if: steps.plan.outputs.tags != '' && env.DRY_RUN != 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # A dry run still builds and checks both images, but pushes nothing.
+      - name: Build and push Docker images
+        if: steps.plan.outputs.tags != ''
+        env:
+          TAGS: ${{ steps.plan.outputs.tags }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            python3 tools.py --docker
+          else
+            python3 tools.py --docker --push --push-tags="$TAGS"
+          fi
+
+      - name: Verify Docker tags
+        if: steps.plan.outputs.tags != '' && env.DRY_RUN != 'true'
+        run: |
+          LEFT=$(python3 tools.py --docker-plan="$VERSION")
+          if [ -n "$LEFT" ]; then
+            echo "::error::Docker tags still missing or stale after push: $LEFT"
+            exit 1
+          fi
+
+  winget:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
+      URL: ${{ needs.resolve.outputs.windows_zip_url }}
+      KOMAC_VERSION: 2.17.1
+    steps:
+      # Lookups use the workflow token; WINGET_TOKEN is only given to komac.
+      - name: Check Winget submission
+        id: winget
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          manifest="manifests/g/genotrance/px/$VERSION"
+          if gh api "repos/microsoft/winget-pkgs/contents/$manifest" --silent 2>err.txt; then
+            echo "Winget manifest for $VERSION already exists"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif ! grep -q "HTTP 404" err.txt; then
+            cat err.txt
+            echo "::error::Could not check the Winget manifest for $VERSION."
+            exit 1
+          fi
+          PRS=$(gh pr list --repo microsoft/winget-pkgs --state open \
+            --search "genotrance.px $VERSION in:title" --json number,title)
+          OPEN=$(echo "$PRS" | jq --arg v "$VERSION" \
+            '[.[] | select((.title | split(" ")) as $w | ($w | index("genotrance.px")) and ($w | index($v)))] | length')
+          if [ "$OPEN" != 0 ]; then
+            echo "An open Winget submission for $VERSION already exists"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify Windows installer
+        if: steps.winget.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ZIP="px-v$VERSION-windows-amd64.zip"
+          [ "$URL" = "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/$ZIP" ] || {
+            echo "::error::Unexpected Windows installer URL $URL"
+            exit 1
+          }
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$ZIP" --pattern "$ZIP.sha256"
+          printf '%s  %s\n' "$(cat "$ZIP.sha256")" "$ZIP" | sha256sum --check -
+          echo "### Winget: submit $URL$( [ "$DRY_RUN" = true ] && echo ' (dry run, not submitted)')" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install komac
+        if: steps.winget.outputs.publish == 'true' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCHIVE="komac-$KOMAC_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+          mkdir -p "$RUNNER_TEMP/komac"
+          cd "$RUNNER_TEMP/komac"
+          gh release download "v$KOMAC_VERSION" --repo russellbanks/Komac \
+            --pattern "$ARCHIVE" --pattern SHA256SUMS
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf "$ARCHIVE" komac
+          echo "$RUNNER_TEMP/komac" >> "$GITHUB_PATH"
+
+      # Syncing the winget-pkgs fork updates its workflow files, which is why
+      # WINGET_TOKEN needs the workflow scope as well as public_repo.
+      - name: Publish to Winget
+        if: steps.winget.outputs.publish == 'true' && env.DRY_RUN != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          KOMAC_FORK_OWNER: ${{ github.repository_owner }}
+          KOMAC_CREATED_WITH: px publish.yml
+          KOMAC_CREATED_WITH_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          komac sync-fork
+          komac update genotrance.px --version "$VERSION" --urls "$URL" --submit
+          komac cleanup --only-merged || echo "::warning::komac cleanup failed"

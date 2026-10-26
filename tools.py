@@ -750,8 +750,21 @@ def docker_plan(version, inspect=None, run=None):
         return r.stdout if r.returncode == 0 else None
 
     inspect = inspect or (
-        lambda tag: (sh("docker", "buildx", "imagetools", "inspect", "--format", "{{.Manifest.Digest}}", f"genotrance/px:{tag}") or "").strip()
-        or None
+        lambda tag: (
+            (
+                sh(
+                    "docker",
+                    "buildx",
+                    "imagetools",
+                    "inspect",
+                    "--format",
+                    "{{.Manifest.Digest}}",
+                    f"genotrance/px:{tag}",
+                )
+                or ""
+            ).strip()
+            or None
+        )
     )
     run = run or (lambda tag: sh("docker", "run", "--rm", "--entrypoint", "px", f"genotrance/px:{tag}", "--help"))
     digests = {}

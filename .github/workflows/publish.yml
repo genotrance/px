@@ -29,14 +29,10 @@ concurrency:
 
 jobs:
   resolve:
-    # build.yml's run-name marks dispatched dry runs, which never publish.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'master' &&
-      (github.event.workflow_run.event == 'push' ||
-      (github.event.workflow_run.event == 'workflow_dispatch' &&
-      !contains(github.event.workflow_run.display_title, 'dry_run=true'))))
+      github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     permissions:
       contents: read

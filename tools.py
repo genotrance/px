@@ -826,18 +826,19 @@ def release_lookups(version):
             raise
         pypi = False
 
-    release = _command_json(
-        "gh", "release", "view", f"v{version}", "--repo", "genotrance/px", "--json", "assets"
-    )
+    release = _command_json("gh", "release", "view", f"v{version}", "--repo", "genotrance/px", "--json", "assets")
     assets = {asset["name"] for asset in release["assets"]} if release else set()
-    manifest = subprocess.run(
-        (
-            "gh",
-            "api",
-            f"repos/microsoft/winget-pkgs/contents/manifests/g/genotrance/px/{version}",
-        ),
-        capture_output=True,
-    ).returncode == 0
+    manifest = (
+        subprocess.run(
+            (
+                "gh",
+                "api",
+                f"repos/microsoft/winget-pkgs/contents/manifests/g/genotrance/px/{version}",
+            ),
+            capture_output=True,
+        ).returncode
+        == 0
+    )
     prs = _command_json(
         "gh",
         "pr",

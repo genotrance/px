@@ -239,10 +239,7 @@ def check_python():
         print(f"ERROR: bundled CPython {have or 'unknown'} is not a {PY_MINOR}.x release")
         sys.exit(1)
     if version_tuple(have) < version_tuple(newest):
-        print(
-            f"WARNING: bundled CPython {have} is older than newest published "
-            f"{PY_MINOR}.x release {newest}"
-        )
+        print(f"WARNING: bundled CPython {have} is older than newest published {PY_MINOR}.x release {newest}")
 
 
 def check_embed():
@@ -367,10 +364,7 @@ def check_bundled_version(have, target):
         print(f"ERROR: {target} CPython {have or 'unknown'} is not a {PY_MINOR}.x release")
         sys.exit(1)
     if version_tuple(have) < version_tuple(newest):
-        print(
-            f"WARNING: {target} CPython {have} is older than newest published "
-            f"{PY_MINOR}.x release {newest}"
-        )
+        print(f"WARNING: {target} CPython {have} is older than newest published {PY_MINOR}.x release {newest}")
 
 
 def docker_python(image, target):

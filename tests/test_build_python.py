@@ -47,7 +47,10 @@ def test_check_python_warns_when_upstream_is_newer(monkeypatch, capsys):
 
     tools.check_python()
 
-    assert "WARNING: bundled CPython 3.13.17 is older than newest published 3.13.x release 3.13.18" in capsys.readouterr().out
+    assert (
+        "WARNING: bundled CPython 3.13.17 is older than newest published 3.13.x release 3.13.18"
+        in capsys.readouterr().out
+    )
 
 
 def test_check_python_rejects_wrong_minor(monkeypatch):
@@ -65,7 +68,10 @@ def test_check_embed_uses_newest_available_zip_and_warns_when_it_lags(monkeypatc
     monkeypatch.setattr(tools, "latest_python", latest_python)
 
     assert tools.check_embed() == "3.13.17"
-    assert "WARNING: python.org has no python-3.13.18-embed-amd64.zip for newest 3.13.x release 3.13.18; bundling available 3.13.17" in capsys.readouterr().out
+    assert (
+        "WARNING: python.org has no python-3.13.18-embed-amd64.zip for newest 3.13.x release 3.13.18; bundling available 3.13.17"
+        in capsys.readouterr().out
+    )
 
 
 def test_check_bundled_version_warns_when_upstream_is_newer(monkeypatch, capsys):
@@ -73,7 +79,10 @@ def test_check_bundled_version_warns_when_upstream_is_newer(monkeypatch, capsys)
 
     tools.check_bundled_version("3.13.17", "test image")
 
-    assert "WARNING: test image CPython 3.13.17 is older than newest published 3.13.x release 3.13.18" in capsys.readouterr().out
+    assert (
+        "WARNING: test image CPython 3.13.17 is older than newest published 3.13.x release 3.13.18"
+        in capsys.readouterr().out
+    )
 
 
 def test_embed_rejects_requested_version_other_than_newest_available_zip(monkeypatch, tmp_path):
@@ -98,7 +107,10 @@ def test_docker_python_warns_when_upstream_is_newer(monkeypatch, capsys):
 
     tools.docker_python(f"python:{tools.PY_MINOR}-alpine", "Docker base image")
 
-    assert "WARNING: Docker base image CPython 3.13.10 is older than newest published 3.13.x release 3.13.18" in capsys.readouterr().out
+    assert (
+        "WARNING: Docker base image CPython 3.13.10 is older than newest published 3.13.x release 3.13.18"
+        in capsys.readouterr().out
+    )
 
 
 def test_docker_checks_base_and_each_built_image(monkeypatch):

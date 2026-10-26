@@ -131,18 +131,12 @@ install_managed_python() {
     PY=$(uv python find --no-project --managed-python "$PY_MINOR")
 }
 
-# Fail unless interpreter $1 is the newest published release of PY_MINOR
-# (fetched from python.org at run time). Prints the bundled version.
-check_python() {
-    "$1" tools.py --check-python
-}
-
-# Set PY to the interpreter to bundle for this platform, failing early if it
-# is not the newest published release of PY_MINOR. Linux glibc prefers the
-# manylinux image's python and falls back to a uv-managed one when the image
-# is stale; musl always uses a uv-managed one (Alpine's apk python is a
-# different minor release); macOS always uses a uv-managed one because
-# setup-python's macOS CPython links Homebrew's OpenSSL by absolute path.
+# Set PY to the interpreter to bundle for this platform, and log its version.
+# Linux glibc compares the manylinux image's python with a freshly installed
+# uv-managed one and uses whichever is newer (no python.org lookup); musl
+# always uses a uv-managed one (Alpine's apk python is a different minor
+# release); macOS always uses a uv-managed one because setup-python's macOS
+# CPython links Homebrew's OpenSSL by absolute path.
 select_python() {
     OS=$(get_os)
     PY=""
@@ -151,35 +145,19 @@ select_python() {
             install_managed_python
             ;;
         linux-glibc)
-            PY="/opt/python/cp$(echo "$PY_MINOR" | tr -d .)-cp$(echo "$PY_MINOR" | tr -d .)/bin/python3"
-            if ! check_python "$PY"; then
-                echo "manylinux python is stale, using uv-managed CPython $PY_MINOR"
-                install_managed_python
+            MANYLINUX_PY="/opt/python/cp$(echo "$PY_MINOR" | tr -d .)-cp$(echo "$PY_MINOR" | tr -d .)/bin/python3"
+            install_managed_python
+            MANYLINUX_VERSION=$("$MANYLINUX_PY" -V | awk '{print $2}')
+            MANAGED_VERSION=$("$PY" -V | awk '{print $2}')
+            if [ "$(printf '%s\n%s\n' "$MANYLINUX_VERSION" "$MANAGED_VERSION" | sort -V | tail -1)" = "$MANYLINUX_VERSION" ]; then
+                PY="$MANYLINUX_PY"
             fi
             ;;
         windows)
             PY=$(uv python find "$PY_MINOR")
             ;;
     esac
-    if [ "$OS" = "windows" ]; then
-        "$PY" tools.py --check-embed
-    else
-        check_python "$PY"
-    fi
-}
-
-# Pre-build guard: resolve the interpreter that build_binary will bundle and
-# fail if it is not the newest published release of PY_MINOR
-check_bundled_python() {
-    NAME="$1"
-    OS=$(get_os)
-    case "$OS" in
-        linux-musl) install_alpine_deps ;;
-        linux-glibc) setup_manylinux ;;
-        mac|windows) ensure_uv ;;
-    esac
-    select_python
-    echo "Python bundled in ${NAME}: $("$PY" -V) ($PY)"
+    echo "Python bundled: $("$PY" -V) ($PY)"
 }
 
 smoke_binary() {

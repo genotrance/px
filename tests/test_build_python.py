@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ assert _spec.loader is not None
 _spec.loader.exec_module(tools)
 
 
-def test_latest_python_selects_newest_embeddable_release(monkeypatch):
+def test_latest_python_selects_newest_release_with_requested_asset(monkeypatch):
     listings = {
         tools.PY_FTP: """
             <a href="3.13.14/">3.13.14/</a>
@@ -24,32 +25,58 @@ def test_latest_python_selects_newest_embeddable_release(monkeypatch):
     assert tools.latest_python(asset=tools.PY_EMBED) == "3.13.17"
 
 
-def test_check_embed_rejects_newest_release_without_embed_zip(monkeypatch):
-    def latest_python(_minor=tools.PY_MINOR, asset=None):
-        return "3.13.17" if asset is None else "3.13.16"
+def test_latest_python_skips_release_without_requested_asset_yet(monkeypatch):
+    # python.org has published 3.13.17 but the embed zip for it is not up
+    # yet; this must not fail, just use the newest release that has one.
+    listings = {
+        tools.PY_FTP: """
+            <a href="3.13.16/">3.13.16/</a>
+            <a href="3.13.17/">3.13.17/</a>
+        """,
+        f"{tools.PY_FTP}3.13.17/": '<a href="Python-3.13.17.tar.xz">',
+        f"{tools.PY_FTP}3.13.16/": '<a href="python-3.13.16-embed-amd64.zip">',
+    }
+    monkeypatch.setattr(tools, "fetch_text", listings.__getitem__)
 
-    monkeypatch.setattr(tools, "latest_python", latest_python)
-
-    with pytest.raises(SystemExit):
-        tools.check_embed()
+    assert tools.latest_python(asset=tools.PY_EMBED) == "3.13.16"
 
 
-def test_check_bundled_version_rejects_stale_patch(monkeypatch):
-    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.17")
-
-    with pytest.raises(SystemExit):
-        tools.check_bundled_version("3.13.16", "test image")
-
-
-def test_embed_rejects_requested_stale_patch(monkeypatch, tmp_path):
+def test_embed_does_not_reject_requested_older_patch(monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tools, "check_embed", lambda: "3.13.17")
+    monkeypatch.setattr(tools, "latest_python", lambda asset=None: "3.13.17")
     monkeypatch.setattr(tools, "get_argval", lambda _name: "3.13.16")
     _, _, wheels_dir = tools.get_paths("px.dist", "wheels")
     Path(wheels_dir).mkdir(parents=True)
 
-    with pytest.raises(SystemExit):
+    class ReachedDownload(Exception):
+        pass
+
+    def fake_curl(*_args, **_kwargs):
+        raise ReachedDownload
+
+    monkeypatch.setattr(tools, "curl", fake_curl)
+
+    # A requested patch older than the newest published release must still be
+    # attempted (reaches the download), not rejected before it.
+    with pytest.raises(ReachedDownload):
         tools.embed()
+
+    assert "Bundling CPython 3.13.16" in capsys.readouterr().out
+
+
+def test_docker_python_logs_version_without_freshness_check(monkeypatch, capsys):
+    def fake_run(cmd, **_kwargs):
+        if cmd[:2] == ["docker", "pull"]:
+            return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 0, stdout="3.13.10\n", stderr="")
+
+    monkeypatch.setattr(tools.subprocess, "run", fake_run)
+
+    # An older patch than whatever python.org has published must not fail -
+    # docker_python only pulls, runs and logs the bundled version.
+    tools.docker_python(f"python:{tools.PY_MINOR}-alpine", "Docker base image")
+
+    assert "Docker base image bundles CPython 3.13.10" in capsys.readouterr().out
 
 
 def test_docker_checks_base_and_each_built_image(monkeypatch):

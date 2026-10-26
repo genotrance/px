@@ -136,8 +136,6 @@ run_target() {
     mkdir -p "$bdir/px.dist-$name-wheels/px.dist" "$bdir/wheel"
     cp "$wdir"/wheels/*.whl "$bdir/px.dist-$name-wheels/px.dist/"
     cp "$ROOT"/sdist/wheel/* "$bdir/wheel/"
-    stage "$bdir" check-python run_in "$bdir" "$binary_image" "$binary_shell" \
-        ". /px/build.sh && check_bundled_python $name"
     stage "$bdir" binary run_in "$bdir" "$binary_image" "$binary_shell" \
         ". /px/build.sh && build_binary $name"
 

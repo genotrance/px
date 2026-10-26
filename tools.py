@@ -216,7 +216,9 @@ def latest_python(minor=PY_MINOR, asset=None):
     Newest published CPython patch release of a minor version on python.org
 
     asset - file name template ({} is the version) that the release must ship,
-            defaults to the source tarball
+            defaults to the source tarball. Used both to pick the Windows
+            embeddable zip to bundle and, by tools/auto_release.py, to detect
+            a new upstream patch worth cutting an automatic release for.
     """
     listing = fetch_text(PY_FTP)
     versions = {v for v in re.findall(r'href="(\d+\.\d+\.\d+)/"', listing) if v.rsplit(".", 1)[0] == minor}
@@ -227,29 +229,6 @@ def latest_python(minor=PY_MINOR, asset=None):
 
     print(f"No published CPython {minor}.x release found on {PY_FTP}")
     sys.exit(1)
-
-
-def check_python():
-    """Fail unless this interpreter is the newest published release of PY_MINOR"""
-    have = platform.python_version()
-    m = re.match(r"\d+\.\d+\.\d+", have)
-    have = m.group(0) if m else have
-    newest = latest_python()
-    print(f"Bundled CPython {have} ({sys.executable}), newest published {PY_MINOR}.x is {newest}")
-    if have.rsplit(".", 1)[0] != PY_MINOR or version_tuple(have) < version_tuple(newest):
-        print(f"ERROR: bundled CPython {have} is not the newest {PY_MINOR}.x release {newest}")
-        sys.exit(1)
-
-
-def check_embed():
-    """Fail unless the Windows embeddable zip selected is the newest published release of PY_MINOR"""
-    newest = latest_python()
-    embed = latest_python(asset=PY_EMBED)
-    print(f"Windows embed will bundle CPython {embed}, newest published {PY_MINOR}.x is {newest}")
-    if embed != newest:
-        print(f"ERROR: python.org has no {PY_EMBED.format(newest)} for the newest {PY_MINOR}.x release yet")
-        sys.exit(1)
-    return embed
 
 
 HOST_LIB_PREFIXES = ("/opt/homebrew", "/usr/local")
@@ -350,17 +329,8 @@ def check_ssl():
             sys.exit(1)
 
 
-def check_bundled_version(have, target):
-    """Fail unless target reports the newest published PY_MINOR release."""
-    newest = latest_python()
-    print(f"{target} bundles CPython {have}, newest published {PY_MINOR}.x is {newest}")
-    if not have.startswith(PY_MINOR + ".") or version_tuple(have) < version_tuple(newest):
-        print(f"ERROR: {target} CPython {have or 'unknown'} is not the newest {PY_MINOR}.x release {newest}")
-        sys.exit(1)
-
-
 def docker_python(image, target):
-    """Pull and check a Docker base or output image's bundled interpreter."""
+    """Pull an image and log its bundled CPython version (informational only)."""
     ret = subprocess.run(["docker", "pull", image])
     if ret.returncode != 0:
         print(f"Failed to pull {image}")
@@ -382,7 +352,7 @@ def docker_python(image, target):
     if res.returncode != 0:
         print(f"Failed to get the Python version from {target}: {res.stderr.strip()}")
         sys.exit(1)
-    check_bundled_version(res.stdout.strip(), target)
+    print(f"{target} bundles CPython {res.stdout.strip()}")
 
 
 # Build
@@ -513,14 +483,10 @@ def embed():
     rmtree(outdir)
     os.makedirs(dist, exist_ok=True)
 
-    # Always select the newest published release of PY_MINOR. Preserve --tag
-    # for callers that provide the current version explicitly, but reject a
-    # stale value before downloading or packaging it.
-    newest = check_embed()
-    version = get_argval("tag").lstrip("v") or newest
-    if version != newest:
-        print(f"ERROR: requested CPython {version}, but newest {PY_MINOR}.x release is {newest}")
-        sys.exit(1)
+    # Select the newest published release of PY_MINOR that has an embeddable
+    # zip on python.org; --tag overrides it for callers that want a specific
+    # version instead.
+    version = get_argval("tag").lstrip("v") or latest_python(asset=PY_EMBED)
     dlurl = PY_FTP + f"{version}/" + PY_EMBED.format(version)
     print(f"Bundling CPython {version} (Windows embeddable): {dlurl}")
 
@@ -693,8 +659,8 @@ def docker():
     dbuild += " -f docker/Dockerfile"
     push = "--push" in sys.argv
 
-    # Check the moving base-image tag before doing either expensive image build.
-    # docker build --pull below then guarantees it uses this freshly checked tag.
+    # docker build --pull below always fetches the current tag; log its
+    # version before doing either expensive image build.
     docker_python(f"python:{PY_MINOR}-alpine", "Docker base image")
 
     # Build mini image
@@ -760,12 +726,6 @@ def main():
         if "--docker" in sys.argv:
             docker()
 
-    if "--check-python" in sys.argv:
-        check_python()
-
-    if "--check-embed" in sys.argv:
-        check_embed()
-
     if "--check-ssl" in sys.argv:
         check_ssl()
 
@@ -789,8 +749,6 @@ def main():
     if len(sys.argv) == 1:
         print(f"""
 Build:
---check-python	Fail unless this Python is the newest published {PY_MINOR}.x
---check-embed	Fail unless the Windows embeddable zip is the newest published {PY_MINOR}.x
 --check-ssl	Fail unless ssl and spnego import and do not link Homebrew or /usr/local libraries (macOS)
 --check-portable DIR	Fail if a Mach-O file under DIR links /opt/homebrew or /usr/local
 --wheel		Build wheels for pypi.org

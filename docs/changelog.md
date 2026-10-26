@@ -47,6 +47,12 @@
   and Winget submissions are left unchanged.
 
 ### Internal
+- Docker Hub and Winget publishing moved from `build.yml` into a new
+  `publish.yml` workflow. It runs after each successful `master` build, or by
+  manual dispatch for a given version with a dry run option, and publishes
+  only from the existing GitHub release's assets without rebuilding or
+  retesting. Docker pushes only tags `tools.py --docker-plan` reports missing
+  or stale, and Winget is skipped when a manifest or open PR exists.
 - Split release automation into new, finish, and complete plans. Partial
   releases now reuse and verify GitHub release artifacts without rebuilding or
   rerunning CI, while dry-run dispatches report missing publication targets.

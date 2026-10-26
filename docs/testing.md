@@ -23,7 +23,7 @@ Tests live in `tests/`.
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
 | `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
 | `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
-| `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks |
+| `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split |
 | `test_ci_matrix.py` | `tools/ci_matrix.py` — fast vs full mode, marker expression and matrix contents |
 | `test_auto_release.py` | `tools/auto_release.py` — version bump and dependency-change helpers for the automatic release |
 | `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |

@@ -158,20 +158,22 @@ summary without pushing a branch, dispatching CI, or publishing.
 
 ### Build (`build.yml`)
 
-Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`). The
-`setup` job asks PyPI, GitHub Releases, Docker Hub, and Winget what already
-exists and selects one of three modes:
+Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`).
+`build.yml` builds and tests every release artifact, uploads to PyPI, and
+creates the GitHub release; Docker Hub and Winget are published afterwards by
+`publish.yml` (below). The `setup` job asks PyPI and GitHub Releases what
+already exists and selects one of three modes:
 
 - **new** — neither PyPI nor a GitHub release has this version. Run full CI
-  (for a manual dispatch), build and test every artifact, then publish all
-  targets on `master`.
+  (for a manual dispatch), build and test every artifact, then publish to PyPI
+  and GitHub Releases on `master`.
 - **finish** — PyPI and/or the GitHub release already exists but one or more
-  targets are incomplete. Do not run CI or rebuild/retest artifacts. Download
+  assets are missing. Do not run CI or rebuild/retest artifacts. Download
   the GitHub release assets, verify every archive that has a `.sha256` file,
-  and publish only missing release assets, Docker tags, and the Winget
-  submission. PyPI is never republished in this mode.
-- **complete** — PyPI, all 26 GitHub assets, Docker tags, and Winget are
-  present. The workflow emits a notice and does nothing.
+  and upload only missing release assets. PyPI is never republished in this
+  mode.
+- **complete** — PyPI and all 26 GitHub assets are present. The workflow emits
+  a notice and does nothing, and still succeeds, so `publish.yml` follows it.
 
 A manual dispatch accepts `mode=auto|new|finish` (default `auto`) and a
 `dry_run` boolean. A forced mode overrides mode selection, although forced
@@ -191,21 +193,68 @@ building, archive extraction, and test execution) is implemented as shell
 functions in `build.sh` and called from the workflow steps.
 
 The automatic release workflow bumps `pyproject.toml` before updating
-`master`, so its resulting build always selects `new`. The release job is safe
-to re-run a version whose publishing stopped partway through: finish mode
-reuses the immutable GitHub assets and only pushes Docker tags that are missing
-or do not identify the release version. `latest` and `latest-mini` are
+`master`, so its resulting build always selects `new`, and `publish.yml`
+follows the successful build. The release job is safe to re-run a version
+whose publishing stopped partway through: finish mode reuses the immutable
+GitHub assets. Publication is equally safe to repeat: `publish.yml` only
+pushes Docker tags that are missing or do not identify the release version. `latest` and `latest-mini` are
 updated when missing, when their digest differs from the version tag, or when
 the version tag is being pushed. This decision lives in `docker_plan()` in
 `tools.py` (`python3 tools.py --docker-plan=VERSION` prints the tags to push)
-and is tested through the CLI path in `tests/test_build_python.py`. The
-workflow computes the plan before writing its GitHub output, so a planning
-failure stops the release instead of silently skipping the Docker push. It also
+and is tested through the CLI path in `tests/test_build_python.py`.
+`publish.yml` computes the plan before writing its GitHub output, so a planning
+failure stops publication instead of silently skipping the Docker push. It also
 does not open a duplicate Winget submission when the manifest exists or an
 open `genotrance.px` pull request for that version exists. `docker manifest
 inspect --verbose genotrance/px:0.12.0` reports one `linux/amd64` manifest, so
 the release continues to build and publish amd64 images; no prior Docker
 architecture is dropped.
+
+### Publish (`publish.yml`)
+
+Publishes an existing GitHub release to Docker Hub and Winget. It never builds
+release binaries or wheels and never runs the test suite; its only inputs are
+the release's assets, and the only thing it builds is the Docker images, from
+the released `px-v<VERSION>-linux-musl-x86_64-wheels.tar.gz`. Splitting it
+from `build.yml` keeps the Docker Hub and Winget secrets out of the long build
+and lets publication be finished or repeated without touching PyPI or the
+GitHub release.
+
+It runs in two ways:
+
+- **After `build.yml`** (`workflow_run`). It proceeds only when the build
+  concluded `success` on `master`. Builds dispatched with `dry_run=true` are
+  skipped: `build.yml`'s `run-name` records `dry_run=` for dispatches and
+  `publish.yml` checks that title. The version is read from `pyproject.toml`
+  at the build's commit. Because `workflow_run` workflows run from the default
+  branch, `publish.yml` must also be present on `devel`.
+- **Manual dispatch** with a required `version` (`0.13.0` or `v0.13.0`) and a
+  `dry_run` boolean (default `true`), to finish or repeat publication of a
+  release. A real publication must be dispatched from `master`.
+
+The `resolve` job checks out the build's commit (or the dispatched ref) and
+requires it to carry the requested version in `pyproject.toml` and to contain
+the `v<VERSION>` tag. This keeps an old version from being republished as
+`latest` from newer sources, and lets the current `tools.py` (with
+`--docker-plan`) publish a release whose own tag predates it, as v0.13.0's
+does. It then requires the release to have the musl wheel archive, the
+Windows zip and their `.sha256` files.
+
+The `docker` job downloads and verifies the wheel archive into
+`px.dist-linux-musl-x86_64-wheels/`, runs `tools.py --docker-plan=VERSION` and,
+when tags are needed, builds both images with `tools.py --docker` (which checks
+the base image and the local build output's CPython version). Only outside a
+dry run does it log in to Docker Hub, push exactly the planned tags with
+`--push-tags`, and re-run the plan to confirm nothing is left. The `winget`
+job checks for an existing `manifests/g/genotrance/px/<VERSION>` manifest or
+an open `genotrance.px <VERSION>` pull request using the workflow token, then
+verifies the released `px-v<VERSION>-windows-amd64.zip` against its checksum.
+Outside a dry run it installs a pinned, checksum-verified
+[komac](https://github.com/russellbanks/Komac), syncs the `winget-pkgs` fork
+and submits that zip's release URL. `WINGET_TOKEN` is only given to that step;
+it needs the `workflow` scope as well as `public_repo` because syncing the
+fork updates its workflow files. Docker Hub secrets are only used by the login
+step. Every job has read-only `contents` permission.
 
 To finish a partial release such as v0.13.0:
 
@@ -213,17 +262,16 @@ To finish a partial release such as v0.13.0:
    cannot recreate a missing binary or wheel archive without violating the
    no-rebuild rule, so it stops with an actionable error if one is absent. It
    can restore a missing checksum from its archive and the PyPI wheel/sdist
-   from PyPI.
-2. Preview the detected gaps with
-   `gh workflow run build.yml --ref master -f mode=finish -f dry_run=true`.
-   Inspect the `Release plan` workflow summary.
-3. Run the same command with `dry_run=false`. The workflow downloads and
-   verifies the v0.13.0 assets, extracts
-   `px-v0.13.0-linux-musl-x86_64-wheels.tar.gz` for the Docker build, runs
-   `tools.py --docker-plan=0.13.0`, pushes only missing/stale tags, and submits
-   Winget only if neither a manifest nor an open PR exists.
-4. Dispatch once more with `mode=auto` and `dry_run=true`; the plan should be
-   `complete`. A later push of the same fully published version is a no-op.
+   from PyPI. Run `gh workflow run build.yml --ref master -f mode=finish` if
+   the build plan is not `complete`.
+2. Preview publication with
+   `gh workflow run publish.yml --ref master -f version=0.13.0 -f dry_run=true`.
+   The summary lists the Docker tags to push and the Winget URL to submit.
+3. Run the same command with `dry_run=false`. The workflow pushes only the
+   missing/stale tags and submits Winget only if neither a manifest nor an
+   open PR exists.
+4. Dispatch the dry run once more; it should report no Docker tags and an
+   existing Winget submission. Later runs for the same version are no-ops.
 
 If PyPI has the version but no GitHub release, finish mode stops rather than
 inventing untested binaries. Recover the original release archives and create
@@ -353,11 +401,12 @@ resolve the newest release from PyPI.
   durations. Linux and Windows retain their complete artifact tests.
 - **release** — on `master` only: publishes the sdist and wheel to PyPI using
   trusted publishing, creates and pushes a version tag, creates a GitHub
-  release with changelog notes extracted via `tools.py --history`, submits
-  the Windows installer to [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
-  via `vedantmgoyal9/winget-releaser`, and builds and pushes Docker images
-  to Docker Hub. The Winget step requires a `WINGET_TOKEN` repository secret
-  (classic PAT with `public_repo` scope).
+  release with changelog notes extracted via `tools.py --history`. Docker
+  Hub images and the Windows installer's
+  [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
+  submission are published by `publish.yml` once the build succeeds. Winget
+  submission requires a `WINGET_TOKEN` repository secret (classic PAT with
+  `public_repo` and `workflow` scopes).
 
 ### Local release check (`tools/release-check.sh`)
 
@@ -465,8 +514,8 @@ environment variables for credentials. The full image requires
 libcap-ng which aborts without the `IPC_LOCK` capability in containers.
 Mounted keyring volumes must be owned by `root` with mode `700` inside the
 container; gnome-keyring-daemon 48+ refuses to create the collection otherwise.
-Images are built and pushed automatically
-as part of the `release` job in `build.yml` on merge to `master`. Docker Hub
+Images are built from the released musl wheel archive and pushed automatically
+by `publish.yml` after a successful `build.yml` run on `master`. Docker Hub
 credentials are stored as repository secrets (`DOCKERHUB_USERNAME` and
 `DOCKERHUB_TOKEN`).
 

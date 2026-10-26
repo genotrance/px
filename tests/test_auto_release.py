@@ -28,3 +28,13 @@ def test_dependency_changes_lists_updates_additions_and_removals():
         "`removed` 1 -> removed",
         "`updated` 1 -> 2",
     ]
+
+
+def test_workflow_dispatches_release_build_after_master_push():
+    text = (Path(__file__).resolve().parent.parent / ".github/workflows/auto-release.yml").read_text()
+    push = text.index("name: Fast-forward master")
+    step = text.index("name: Dispatch release build on master")
+    assert push < step
+    block = text[step:text.index("name: Merge released master into devel")]
+    assert "if: steps.publish.outcome == 'success'" in block
+    assert "gh workflow run build.yml --ref master" in block

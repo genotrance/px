@@ -22,8 +22,7 @@ get_os() {
 }
 
 # CPython minor version bundled in every binary (keep in sync with PY_MINOR in
-# tools.py). The newest published patch release is always used, never a pinned
-# patch version.
+# tools.py). Build tools select their newest available patch version.
 PY_MINOR="${PY_MINOR:-3.13}"
 # Nuitka 4.2+ bundles SCons 4.10.1, which cannot select the linker in the
 # manylinux2014 GCC 10 environment. Keep every binary target on the newest
@@ -131,7 +130,8 @@ install_managed_python() {
     PY=$(uv python find --no-project --managed-python "$PY_MINOR")
 }
 
-# Set PY to the interpreter to bundle for this platform, and log its version.
+# Set PY to the interpreter to bundle for this platform, validate its minor,
+# and warn (without failing) if python.org has a newer patch.
 # Linux glibc compares the manylinux image's python with a freshly installed
 # uv-managed one and uses whichever is newer (no python.org lookup); musl
 # always uses a uv-managed one (Alpine's apk python is a different minor
@@ -157,7 +157,24 @@ select_python() {
             PY=$(uv python find "$PY_MINOR")
             ;;
     esac
-    echo "Python bundled: $("$PY" -V) ($PY)"
+    if [ "$OS" = "windows" ]; then
+        "$PY" tools.py --check-embed
+    else
+        "$PY" tools.py --check-python
+    fi
+}
+
+# Resolve and validate the interpreter that build_binary will bundle.
+check_bundled_python() {
+    NAME="$1"
+    OS=$(get_os)
+    case "$OS" in
+        linux-musl) install_alpine_deps ;;
+        linux-glibc) setup_manylinux ;;
+        mac|windows) ensure_uv ;;
+    esac
+    select_python
+    echo "Python bundled in ${NAME}: $("$PY" -V) ($PY)"
 }
 
 smoke_binary() {

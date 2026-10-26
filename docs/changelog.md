@@ -109,14 +109,14 @@
   CI matrix, and only then fast-forwards `master` to start release builds.
   Manual dry runs report candidates without pushing or publishing, and failed
   CI runs update a single `auto-release blocked` issue.
-- Removed the release-build check that failed every binary and Docker job
-  whenever python.org had published a newer CPython 3.13 patch than uv's
+- Changed the release-build CPython freshness guards to warn rather than fail
+  when python.org has published a newer 3.13 patch than uv's
   python-build-standalone, `actions/setup-python`, the Windows embed zip
-  index, or the `python:3.13-alpine` image provided yet; this blocked all 6
-  binary jobs in release-build dry run 40266792761 the day 3.13.18 appeared.
-  Builds still bundle and log the newest patch each tool offers, and the new
-  weekly automatic release above keeps that patch current without a gate that
-  fails on upstream timing it cannot control.
+  index, or the `python:3.13-alpine` image provides. This blocked all 6 binary
+  jobs in release-build dry run 40266792761 the day 3.13.18 appeared. Builds
+  still reject a missing, unparsable, or wrong-minor interpreter, bundle and
+  log the newest patch each tool offers, and rely on automatic releases to
+  keep that patch current.
 - The test helper now starts every Px instance with an explicit empty config
   file so a `px.ini` that `test_config` temporarily writes next to the px
   script under `pytest -n auto` can no longer leak into other tests' Px

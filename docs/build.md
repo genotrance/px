@@ -158,8 +158,26 @@ summary without pushing a branch, dispatching CI, or publishing.
 
 ### Build (`build.yml`)
 
-Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`). A
-manual dispatch on `devel` is the single pre-release gate: it calls `ci.yml`
+Triggered by pushes to `master` and manual dispatch (`workflow_dispatch`). The
+`setup` job asks PyPI, GitHub Releases, Docker Hub, and Winget what already
+exists and selects one of three modes:
+
+- **new** — neither PyPI nor a GitHub release has this version. Run full CI
+  (for a manual dispatch), build and test every artifact, then publish all
+  targets on `master`.
+- **finish** — PyPI and/or the GitHub release already exists but one or more
+  targets are incomplete. Do not run CI or rebuild/retest artifacts. Download
+  the GitHub release assets, verify every archive that has a `.sha256` file,
+  and publish only missing release assets, Docker tags, and the Winget
+  submission. PyPI is never republished in this mode.
+- **complete** — PyPI, all 26 GitHub assets, Docker tags, and Winget are
+  present. The workflow emits a notice and does nothing.
+
+A manual dispatch accepts `mode=auto|new|finish` (default `auto`) and a
+`dry_run` boolean. A forced mode overrides mode selection, although forced
+`new` still uses PyPI's skip-existing protection. A dry run records the plan
+and may run the non-publishing new-release build/gate, but never publishes.
+A manual dispatch on `devel` in new mode is the single pre-release gate: it calls `ci.yml`
 with its full matrix at the same time as the release artifact jobs, so it
 checks every CI configuration plus every wheel, binary and built-artifact test
 before a merge to `master`. Run it with `gh workflow run build.yml --ref devel`
@@ -172,10 +190,11 @@ condition. All CI scaffolding (environment setup, wheel building, binary
 building, archive extraction, and test execution) is implemented as shell
 functions in `build.sh` and called from the workflow steps.
 
-The release job is safe to re-run a version whose publishing stopped partway
-through: it leaves an existing GitHub tag and release untouched, lets PyPI
-ignore an already-uploaded distribution, and only pushes Docker tags that are
-missing or do not identify the release version. `latest` and `latest-mini` are
+The automatic release workflow bumps `pyproject.toml` before updating
+`master`, so its resulting build always selects `new`. The release job is safe
+to re-run a version whose publishing stopped partway through: finish mode
+reuses the immutable GitHub assets and only pushes Docker tags that are missing
+or do not identify the release version. `latest` and `latest-mini` are
 updated when missing, when their digest differs from the version tag, or when
 the version tag is being pushed. This decision lives in `docker_plan()` in
 `tools.py` (`python3 tools.py --docker-plan=VERSION` prints the tags to push)
@@ -187,6 +206,28 @@ open `genotrance.px` pull request for that version exists. `docker manifest
 inspect --verbose genotrance/px:0.12.0` reports one `linux/amd64` manifest, so
 the release continues to build and publish amd64 images; no prior Docker
 architecture is dropped.
+
+To finish a partial release such as v0.13.0:
+
+1. Confirm its GitHub release contains the platform archives. Finish mode
+   cannot recreate a missing binary or wheel archive without violating the
+   no-rebuild rule, so it stops with an actionable error if one is absent. It
+   can restore a missing checksum from its archive and the PyPI wheel/sdist
+   from PyPI.
+2. Preview the detected gaps with
+   `gh workflow run build.yml --ref master -f mode=finish -f dry_run=true`.
+   Inspect the `Release plan` workflow summary.
+3. Run the same command with `dry_run=false`. The workflow downloads and
+   verifies the v0.13.0 assets, extracts
+   `px-v0.13.0-linux-musl-x86_64-wheels.tar.gz` for the Docker build, runs
+   `tools.py --docker-plan=0.13.0`, pushes only missing/stale tags, and submits
+   Winget only if neither a manifest nor an open PR exists.
+4. Dispatch once more with `mode=auto` and `dry_run=true`; the plan should be
+   `complete`. A later push of the same fully published version is a no-op.
+
+If PyPI has the version but no GitHub release, finish mode stops rather than
+inventing untested binaries. Recover the original release archives and create
+the release manually, then rerun finish mode.
 
 Release builds deliberately refresh `quickjs-ng` from PyPI on every run,
 subject only to the minimum version declared in `pyproject.toml`, and print the

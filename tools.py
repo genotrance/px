@@ -1,6 +1,7 @@
 import contextlib
 import glob
 import hashlib
+import json
 import os
 import platform
 import re
@@ -8,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -788,6 +790,109 @@ def docker_plan(version, inspect=None, run=None):
     return plan
 
 
+RELEASE_PLATFORMS = (
+    "linux-glibc-x86_64",
+    "linux-glibc-aarch64",
+    "linux-musl-x86_64",
+    "linux-musl-aarch64",
+    "mac-arm64",
+    "windows-amd64",
+)
+
+
+def expected_release_assets(version):
+    assets = {f"px_proxy-{version}-py3-none-any.whl", f"px_proxy-{version}.tar.gz"}
+    for platform_name in RELEASE_PLATFORMS:
+        extension = "zip" if platform_name == "windows-amd64" else "tar.gz"
+        for suffix in ("", "-wheels"):
+            name = f"px-v{version}-{platform_name}{suffix}.{extension}"
+            assets.update((name, f"{name}.sha256"))
+    return assets
+
+
+def _command_json(*args):
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    return json.loads(result.stdout)
+
+
+def release_lookups(version):
+    try:
+        with urllib.request.urlopen(f"https://pypi.org/pypi/px-proxy/{version}/json") as response:
+            pypi = response.status == 200
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        pypi = False
+
+    release = _command_json(
+        "gh", "release", "view", f"v{version}", "--repo", "genotrance/px", "--json", "assets"
+    )
+    assets = {asset["name"] for asset in release["assets"]} if release else set()
+    manifest = subprocess.run(
+        (
+            "gh",
+            "api",
+            f"repos/microsoft/winget-pkgs/contents/manifests/g/genotrance/px/{version}",
+        ),
+        capture_output=True,
+    ).returncode == 0
+    prs = _command_json(
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        "microsoft/winget-pkgs",
+        "--state",
+        "open",
+        "--search",
+        f"genotrance.px {version} in:title",
+        "--json",
+        "number",
+    )
+    return {
+        "pypi": pypi,
+        "github_release": release is not None,
+        "assets": assets,
+        "docker_tags": docker_plan(version),
+        "winget": manifest or bool(prs),
+    }
+
+
+def release_plan(version, forced="auto", dry_run=False, lookup=None):
+    state = (lookup or release_lookups)(version)
+    expected = expected_release_assets(version)
+    missing_assets = sorted(expected - set(state["assets"]))
+    complete = (
+        state["pypi"]
+        and state["github_release"]
+        and not missing_assets
+        and not state["docker_tags"]
+        and state["winget"]
+    )
+    if forced == "new":
+        mode = "new"
+    elif forced == "finish":
+        mode = "finish"
+    elif complete:
+        mode = "complete"
+    elif state["pypi"] or state["github_release"]:
+        mode = "finish"
+    else:
+        mode = "new"
+    return {
+        "version": version,
+        "mode": mode,
+        "dry_run": bool(dry_run),
+        "pypi_exists": state["pypi"],
+        "github_release_exists": state["github_release"],
+        "missing_assets": missing_assets,
+        "docker_tags": state["docker_tags"],
+        "winget_exists": state["winget"],
+    }
+
+
 def get_history():
     with open("docs/changelog.md") as f:
         h = f.read()
@@ -845,6 +950,22 @@ def main():
             sys.exit(1)
         print(",".join(docker_plan(version)))
 
+    if "--release-plan" in sys.argv or any(arg.startswith("--release-plan=") for arg in sys.argv):
+        version = get_argval("release-plan")
+        if not version:
+            print("ERROR: --release-plan requires a version", file=sys.stderr)
+            sys.exit(1)
+        print(
+            json.dumps(
+                release_plan(
+                    version,
+                    forced=get_argval("mode") or "auto",
+                    dry_run=(get_argval("dry-run").lower() == "true"),
+                ),
+                sort_keys=True,
+            )
+        )
+
     if "--history" in sys.argv:
         print(get_history())
 
@@ -867,6 +988,7 @@ Build:
 		Comma-separated Docker tags to push (default: all)
   --wheels-dir=DIR	Wheels directory (default: px.dist-linux-musl-x86_64-wheels)
 --docker-plan=VER	Print comma-separated Docker tags that need pushing for VER
+--release-plan=VER	Print the release mode and missing publication targets as JSON
 --history	Print latest changelog section
 """)
 

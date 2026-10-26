@@ -166,8 +166,8 @@ def test_release_workflow_skips_already_published_release_outputs():
     assert "steps.release_exists.outputs.exists != 'true'" in build
     assert "skip-existing: true" in build
     assert "id: docker_tags" in build
-    assert 'push_tags=$(python3 tools.py --docker-plan="$VERSION")' in build
-    assert 'echo "push_tags=$push_tags" >> "$GITHUB_OUTPUT"' in build
+    assert 'python3 tools.py --release-plan="$VERSION"' in build
+    assert 'echo "push_tags=${{ needs.setup.outputs.docker_tags }}" >> "$GITHUB_OUTPUT"' in build
     assert "--push-tags=${{ steps.docker_tags.outputs.push_tags }}" in build
     assert "id: winget" in build
     assert "steps.winget.outputs.publish == 'true'" in build

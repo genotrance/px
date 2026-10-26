@@ -386,31 +386,7 @@ jobs:
         env:
           VERSION: ${{ needs.setup.outputs.version }}
         run: |
-          should_push_version_tag() {
-            local tag=$1
-            if ! docker buildx imagetools inspect "genotrance/px:$tag" >/dev/null 2>&1; then
-              return 0
-            fi
-            docker run --rm --entrypoint px "genotrance/px:$tag" --help |
-              grep -Fxq "Px v$VERSION"
-          }
-          same_as_version_tag() {
-            local tag=$1 version_tag=$2
-            local actual expected
-            if ! actual=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "genotrance/px:$tag"); then
-              return 1
-            fi
-            if ! expected=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "genotrance/px:$version_tag"); then
-              return 1
-            fi
-            test "$actual" = "$expected"
-          }
-          push_tags=()
-          should_push_version_tag "$VERSION-mini" || push_tags+=("$VERSION-mini")
-          should_push_version_tag "$VERSION" || push_tags+=("$VERSION")
-          same_as_version_tag latest-mini "$VERSION-mini" || push_tags+=("latest-mini")
-          same_as_version_tag latest "$VERSION" || push_tags+=("latest")
-          (IFS=,; echo "push_tags=${push_tags[*]}") >> "$GITHUB_OUTPUT"
+          echo "push_tags=$(python3 tools.py --docker-plan="$VERSION")" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker images
         if: steps.docker_tags.outputs.push_tags != ''

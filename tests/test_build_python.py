@@ -261,3 +261,44 @@ def test_binary_smoke_check_imports_ssl_and_spnego_before_artifact_tests():
     assert '"$PXBIN" --help' in smoke
     assert "Smoke check ssl and spnego imports" in smoke
     assert 'grep -q "Requires module"' in smoke
+
+
+def _plan(images, version="0.13.0"):
+    def inspect(tag):
+        return images.get(tag, (None, None))[0]
+
+    def run(tag):
+        return images[tag][1]
+
+    return tools.docker_plan(version, inspect=inspect, run=run)
+
+
+def _good(version="0.13.0"):
+    out = f"Px v{version}\nusage"
+    return {
+        version: ("sha:a", out),
+        f"{version}-mini": ("sha:b", out),
+        "latest": ("sha:a", out),
+        "latest-mini": ("sha:b", out),
+    }
+
+
+def test_docker_plan_all_missing():
+    assert set(_plan({})) == {"0.13.0", "0.13.0-mini", "latest", "latest-mini"}
+
+
+def test_docker_plan_all_present_and_correct():
+    assert _plan(_good()) == []
+
+
+def test_docker_plan_latest_stale():
+    images = _good()
+    images["latest"] = ("sha:old", "Px v0.12.0\n")
+    images["latest-mini"] = ("sha:oldmini", "Px v0.12.0\n")
+    assert _plan(images) == ["latest-mini", "latest"]
+
+
+def test_docker_plan_version_tag_wrong_px_version():
+    images = _good()
+    images["0.13.0"] = ("sha:a", "Px v0.12.0\n")
+    assert _plan(images) == ["0.13.0", "latest"]

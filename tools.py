@@ -744,6 +744,37 @@ def docker():
                 sys.exit(1)
 
 
+def docker_plan(version, inspect=None, run=None):
+    def sh(*args):
+        r = subprocess.run(args, capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else None
+
+    inspect = inspect or (
+        lambda tag: (sh("docker", "buildx", "imagetools", "inspect", "--format", "{{.Manifest.Digest}}", f"genotrance/px:{tag}") or "").strip()
+        or None
+    )
+    run = run or (lambda tag: sh("docker", "run", "--rm", "--entrypoint", "px", f"genotrance/px:{tag}", "--help"))
+    digests = {}
+
+    def digest(tag):
+        if tag not in digests:
+            digests[tag] = inspect(tag)
+        return digests[tag]
+
+    def version_ok(tag):
+        out = run(tag) if digest(tag) else None
+        return bool(out) and out.splitlines()[:1] == [f"Px v{version}"]
+
+    plan = []
+    for latest, vtag in (("latest-mini", f"{version}-mini"), ("latest", version)):
+        push_version = not version_ok(vtag)
+        if push_version:
+            plan.append(vtag)
+        if push_version or not digest(latest) or digest(latest) != digest(vtag):
+            plan.append(latest)
+    return plan
+
+
 def get_history():
     with open("docs/changelog.md") as f:
         h = f.read()
@@ -794,6 +825,9 @@ def main():
     if "--depspkg" in sys.argv:
         depspkg()
 
+    if "--docker-plan" in sys.argv:
+        print(",".join(docker_plan(get_argval("docker-plan"))))
+
     if "--history" in sys.argv:
         print(get_history())
 
@@ -815,6 +849,7 @@ Build:
   --push-tags=TAGS
 		Comma-separated Docker tags to push (default: all)
   --wheels-dir=DIR	Wheels directory (default: px.dist-linux-musl-x86_64-wheels)
+--docker-plan=VER	Print comma-separated Docker tags that need pushing for VER
 --history	Print latest changelog section
 """)
 

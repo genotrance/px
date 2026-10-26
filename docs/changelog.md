@@ -41,6 +41,10 @@
   the problem.
 
 ### Bug fixes
+- Re-running a partially published release now verifies locally built Docker
+  images without pulling their not-yet-published tags, then publishes only
+  missing or stale Docker tags. Existing GitHub releases, PyPI distributions,
+  and Winget submissions are left unchanged.
 - The macOS binary no longer links Homebrew's OpenSSL by absolute path, which
   made SSL and pyspnego fail to load on Macs without that exact Homebrew
   version. It is now built with a self-contained python-build-standalone

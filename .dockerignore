@@ -7,6 +7,8 @@
 __pycache__
 *.pyc
 px.dist-*
+!px.dist-linux-musl-x86_64-wheels/
+!px.dist-linux-musl-x86_64-wheels/**
 wheels
 build
 dist

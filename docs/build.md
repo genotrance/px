@@ -172,6 +172,17 @@ condition. All CI scaffolding (environment setup, wheel building, binary
 building, archive extraction, and test execution) is implemented as shell
 functions in `build.sh` and called from the workflow steps.
 
+The release job is safe to re-run a version whose publishing stopped partway
+through: it leaves an existing GitHub tag and release untouched, lets PyPI
+ignore an already-uploaded distribution, and only pushes Docker tags that are
+missing or do not identify the release version. `latest` and `latest-mini` are
+updated only when they do not match their corresponding version tag. It also
+does not open a duplicate Winget submission when the manifest exists or an
+open `genotrance.px` pull request for that version exists. `docker manifest
+inspect --verbose genotrance/px:0.12.0` reports one `linux/amd64` manifest, so
+the release continues to build and publish amd64 images; no prior Docker
+architecture is dropped.
+
 Release builds deliberately refresh `quickjs-ng` from PyPI on every run,
 subject only to the minimum version declared in `pyproject.toml`, and print the
 resolved version. This is the explicit exception to locked dependency installs.

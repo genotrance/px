@@ -143,16 +143,18 @@ CPython changed, the workflow exits successfully. Otherwise it:
 3. On CI success, verifies that the version still has no tag or GitHub release
    and that `master` has not moved, then fast-forwards `master` to the tested
    commit. Pushes made with `GITHUB_TOKEN` do not trigger workflows, so the
-   workflow then explicitly dispatches `build.yml` on `master` and logs the
-   run URL to the step summary without waiting for it. That build bundles and
-   logs whatever CPython patch its own build tools provide at that point
-   before anything is published. A dispatch also runs `build.yml`'s `ci-full`
-   job in parallel; the release only needs `test-binary`, so this is redundant
-   but harmless. A dispatch failure fails the job after the devel sync and
-   issue-close steps have run.
-4. Merges the released `master` back into `devel` without forcing. A merge
-   conflict or concurrent `devel` update emits a warning for manual follow-up
-   but does not rewrite either branch.
+   workflow explicitly dispatches `build.yml` on `master` and logs the run URL
+   without waiting for it. That build bundles and logs whatever CPython patch
+   its own build tools provide, builds and tests the release artifacts, and
+   publishes PyPI and the GitHub release. A new-mode dispatch also invokes
+   `build.yml`'s reusable full CI gate while the artifact jobs run; the
+   candidate's exact full CI run in step 2 remains the release precondition.
+4. The automatic-release workflow then attempts to merge the released
+   `master` back into `devel` without waiting for the dispatched build. In
+   parallel, a successful `build.yml` run on `master` emits the `workflow_run`
+   event that starts `publish.yml`, which publishes Docker and Winget from the
+   existing GitHub release. A merge conflict or concurrent `devel` update
+   emits a warning for manual follow-up but does not rewrite either branch.
 
 If CI fails, nothing reaches `master`. The workflow opens or updates the single
 GitHub issue titled `auto-release blocked` with the run and failing job names;
@@ -178,7 +180,8 @@ already exists and selects one of three modes:
   and upload only missing release assets. PyPI is never republished in this
   mode.
 - **complete** — PyPI and all 26 GitHub assets are present. The workflow emits
-  a notice and does nothing, and still succeeds, so `publish.yml` follows it.
+  a notice and does nothing, and still succeeds. On `master`, `publish.yml`
+  follows the successful run to reconcile Docker and Winget publication.
 
 A manual dispatch accepts `mode=auto|new|finish` (default `auto`) and a
 `dry_run` boolean. A forced mode overrides mode selection, although forced
@@ -198,15 +201,17 @@ building, archive extraction, and test execution) is implemented as shell
 functions in `build.sh` and called from the workflow steps.
 
 The automatic release workflow bumps `pyproject.toml` before updating
-`master`, so its resulting build always selects `new`, and `publish.yml`
-follows the successful build. The release job is safe to re-run a version
-whose publishing stopped partway through: finish mode reuses the immutable
-GitHub assets. Publication is equally safe to repeat: `publish.yml` only
-pushes Docker tags that are missing or do not identify the release version. `latest` and `latest-mini` are
-updated when missing, when their digest differs from the version tag, or when
-the version tag is being pushed. This decision lives in `docker_plan()` in
-`tools.py` (`python3 tools.py --docker-plan=VERSION` prints the tags to push)
-and is tested through the CLI path in `tests/test_build_python.py`.
+`master`, so its resulting build always selects `new`, and a successful build
+then hands the existing release to `publish.yml`. The build release job is
+safe to re-run a version whose artifact publication stopped partway through:
+finish mode reuses the immutable GitHub assets and never republishes PyPI.
+Publication is equally safe to repeat: `publish.yml` only pushes Docker tags
+that are missing or do not identify the release version. `latest` and
+`latest-mini` are updated when missing, when their digest differs from the
+version tag, or when the version tag is being pushed. This decision lives in
+`docker_plan()` in `tools.py` (`python3 tools.py --docker-plan=VERSION` prints
+the tags to push) and is tested through the CLI path in
+`tests/test_build_python.py`.
 `publish.yml` computes the plan before writing its GitHub output, so a planning
 failure stops publication instead of silently skipping the Docker push. It also
 does not open a duplicate Winget submission when the manifest exists or an
@@ -261,22 +266,48 @@ it needs the `workflow` scope as well as `public_repo` because syncing the
 fork updates its workflow files. Docker Hub secrets are only used by the login
 step. Every job has read-only `contents` permission.
 
-To finish a partial release such as v0.13.0:
+To finish and re-publish an existing release such as v0.13.0, use the
+following procedure. It is also the recovery path for a release created before
+the Docker/Winget split:
 
-1. Confirm its GitHub release contains the platform archives. Finish mode
-   cannot recreate a missing binary or wheel archive without violating the
-   no-rebuild rule, so it stops with an actionable error if one is absent. It
-   can restore a missing checksum from its archive and the PyPI wheel/sdist
-   from PyPI. Run `gh workflow run build.yml --ref master -f mode=finish` if
-   the build plan is not `complete`.
-2. Preview publication with
-   `gh workflow run publish.yml --ref master -f version=0.13.0 -f dry_run=true`.
-   The summary lists the Docker tags to push and the Winget URL to submit.
-3. Run the same command with `dry_run=false`. The workflow pushes only the
-   missing/stale tags and submits Winget only if neither a manifest nor an
-   open PR exists.
-4. Dispatch the dry run once more; it should report no Docker tags and an
-   existing Winget submission. Later runs for the same version are no-ops.
+1. Confirm that `master` contains the `v0.13.0` tag and that its
+   `pyproject.toml` still declares `0.13.0`. Confirm that the GitHub release
+   contains the musl wheel archive, Windows archive, and their checksums.
+   Finish mode cannot recreate a missing binary or wheel archive without
+   violating the no-rebuild rule, so it stops with an actionable error if one
+   is absent. It can restore a missing checksum from its archive and the PyPI
+   wheel/sdist. If the release assets are incomplete, run:
+
+   ```
+   gh workflow run build.yml --ref master -f mode=finish -f dry_run=false
+   ```
+
+   Wait for this run to finish before publishing. If the release is already
+   complete, skip this build step; a build rerun is not needed just to repeat
+   Docker or Winget publication.
+2. Preview publication from `master`:
+
+   ```
+   gh workflow run publish.yml --ref master -f version=0.13.0 -f dry_run=true
+   ```
+
+   Inspect the workflow summary. It lists the Docker tags that are missing or
+   stale and whether the Winget manifest or an open pull request causes the
+   submission to be skipped. A dry run may build Docker images for validation,
+   but it does not log in, push tags, or submit Winget.
+3. If the preview is correct, run the real publication from `master`:
+
+   ```
+   gh workflow run publish.yml --ref master -f version=0.13.0 -f dry_run=false
+   ```
+
+   The workflow pushes only the planned Docker tags and submits Winget only
+   when neither a manifest nor an open pull request exists.
+4. Dispatch the dry run once more to verify that no Docker tags remain and that
+   Winget is recognized as submitted or already present. Later runs for the
+   same version are no-ops. Do not use `build.yml` to repeat Docker or Winget
+   publication; it owns PyPI and GitHub release assets, while `publish.yml`
+   owns those two downstream destinations.
 
 If PyPI has the version but no GitHub release, finish mode stops rather than
 inventing untested binaries. Recover the original release archives and create

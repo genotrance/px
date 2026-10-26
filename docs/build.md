@@ -126,11 +126,12 @@ started manually. Scheduled workflows run from the default `devel` branch, but
 this workflow explicitly checks out `master`; unreleased work on `devel` can
 therefore never enter an automatic release.
 
-`tools/auto_release.py` upgrades `uv.lock` and uses the same python.org lookup
-as the release build guard to compare the newest CPython 3.13 patch with
+`tools/auto_release.py` upgrades `uv.lock` and looks up the newest CPython
+3.13 patch published on python.org to compare against
 `.github/bundled-python-version`, which records the patch bundled by the last
-release. If neither the lock nor CPython changed, the workflow exits
-successfully. Otherwise it:
+release. This lookup only decides whether a new patch is worth cutting a
+release for; it never fails the release build itself. If neither the lock nor
+CPython changed, the workflow exits successfully. Otherwise it:
 
 1. Raises the `pymcurl` and `quickjs-ng` minimums to their newly resolved
    versions, bumps Px's patch version, records the CPython patch, and inserts a
@@ -141,8 +142,9 @@ successfully. Otherwise it:
    duplicate CI matrix jobs.
 3. On CI success, verifies that the version still has no tag or GitHub release
    and that `master` has not moved, then fast-forwards `master` to the tested
-   commit. That push starts `build.yml`, whose CPython freshness guards run
-   again before anything is published.
+   commit. That push starts `build.yml`, which bundles and logs whatever
+   CPython patch its own build tools provide at that point before anything is
+   published.
 4. Merges the released `master` back into `devel` without forcing. A merge
    conflict or concurrent `devel` update emits a warning for manual follow-up
    but does not rewrite either branch.
@@ -199,24 +201,31 @@ resolve the newest release from PyPI.
   Nuitka invalidate changed inputs itself. Both cache directories are mounted
   into the glibc and Alpine containers, so they survive ephemeral runners
   without mixing architectures or compiler environments.
-  Every job first prints and checks the interpreter version that it will
-  bundle against the newest published CPython 3.13 patch release on
-  python.org. The check is run again when the build selects its interpreter,
-  so a release cannot continue with a stale runner or container image.
-  macOS always uses the newest uv-managed python-build-standalone CPython:
-  `actions/setup-python`'s macOS CPython links Homebrew's OpenSSL by absolute
-  path (`/opt/homebrew/Cellar/openssl@3/<version>/lib/libcrypto.3.dylib`), so
-  the Nuitka binary built from it ran only on Macs with that exact Homebrew
-  version. python-build-standalone avoids that interpreter dependency. Linux
-  glibc uses the manylinux interpreter when it
-  passes the check, otherwise it installs the newest managed CPython through
-  the current uv release. Linux musl always uses that managed CPython because
-  Alpine's system Python can have a different minor version; its
+  Every job bundles the newest CPython 3.13 patch available to its own build
+  tools and logs the interpreter version (and path) it selected, purely as
+  information — nothing fails a build because python.org has published a
+  newer patch than uv's python-build-standalone, `actions/setup-python`, the
+  Windows embeddable zip index, or the `python:3.13-alpine` Docker image
+  provide yet. A release build previously failed this way in all six binary
+  jobs (dry run 40266792761) the day python.org published 3.13.18 before any
+  of those tools did; weekly automatic releases (see "Automatic release"
+  above) now keep the bundled patch current on their own, which is also what
+  fixed issue #275's months-long release gap, so a hard python.org gate on
+  every build added delay without adding safety.
+  macOS and Linux musl always use the newest uv-managed python-build-standalone
+  CPython. For macOS this also sidesteps `actions/setup-python`'s CPython,
+  which links Homebrew's OpenSSL by absolute path
+  (`/opt/homebrew/Cellar/openssl@3/<version>/lib/libcrypto.3.dylib`) so a
+  Nuitka binary built from it only ran on Macs with that exact Homebrew
+  version; python-build-standalone avoids that interpreter dependency. Alpine's
+  system Python can have a different minor version than Px targets, and its
   python-build-standalone distribution includes the headers Nuitka needs.
-  Windows instead checks that python.org publishes the newest patch's amd64
-  embeddable zip, then deterministically downloads that exact asset.
-  During validation on 2026-10-22, the python.org, manylinux, and uv-managed
-  resolutions all returned CPython 3.13.17. Aarch64 builds run on native
+  Linux glibc compares the manylinux image's Python against a freshly
+  installed uv-managed one — both resolved locally, no python.org lookup —
+  and bundles whichever reports the newer version. Windows selects the newest
+  python.org release that actually ships a Windows embeddable zip yet (the
+  zip can lag a day or two behind the interpreter's python-build-standalone
+  release) and downloads exactly that asset. Aarch64 builds run on native
   `ubuntu-24.04-arm` runners. Alpine's `patchelf` package (0.18.0) is
   intentionally not used because Nuitka rejects it as a known buggy release;
   instead `build.sh` installs `patchelf==0.17.2.4` from PyPI into the build
@@ -311,8 +320,8 @@ same containers, `build.sh` functions and artifact hand-offs:
 1. `sdist` on the host with uv, refreshing `quickjs-ng`, into `wheel/`.
 2. `wheels` in `manylinux2014_x86_64` and `musllinux_1_2_x86_64`
    (`build_wheels`).
-3. `binary` in `manylinux2014_x86_64` and `alpine:3.21`
-   (`check_bundled_python`, then `build_binary`, which runs Nuitka).
+3. `binary` in `manylinux2014_x86_64` and `alpine:3.21` (`build_binary`, which
+   runs Nuitka).
 4. `test-binary` in `ubuntu` and `musllinux_1_2_x86_64` against a fresh tree
    that only contains the binary archives, as the workflow's download step
    provides (`extract_archives`, then `test_binary` with tox).
@@ -344,9 +353,9 @@ stays concise. Functions include:
 - `build_wheels` — builds dependency wheels for all supported Python versions.
 - `build_binary` — installs build dependencies and runs `tools.py --nuitka` or
   `--embed` plus `--depspkg`.
-- `check_bundled_python` — the pre-build release guard; resolves and logs the
-  interpreter a binary job will bundle, and rejects it if it is behind the
-  newest published CPython 3.13 patch release.
+- `select_python` — resolves the interpreter a binary job will bundle (the
+  newest one its own build tools provide) and logs its version and path; it
+  never fails on python.org freshness. Called by `build_binary`.
 - `extract_archives` — unpacks binary and wheel archives for the test-binary job.
 - `smoke_binary` — launches `px --help` on an artifact, failing if `ssl` or
   `spnego` cannot load; on macOS it also runs `tools.py --check-portable`.
@@ -368,9 +377,6 @@ Local build helper used by both developers and the GitHub Actions workflows:
   on Windows, adds `--include-package=win32ctypes` (keyring) and
   `--include-package=winloop`. Guarded imports may not be detected automatically
   by Nuitka.
-- `--check-python` / `--check-embed` — fail unless the interpreter (or the
-  Windows embeddable zip) is the newest published CPython 3.13 release. Used by
-  `check_bundled_python`.
 - `--check-ssl` — fails unless `ssl`, `hashlib` and `spnego` import in this
   interpreter and, on macOS, `_ssl`/`_hashlib` have no `/opt/homebrew` or
   `/usr/local` library reference.
@@ -412,10 +418,12 @@ builds use `BUILDER=local` which copies the source tree and runs `pip install`.
 The CI image uses the Linux musl wheel archive, including its `uvloop` wheel;
 local source installs resolve the same dependency. Thus both image variants use
 the Linux default event loop, with Px retaining its runtime `asyncio` fallback.
-The moving `python:3.13-alpine` base tag is pulled before each image build and
-its interpreter is compared with python.org's newest 3.13 release. The
-completed mini image is checked again before it can be pushed. This makes local
-and release Docker builds fail rather than publishing a stale CPython patch.
+The moving `python:3.13-alpine` base tag is pulled fresh (`docker build --pull`)
+before each image build, and its bundled interpreter version is logged. The
+completed mini and full images are logged again after they build. None of this
+compares against python.org, so a build never fails because python.org has
+published a newer patch than the Alpine image provides yet; weekly automatic
+releases keep the bundled patch current instead.
 Run `make docker` to build both images locally.
 
 Three additional Dockerfiles support the Kerberos integration test

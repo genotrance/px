@@ -13,10 +13,10 @@
   slow resolvers no longer stall unrelated requests (#273).
 - `px --test` now reports every connectivity check as passed or failed and
   completes all checks before returning a failure status (#274).
-- Release binaries and Docker images now resolve the newest published CPython
-  3.13 patch release at build time. Builds log the bundled version and fail
-  before packaging or pushing if the selected interpreter is behind python.org
-  (#275).
+- Release binaries and Docker images bundle the newest CPython 3.13 patch
+  available to the build tools (uv's python-build-standalone,
+  `actions/setup-python`, python.org's Windows embed zips, and the
+  `python:3.13-alpine` image), and log the bundled version (#275).
 - Installation docs now cover uninstalling Px for winget, pip and standalone
   binary installs, including removing the Windows auto-start entry first.
 
@@ -109,6 +109,14 @@
   CI matrix, and only then fast-forwards `master` to start release builds.
   Manual dry runs report candidates without pushing or publishing, and failed
   CI runs update a single `auto-release blocked` issue.
+- Removed the release-build check that failed every binary and Docker job
+  whenever python.org had published a newer CPython 3.13 patch than uv's
+  python-build-standalone, `actions/setup-python`, the Windows embed zip
+  index, or the `python:3.13-alpine` image provided yet; this blocked all 6
+  binary jobs in release-build dry run 40266792761 the day 3.13.18 appeared.
+  Builds still bundle and log the newest patch each tool offers, and the new
+  weekly automatic release above keeps that patch current without a gate that
+  fails on upstream timing it cannot control.
 - The test helper now starts every Px instance with an explicit empty config
   file so a `px.ini` that `test_config` temporarily writes next to the px
   script under `pytest -n auto` can no longer leak into other tests' Px

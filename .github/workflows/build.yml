@@ -170,20 +170,6 @@ jobs:
           check-latest: "true"
           refresh-quickjs: "true"
 
-      # Fail early if the Python bundled in the binary is not the newest
-      # published 3.13 release on python.org
-      - name: Check bundled Python (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          SHELL_BIN="${{ matrix.alpine && '/bin/sh' || '/bin/bash' }}"
-          docker run --rm -v ${{ github.workspace }}:/px -w /px \
-            ${{ matrix.image }} $SHELL_BIN -c '. /px/build.sh && check_bundled_python ${{ matrix.name }}'
-
-      - name: Check bundled Python (macOS, Windows)
-        if: runner.os != 'Linux'
-        shell: bash
-        run: . ./build.sh && check_bundled_python ${{ matrix.name }}
-
       - name: Download wheels
         uses: actions/download-artifact@v8
         with:

@@ -189,7 +189,7 @@ def _start_px(name, port, fake_ntlm_upstream, event_loop, tmp_path):
     config_path = tmp_path / "px.ini"
     config_path.touch()
     flags = (
-        f"--server={fake_ntlm_upstream.addr} --auth=ANY --username={USERNAME}"
+        f"--server={fake_ntlm_upstream.addr} --auth=NTLM --username={USERNAME}"
         f" --authretry=0 --noproxy= --threads={BURST_SIZE} --workers=1 --config={config_path}"
     )
     return run_px(name, port, tmp_path, flags, env, startup_timeout=90)

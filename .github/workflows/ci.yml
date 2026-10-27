@@ -320,8 +320,9 @@ jobs:
             --threads=64 --socktimeout=10 > "$RUNNER_TEMP/px-windows.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/px.pid"
           for i in $(seq 1 30); do
-            curl --connect-timeout 1 --silent --output /dev/null http://127.0.0.1:3129
-            [ $? -ne 7 ] && break
+            rc=0
+            curl --connect-timeout 1 --silent --output /dev/null http://127.0.0.1:3129 || rc=$?
+            [ $rc -ne 7 ] && break
             sleep 1
           done
           fail=0

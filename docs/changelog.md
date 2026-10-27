@@ -22,6 +22,23 @@
   Authentication Required` challenge rather than an origin-server `401`, and
   correctly restarts connection-oriented NEGOTIATE/NTLM authentication after a
   scheme change or failed exchange.
+- NTLM and Negotiate upstream proxies are no longer blocked after CONNECT
+  handshakes are cut by network errors, which mcurl used to count as
+  authentication failures (px#268). The fix is in pymcurl 8.23.0.3, which Px
+  0.13.1 requires; the minimum is raised when 0.13.1 is released, once that
+  pymcurl is on PyPI.
+
+### Internal
+- Until pymcurl 8.23.0.3 is on PyPI, CI and `build.yml` install it from the
+  latest successful mcurl `devel` dry-run build through the temporary
+  `.github/actions/mcurl-devel` action and assert its version and
+  `Curl.get_os_errno` (see `docs/build.md`); `uv.lock` is relocked only on the
+  runner. The `pymcurl>=8.23.0.2` minimum stays until then so locked installs
+  keep resolving from PyPI.
+- The interrupted-CONNECT NTLM burst test in `tests/test_ntlm_burst.py` is no
+  longer a strict xfail: it is skipped only when pymcurl lacks
+  `Curl.get_os_errno`, and CI sets `PX_REQUIRE_MCURL_FIX=1` so it always runs
+  there.
 
 ## v0.13.0 — 2026-10-24
 

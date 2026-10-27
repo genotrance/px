@@ -102,12 +102,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # TEMPORARY until pymcurl 8.23.0.3 is on PyPI (docs/build.md)
+      - name: Use pymcurl devel wheels
+        uses: ./.github/actions/mcurl-devel
+
       - name: Run tests in musllinux container
         timeout-minutes: 60
         env:
           MARKER: ${{ needs.plan.outputs.marker }}
         run: |
           docker run --rm -e MARKER -v ${{ github.workspace }}:/px -w /px \
+            -v "$MCURL_WHEELS:/mcurl-wheels" -e UV_FIND_LINKS=/mcurl-wheels -e PX_REQUIRE_MCURL_FIX=1 \
             ${{ matrix.image }} /bin/bash -c '
               PY=/opt/python/cp${{ matrix.pyver }}-cp${{ matrix.pyver }}/bin/python3
               if [ ! -f "$PY" ]; then echo "Python ${{ matrix.pyver }} not found"; exit 1; fi
@@ -119,6 +124,7 @@ jobs:
               uv pip install -e .
               uv pip install keyring keyrings.alt psutil pytest pytest-xdist pytest-httpbin pytest-cov
               python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
+              python .github/actions/mcurl-devel/check.py
               python -m pytest tests -n auto --tb=short -q --durations=30 ${MARKER:+-m "$MARKER"}
             '
 

@@ -70,6 +70,63 @@ release on `master`. A changed lock is treated as a release candidate, including
 changes to transitive dependencies that do not have a minimum in
 `pyproject.toml`.
 
+### Temporary: pymcurl 8.23.0.3 from mcurl devel builds
+
+Px 0.13.1 needs pymcurl 8.23.0.3, the mcurl release that fixes px#268 (it
+adds `Curl.get_os_errno`). Until that version is on PyPI it exists only as
+artifacts of a dry-run `build.yml` run on genotrance/mcurl `devel`, so
+`pyproject.toml` deliberately keeps the minimum at `pymcurl>=8.23.0.2` and the
+committed `uv.lock` keeps pinning the PyPI 8.23.0.2. Raising the minimum first
+would make every locked install unsatisfiable: `uv sync --locked`, `uv run` and
+`pip install` resolve against PyPI, where no matching pymcurl exists, so local
+development and the integration gate would break. Locking the devel wheels
+instead would record local paths or artifact URLs that only exist on one
+machine or expire, so they are never committed either.
+
+CI and `build.yml` bridge the gap in one place, the
+`.github/actions/mcurl-devel` composite action:
+
+- It finds the latest successful `workflow_dispatch` run of mcurl's
+  `build.yml` on `devel`, downloads the `wheels-<os>-<arch>` artifact for the
+  runner (abi3 and free-threaded wheels, manylinux and musllinux on Linux) into
+  `$RUNNER_TEMP/mcurl-wheels`, and exports `PIP_FIND_LINKS`, `UV_FIND_LINKS`
+  and `MCURL_WHEELS` pointing at it.
+- `setup-python-env` calls it, then relocks only pymcurl
+  (`uv lock --upgrade-package pymcurl`) in the runner's checkout so every
+  existing `--locked` command keeps working, and runs
+  `.github/actions/mcurl-devel/check.py` to assert that the installed pymcurl
+  is at least 8.23.0.3 and has `Curl.get_os_errno`.
+- Container jobs (`ci.yml` musl tests, `build.yml` Linux wheels) call it
+  directly and mount the wheels at `/mcurl-wheels` with the find-links variable
+  set inside the container. The musl tests run the same check; the `build.yml`
+  `wheels` job checks that every collected pymcurl wheel is at least 8.23.0.3,
+  and those wheels are what the binary and artifact-test jobs install.
+- The action also exports `PX_REQUIRE_MCURL_FIX=1`; the musl and Linux
+  artifact-test containers set it explicitly and tox passes it through. With it
+  set, the interrupted-CONNECT test in `tests/test_ntlm_burst.py` runs (and
+  fails) even if an old pymcurl slipped in, instead of skipping silently as it
+  does on a plain 8.23.0.2 install (`docs/testing.md`).
+
+Locally nothing extra is needed: with the 8.23.0.2 minimum the committed lock
+installs as usual and the px#268 test is skipped. To test against the fix,
+download the artifact for your platform (for example `gh run download <run-id>
+-R genotrance/mcurl -n wheels-ubuntu-latest-x86_64 -D /tmp/mcurl-wheels`), run
+`UV_FIND_LINKS=/tmp/mcurl-wheels uv lock --upgrade-package pymcurl` before
+`make install`, and do not commit the resulting `uv.lock`.
+
+Release order:
+
+1. Release mcurl 8.23.0.3 to PyPI.
+2. In px, raise the dependency to `pymcurl>=8.23.0.3` in `pyproject.toml`, run
+   `uv lock --upgrade-package pymcurl` and commit both. Remove the temporary
+   mechanism in the same change: delete `.github/actions/mcurl-devel/`, the
+   "Use pymcurl devel wheels" and "Relock pymcurl" steps and the `check.py`
+   call in `setup-python-env`, the mcurl-devel steps, `/mcurl-wheels` mounts,
+   find-links variables, checks and `PX_REQUIRE_MCURL_FIX` settings in
+   `ci.yml` and `build.yml`, `PX_REQUIRE_MCURL_FIX` in the tox `passenv`
+   lists, the `skipif` in `tests/test_ntlm_burst.py`, and this section.
+3. Release px 0.13.1.
+
 ## GitHub Actions
 
 All CI and release builds run via GitHub Actions. The workflows live in

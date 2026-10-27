@@ -48,6 +48,13 @@
 
 ## v0.13.1
 
+### Improvements
+- Default `--authretry` changed from `0` (never retry) to `600` (retry every 10
+  minutes), so after the failure threshold blocks an upstream proxy, one probe
+  request per interval per worker process lets the block clear on success — no
+  restart needed after a transient outage or password change. Set `--authretry=0`
+  to restore the never-retry behaviour.
+
 ### Bug fixes
 - Failed downstream client authentication now returns a fresh `407 Proxy
   Authentication Required` challenge rather than an origin-server `401`, and

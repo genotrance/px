@@ -175,12 +175,12 @@ Configuration:
 
   --authretry= | PX_AUTHRETRY= | settings:authretry=
   Seconds to wait before retrying an upstream proxy blocked by repeated 407s.
-    Valid float number of seconds (fractions allowed), default: 0 (disabled -
-    today's behaviour, blocked proxies stay blocked until Kerberos ticket
-    renewal or restart). For example, --authretry=300 retries every 5 minutes.
-    Once blocked, exactly one probe request is let through per interval; all
-    other requests are refused until that probe succeeds. Another 407 re-blocks
-  the proxy.
+    Valid float number of seconds (fractions allowed), default: 600 (retries
+    every 10 minutes). Set to 0 to disable retrying (blocked proxies stay
+    blocked until Kerberos ticket renewal or restart). For example,
+    --authretry=300 retries every 5 minutes. Once blocked, exactly one probe
+    request is let through per interval; all other requests are refused until
+    that probe succeeds. Another 407 re-blocks the proxy.
 
   --proxyreload= | PX_PROXYRELOAD= | settings:proxyreload=
   Time interval in seconds before refreshing proxy info. Valid int, default: 60

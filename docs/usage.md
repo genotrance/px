@@ -327,18 +327,20 @@ keepalive period is 60 seconds.
 
 ### Retrying an upstream proxy after repeated authentication failures
 
-By default, once an upstream proxy has rejected three requests in a row with
-407 (Proxy Authentication Required), Px stops sending it further requests
-until the next Kerberos ticket renewal (or restart) resets that state - a
-temporary credential or proxy issue otherwise has no other way to recover.
+When an upstream proxy rejects three requests in a row with 407 (Proxy
+Authentication Required), Px blocks it from further requests to avoid repeated
+authentication failures. By default (`--authretry=600`), Px probes the blocked
+proxy once every 10 minutes; if the probe succeeds, the proxy is unblocked.
+Set `--authretry=0` to disable this retry mechanism and keep the proxy blocked
+until Kerberos ticket renewal or restart.
 
-`--authretry=<seconds>` is a float number of seconds (fractions allowed) that
-lets Px probe a blocked proxy again on its own. For example,
-`--authretry=300` retries every 5 minutes. Once that interval has passed since
-the proxy was blocked, Px lets exactly one request through as a probe; all
-other requests are refused until the probe succeeds, even under concurrent
-load. A successful probe response unblocks the proxy immediately; another 407
-blocks it for another interval.
+`--authretry=<seconds>` is a float number of seconds (fractions allowed). Once
+that interval has passed since the proxy was blocked, Px lets exactly one
+request through as a probe; all other requests are refused until the probe
+succeeds, even under concurrent load. A successful probe response unblocks the
+proxy immediately; another 407 blocks it for another interval. With `--workers`
+set to more than 1, each worker process probes independently, so the actual
+number of probes per interval is multiplied by the worker count.
 
 ## Dependencies
 

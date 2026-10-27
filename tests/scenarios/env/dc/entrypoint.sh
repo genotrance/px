@@ -18,8 +18,11 @@ samba-tool user create pxgood 'GoodPass1!'
 samba-tool user create pxother 'OtherPass2!'
 samba-tool user create squid-sso 'ServicePass3!'
 samba-tool spn add HTTP/squid-sso.corp.test squid-sso
+samba-tool spn add HTTP/localhost squid-sso
 samba-tool domain exportkeytab /shared/squid-http.keytab \
     --principal=HTTP/squid-sso.corp.test
+samba-tool domain exportkeytab /shared/squid-http.keytab \
+    --principal=HTTP/localhost
 chmod 0644 /shared/squid-http.keytab
 
 samba -i --debug-stdout &
@@ -40,12 +43,12 @@ chown proxy:proxy /shared/squid-http.keytab
 cat >/etc/squid/squid.conf <<'EOF'
 visible_hostname squid-sso.corp.test
 http_port 3128
-acl SSL_ports port 443 8443 18443
-acl Safe_ports port 80 443 8080 8443 18080 18443
+acl SSL_ports port 443 8443 8888 18443
+acl Safe_ports port 80 443 8080 8443 8888 18080 18443
 acl CONNECT method CONNECT
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
-acl max_client_connections maxconn 16
+acl max_client_connections maxconn 64
 http_access deny max_client_connections
 auth_param negotiate program /usr/lib/squid/negotiate_kerberos_auth -k /shared/squid-http.keytab -s HTTP/squid-sso.corp.test
 auth_param negotiate children 20 startup=2 idle=2

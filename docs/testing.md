@@ -126,8 +126,10 @@ uv run --locked python -m pytest tests/scenarios -m scenario \
 tools/scenario-env.sh down
 ```
 
-A complete warm run is expected to take about 3-5 minutes, including the two
-30-second tunnel variants; a cold Docker image build adds 2-5 minutes. Every
+A complete warm run is expected to take about 1.5-3 minutes, including the two
+30-second tunnel variants; a cold Docker image build adds 2-5 minutes. The
+normal authentication proxies allow the 25-client regression burst, while the
+connection-close variant retains a 16-connection limit for overload testing. Every
 subprocess and network operation has a bounded timeout, and scenarios assert
 that Px remains alive without a traceback. The burst test is deliberately not
 an xfail: pymcurl 8.23.0.2 must fail it, while mcurl devel must pass.

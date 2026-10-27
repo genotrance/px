@@ -42,7 +42,7 @@ services:
     <<: *proxy
     hostname: squid-close
     domainname: corp.test
-    environment: [SCHEME=close]
+    environment: [SCHEME=close, MAXCONN=16]
     ports: ["127.0.0.1:31283:3128"]
 
   squid-parent:

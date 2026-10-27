@@ -100,10 +100,7 @@ smoke() {
     expect_code 200 "fault-injection hop" --proxy toxiproxy:8666 --proxy-ntlm \
         --proxy-user 'CORP\pxgood:GoodPass1!' http://origin.corp.test:8080/small
     compose_exec curl -fsS http://toxiproxy:8474/proxies/sso >/dev/null
-    for proxy in squid-basic squid-digest squid-close squid-child; do
-        "${COMPOSE[@]}" exec -T "$proxy" grep -q 'maxconn 16' /etc/squid/squid.conf
-    done
-    "${COMPOSE[@]}" exec -T dc grep -q 'maxconn 16' /etc/squid/squid.conf
+    "${COMPOSE[@]}" exec -T squid-close grep -q 'maxconn 16' /etc/squid/squid.conf
     expect_code 200 "PAC fetch" http://pac.corp.test:8081/proxy.pac
     compose_exec sh -c \
         "curl -fsS http://pac.corp.test:8081/proxy.pac | grep -q 'PROXY 127.0.0.1:31282'"

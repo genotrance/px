@@ -30,7 +30,7 @@ WHEEL = "px_proxy-" + __version__ + "-py3-none-any.whl"
 
 # CPython minor version bundled in every release binary and Docker image.
 # Build tools select their newest available patch version of this minor.
-PY_MINOR = "3.13"
+PY_MINOR = "3.14"
 PY_FTP = "https://www.python.org/ftp/python/"
 PY_EMBED = "python-{}-embed-amd64.zip"
 

@@ -23,7 +23,7 @@ get_os() {
 
 # CPython minor version bundled in every binary (keep in sync with PY_MINOR in
 # tools.py). Build tools select their newest available patch version.
-PY_MINOR="${PY_MINOR:-3.13}"
+PY_MINOR="${PY_MINOR:-3.14}"
 # Nuitka 4.2+ bundles SCons 4.10.1, which cannot select the linker in the
 # manylinux2014 GCC 10 environment. Keep every binary target on the newest
 # version validated there until upstream fixes that regression.

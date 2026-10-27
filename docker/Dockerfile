@@ -2,7 +2,7 @@
 ARG BUILDER=ci
 
 # CPython minor version, always the newest patch release of it
-ARG PYTHON_MINOR=3.13
+ARG PYTHON_MINOR=3.14
 
 # Main image to use
 FROM python:${PYTHON_MINOR}-alpine AS base

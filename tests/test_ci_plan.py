@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,10 @@ def plan(tmp_path, event, full_input=""):
 
 
 @pytest.mark.skipif(not (shutil.which("bash") and shutil.which("jq")), reason="needs bash and jq")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the CI plan runs on Ubuntu; bash/jq/GITHUB_OUTPUT are not portable on Windows",
+)
 @pytest.mark.parametrize(
     ("event", "full_input", "full"),
     [

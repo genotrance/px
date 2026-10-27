@@ -61,6 +61,21 @@ def _docker(*args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]
     )
 
 
+def _squid_sso_log_lines() -> int:
+    # dc's own HEALTHCHECK polls its Squid port with a bare `nc -z` every 5s,
+    # which Squid logs as a headerless "NONE_NONE/000" transaction; excluded
+    # so that noise can't be mistaken for Px's proxy traffic.
+    result = _docker(
+        "exec",
+        "-T",
+        "dc",
+        "sh",
+        "-c",
+        "grep -v 'NONE_NONE/000' /var/log/squid/access.log | wc -l",
+    )
+    return int(result.stdout.strip())
+
+
 @pytest.fixture(scope="session")
 def scenario_env() -> dict[str, str]:
     started = False
@@ -279,7 +294,7 @@ def test_kerberos_ticket_no_password(scenario_env, kerberos_cache, tmp_path):
 @pytest.mark.parametrize("authretry", [0, 0.5], ids=["disabled", "interval"])
 def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
     """Repeated bad credentials are bounded and never leave Px hung or crashed."""
-    before = _docker("exec", "-T", "dc", "sh", "-c", "wc -l < /var/log/squid/access.log").stdout.strip()
+    before = _squid_sso_log_lines()
     with running_px(
         tmp_path,
         scenario_env,
@@ -292,9 +307,9 @@ def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
         time.sleep(authretry + 0.2)
         assert _status(px) != 200
         px.assert_healthy()
-    after = _docker("exec", "-T", "dc", "sh", "-c", "wc -l < /var/log/squid/access.log").stdout.strip()
+    after = _squid_sso_log_lines()
     # NTLM challenge exchanges add two log entries beyond Px's three attempts.
-    assert int(after) - int(before) <= (7 if authretry else 5)
+    assert after - before <= (7 if authretry else 5)
     with running_px(tmp_path, scenario_env, scheme="NTLM", authretry=authretry) as recovered:
         assert _status(recovered) == 200
 

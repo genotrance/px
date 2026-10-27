@@ -376,7 +376,7 @@ DEFAULTS = {
     "threads": "32",
     "idle": "30",
     "socktimeout": "20.0",
-    "authretry": "0",
+    "authretry": "600",
     "proxyreload": "60",
     "foreground": "0",
     "log": "0",
@@ -403,7 +403,7 @@ class State:
     pac = ""
     proxyreload = 60
     socktimeout = 20.0
-    authretry = 0.0
+    authretry = 600.0
     useragent = ""
 
     # Auth

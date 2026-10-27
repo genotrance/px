@@ -233,11 +233,11 @@ class TestEventLoopSelection:
 class TestAuthRetry:
     """--authretry wiring: default, parsing, and mcurl configuration."""
 
-    def test_default_disabled(self, monkeypatch):
+    def test_default_enabled(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["px"])
         monkeypatch.delenv("PX_AUTHRETRY", raising=False)
         config.STATE.parse_config()
-        assert config.STATE.authretry == 0.0
+        assert config.STATE.authretry == 600.0
 
     def test_command_line_sets_value(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["px", "--authretry=5.5"])

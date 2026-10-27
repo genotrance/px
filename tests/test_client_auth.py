@@ -53,6 +53,22 @@ def test_switching_from_negotiate_to_ntlm_recreates_server_context():
     assert connection.client_ctxt_scheme == "NTLM"
 
 
+def test_ntlm_continuation_uses_existing_server_context():
+    connection, _responses = _connection()
+    context = unittest.mock.Mock(step=unittest.mock.Mock(return_value=None))
+    connection.client_ctxt = context
+    connection.client_ctxt_scheme = "NTLM"
+    token = base64.b64encode(b"NTLMSSP\x00\x03\x00\x00\x00").decode("ascii")
+
+    with unittest.mock.patch.object(handler.spnego.auth, "server") as server:
+        assert connection._do_spnego_auth(f"NTLM {token}", "NTLM")
+
+    context.step.assert_called_once_with(base64.b64decode(token))
+    server.assert_not_called()
+    assert connection.client_ctxt is None
+    assert connection.client_ctxt_scheme is None
+
+
 def test_bad_digest_credentials_restart_with_proxy_challenge():
     connection, responses = _connection()
     digest = (

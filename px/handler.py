@@ -721,12 +721,11 @@ class ConnectionHandler:
         if self.client_ctxt_scheme != authtype or self._is_spnego_new_handshake(credentials, authtype):
             self._reset_client_auth_context()
 
+        challenge_authtype = "Negotiate" if authtype == "NEGOTIATE" else "NTLM"
         if self.client_ctxt is None:
             if authtype == "NEGOTIATE":
-                challenge_authtype = "Negotiate"
                 options = spnego.NegotiateOptions.use_negotiate
             else:
-                challenge_authtype = "NTLM"
                 options = spnego.NegotiateOptions.use_ntlm
             if sys.platform == "win32" and not STATE.client_nosspi:
                 options = spnego.NegotiateOptions.use_sspi

@@ -5,6 +5,15 @@
 ## Unreleased
 
 ### Internal
+- Wired the real-Px corporate proxy scenario suite into `ci.yml`'s full
+  matrix (`scenario-linux`: Ubuntu, Python 3.10–3.14, both event loops;
+  `scenario-windows`: a native Windows Px against the lab's NTLM proxy with
+  explicit credentials via a WSL2-hosted lab), `tools/release-check.sh` (a
+  new `scenario` stage, on by default, that skips with a message instead of
+  failing when Docker is unavailable), and the release checklist in
+  `docs/build.md`. Failing CI jobs upload Squid/Samba/Px logs as artifacts.
+  Domain-joined SSPI single sign-on cannot run on GitHub runners; documented
+  as a manual pre-release checklist in `docs/testing.md` instead.
 - Added opt-in real-Px corporate proxy scenarios covering authentication,
   concurrency, tunnels, failure recovery, proxy chains, and PAC routing.
 - Added a Docker corporate-proxy scenario environment with a Samba AD realm,

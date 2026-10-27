@@ -47,6 +47,7 @@ def test_fast_matrix():
         ("windows-latest", "3.14", "asyncio"),
     }
     assert [(e["name"], e["pyver"]) for e in jobs(out, "musl")] == [("musl-x86_64", "314")]
+    assert jobs(out, "scenario") == []
 
 
 def test_full_matrix_keeps_every_configuration():
@@ -73,16 +74,20 @@ def test_full_matrix_keeps_every_configuration():
         ("musl-aarch64", "310"),
         ("musl-aarch64", "314"),
     }
+    assert {(e["python-version"], e["event-loop"]) for e in jobs(out, "scenario")} == {
+        (pyver, loop) for pyver in ("3.10", "3.11", "3.12", "3.13", "3.14") for loop in ("auto", "asyncio")
+    }
+    assert {e["os"] for e in jobs(out, "scenario")} == {"ubuntu-latest"}
 
 
 def test_fast_is_subset_of_full():
     fast, full = ci_matrix.plan("push", ""), ci_matrix.plan("schedule", "")
-    for name in ("tests", "musl"):
+    for name in ("tests", "musl", "scenario"):
         assert all(e in jobs(full, name) for e in jobs(fast, name))
 
 
 def test_matrix_entries_have_no_internal_keys():
     for event in ("push", "schedule"):
         out = ci_matrix.plan(event, "")
-        for name in ("tests", "musl"):
+        for name in ("tests", "musl", "scenario"):
             assert all("fast" not in e for e in jobs(out, name))

@@ -39,6 +39,14 @@ MUSL: list[dict] = [
     {"os": LINUX_ARM, "image": ARM_IMAGE, "name": "musl-aarch64", "pyver": "314"},
 ]
 
+# Real Px scenario suite (tests/scenarios) against the Docker corporate-proxy
+# lab: full mode only, the whole supported CPython range on both event loops.
+SCENARIO: list[dict] = [
+    {"os": LINUX, "python-version": pyver, "event-loop": loop}
+    for pyver in ("3.10", "3.11", "3.12", "3.13", "3.14")
+    for loop in ("auto", "asyncio")
+]
+
 
 def resolve_full(event: str, full_input: str) -> bool:
     """Decide the mode: an explicit `full` input wins, schedules are full, push/PR are fast."""
@@ -58,6 +66,7 @@ def plan(event: str, full_input: str) -> dict[str, str]:
         "marker": "" if full else FAST_MARKER,
         "tests": json.dumps(select(TESTS, full)),
         "musl": json.dumps(select(MUSL, full)),
+        "scenario": json.dumps(select(SCENARIO, full)),
     }
 
 

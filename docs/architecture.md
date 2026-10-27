@@ -116,7 +116,9 @@ for each request to avoid state conflicts.
 1. **Client auth** — if `--client-auth` is enabled, `_do_client_auth()` validates
    the client using NEGOTIATE/NTLM/DIGEST/BASIC. NTLM client auth uses
    monkey-patched `spnego._ntlm._get_credential` to look up credentials from
-   keyring or `PX_CLIENT_PASSWORD`.
+   keyring or `PX_CLIENT_PASSWORD`. Incomplete SPNEGO contexts are scoped to
+   their authentication scheme and are reset before sending a fresh 407
+   challenge after a rejected token or credential.
 2. **Destination** — `_get_destination()` calls `STATE.reload_proxy()` (if the
    `proxyreload` interval has elapsed) and then `Wproxy.find_proxy_for_url()`
    to get the upstream proxy or DIRECT.

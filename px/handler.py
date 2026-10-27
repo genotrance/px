@@ -447,6 +447,7 @@ class ConnectionHandler:
         # Connection-scoped state
         self.client_authed = False
         self.client_ctxt = None
+        self.client_ctxt_scheme = None
         self.curl = None
         self.proxy_servers = []
         self._close_after_response = False
@@ -687,36 +688,65 @@ class ConnectionHandler:
         self.client_authed = False
         self._send_auth_response(auth_headers)
 
+    def _reset_client_auth_context(self):
+        "Discard an incomplete connection-oriented authentication context"
+        self.client_ctxt = None
+        self.client_ctxt_scheme = None
+
+    def _fail_client_auth(self):
+        "Restart client authentication after a failed credential or token"
+        self._reset_client_auth_context()
+        self._send_auth_challenge()
+
+    @staticmethod
+    def _is_spnego_new_handshake(credentials, authtype):
+        "Return whether credentials begin a fresh NTLM or Negotiate exchange"
+        if authtype == "NTLM":
+            return credentials.startswith(b"NTLMSSP\x00\x01\x00\x00\x00")
+        return credentials.startswith(b"\x60")
+
     def _do_spnego_auth(self, auth_header, authtype):
         "NEGOTIATE/NTLM auth using pyspnego"
         import base64
+        import binascii
 
         encoded_credentials = auth_header[len(authtype + " ") :]
+        try:
+            credentials = base64.b64decode(encoded_credentials, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            dprint("Authentication failed: " + str(exc))
+            self._fail_client_auth()
+            return False
+
+        if self.client_ctxt_scheme != authtype or self._is_spnego_new_handshake(credentials, authtype):
+            self._reset_client_auth_context()
+
+        challenge_authtype = "Negotiate" if authtype == "NEGOTIATE" else "NTLM"
         if self.client_ctxt is None:
             if authtype == "NEGOTIATE":
-                authtype = "Negotiate"
                 options = spnego.NegotiateOptions.use_negotiate
             else:
                 options = spnego.NegotiateOptions.use_ntlm
             if sys.platform == "win32" and not STATE.client_nosspi:
                 options = spnego.NegotiateOptions.use_sspi
-            self.client_ctxt = spnego.auth.server(protocol=authtype.lower(), options=options)
+            self.client_ctxt = spnego.auth.server(protocol=challenge_authtype.lower(), options=options)
+            self.client_ctxt_scheme = authtype
         try:
-            outok = self.client_ctxt.step(base64.b64decode(encoded_credentials))
+            outok = self.client_ctxt.step(credentials)
         except (spnego.exceptions.InvalidTokenError, spnego.exceptions.SpnegoError, ValueError) as exc:
             dprint("Authentication failed: " + str(exc))
-            self._send_error(401, "Authentication failed")
+            self._fail_client_auth()
             return False
         if outok is not None:
             import base64 as b64
 
-            dprint(f"Sending {authtype} challenge")
-            self._send_auth_challenge(authtype=authtype, challenge=b64.b64encode(outok).decode("utf-8"))
+            dprint(f"Sending {challenge_authtype} challenge")
+            self._send_auth_challenge(authtype=challenge_authtype, challenge=b64.b64encode(outok).decode("utf-8"))
             return False
         else:
-            dprint(f"Authenticated {authtype} client")
+            dprint(f"Authenticated {challenge_authtype} client")
             self.client_authed = True
-            self.client_ctxt = None
+            self._reset_client_auth_context()
             return True
 
     def _do_digest_auth(self, auth_header, method, headers):
@@ -732,18 +762,18 @@ class ConnectionHandler:
         nonce = params.get("nonce", "")
         if len(nonce) == 0:
             dprint("Authentication failed: No nonce")
-            self._send_error(401, "Authentication failed")
+            self._fail_client_auth()
             return False
         if not self._verify_digest_nonce(nonce):
             dprint("Authentication failed: Invalid nonce")
-            self._send_error(401, "Authentication failed")
+            self._fail_client_auth()
             return False
 
         client_username = params.get("username", "")
         client_password = get_client_password(client_username)
         if client_password is None:
             dprint("Authentication failed: Bad username")
-            self._send_error(401, "Authentication failed")
+            self._fail_client_auth()
             return False
 
         A1 = f"{client_username}:{CLIENT_REALM}:{client_password}"
@@ -755,7 +785,7 @@ class ConnectionHandler:
 
         if response != params["response"]:
             dprint("Authentication failed: Bad response")
-            self._send_error(401, "Authentication failed")
+            self._fail_client_auth()
             return False
         else:
             dprint("Authenticated Digest client")
@@ -773,7 +803,7 @@ class ConnectionHandler:
         client_password = get_client_password(username)
         if client_password is None or client_password != password:
             dprint("Authentication failed")
-            self._send_error(401, "Authentication failed")
+            self._fail_client_auth()
             return False
 
         dprint("Authenticated Basic client")

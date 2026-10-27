@@ -278,7 +278,8 @@ jobs:
       - name: Set up WSL2
         uses: Vampire/setup-wsl@v5
         with:
-          distribution: Debian-12
+          distribution: Debian
+          wsl-version: 2
 
       - name: Install Docker in WSL2
         shell: wsl-bash {0}

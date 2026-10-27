@@ -14,6 +14,9 @@ import pytest
 from fixtures import *  # noqa: F403
 from helpers import *  # noqa: F403
 
+HAS_NTLM = bool(mcurl.get_curl_vinfo().features & mcurl.libcurl.CURL_VERSION_NTLM)
+pytestmark = pytest.mark.skipif(not HAS_NTLM, reason="libcurl was built without NTLM support")
+
 USERNAME = "ntlm-burst-test"
 PASSWORD = "ntlm-burst-pass"
 BURST_SIZE = 15
@@ -189,7 +192,7 @@ def _start_px(name, port, fake_ntlm_upstream, event_loop, tmp_path):
     config_path = tmp_path / "px.ini"
     config_path.touch()
     flags = (
-        f"--server={fake_ntlm_upstream.addr} --auth=NTLM --username={USERNAME}"
+        f"--server={fake_ntlm_upstream.addr} --auth=ANY --username={USERNAME}"
         f" --authretry=0 --noproxy= --threads={BURST_SIZE} --workers=1 --config={config_path}"
     )
     return run_px(name, port, tmp_path, flags, env, startup_timeout=90)

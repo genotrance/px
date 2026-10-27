@@ -76,9 +76,10 @@ restore automatic winloop or uvloop selection.
 ### Testing connectivity
 
 `px --test` exercises GET, POST, PUT, DELETE, and PATCH requests against both
-HTTP and HTTPS httpbin endpoints. Each request is reported as passed or failed;
-Px completes every request before returning a non-zero exit code if any fail.
-Use `--test=URL` to test one configured endpoint instead.
+HTTP and HTTPS httpbin endpoints, and prints the request, response headers,
+response length, and `Passed` for every successful check. Px completes every
+request before returning a non-zero exit code if any fail. Use `--test=URL` to
+print the same result for one configured endpoint instead.
 
 ## Credentials
 

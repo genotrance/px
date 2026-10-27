@@ -95,6 +95,49 @@ private to the Compose network. Toxiproxy is configured without a toxic by defau
 scenario tests add and remove latency, timeout, reset, or bandwidth toxics
 through its API so one test cannot contaminate another.
 
+#### Real Px scenarios
+
+`tests/scenarios/test_corporate_proxy.py` starts Px through `python -m px`, the
+same entry point as the `px` console script, and sends traffic from curl and
+Python's HTTP client. The suite covers `px --test` through an explicit proxy
+and PAC, a test-owned Kerberos ticket cache, wrong-password blocking and
+`--authretry`, the px#268 25-client burst regression, sustained CONNECT
+tunnels, connection-close behaviour, a mid-handshake reset, Squid connection
+limits, a child/parent proxy chain, and PAC proxy-versus-DIRECT selection.
+Authentication coverage includes NTLM, Negotiate, Basic, and Digest; the burst
+matrix also covers HTTP, HTTPS CONNECT, `auto` and `asyncio` event loops, and
+one and two workers.
+
+The scenarios skip with an actionable message when the lab is absent. A plain
+test run therefore remains quick, while an already-running lab makes the
+scenarios part of that run. Select individual behaviours with pytest's normal
+`-k` option:
+
+```bash
+# Use the mcurl devel checkout, start and stop the lab around the run.
+uv pip install --python .venv/bin/python -e /home/gt/code/mcurl
+PX_SCENARIO_ENV=start uv run --locked python -m pytest \
+  tests/scenarios -m scenario -v
+
+# Reuse a lab started separately and run only the px#268 matrix.
+tools/scenario-env.sh up
+uv run --locked python -m pytest tests/scenarios -m scenario \
+  -k burst_25_px268 -v
+tools/scenario-env.sh down
+```
+
+A complete warm run is expected to take about 1.5-3 minutes, including the two
+30-second tunnel variants; a cold Docker image build adds 2-5 minutes. The
+normal authentication proxies allow the 25-client regression burst, while the
+connection-close variant retains a 16-connection limit for overload testing. Every
+subprocess and network operation has a bounded timeout, and scenarios assert
+that Px remains alive without a traceback. The burst test is deliberately not
+an xfail: pymcurl 8.23.0.2 must fail it, while mcurl devel must pass.
+
+The lab remains a focused single-site Debian Squid model. AD replication,
+transparent interception, TLS inspection, WPAD, platform SSPI, and interaction
+with a real organisation's proxy policies remain manual tests.
+
 ### Quick run
 
 ```bash
@@ -156,6 +199,7 @@ The markers registered in `pyproject.toml` are:
 | Marker | Used by | Run by default |
 |---|---|---|
 | `integration` | `test_kerberos.py` (Docker KDCs) | no |
+| `scenario` | `scenarios/test_corporate_proxy.py` (optional corporate proxy lab) | when the lab is available |
 | `benchmark` | `test_benchmark.py` | no |
 | `largedata` | `test_large_data.py` | no |
 | `slow` | `test_auth_retry.py` (all tests), `test_proxy.py` chain tests | yes |

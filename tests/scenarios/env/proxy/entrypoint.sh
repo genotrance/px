@@ -2,6 +2,7 @@
 set -eu
 
 SCHEME=${SCHEME:-basic}
+MAXCONN=${MAXCONN:-64}
 mkdir -p /run/samba /var/log/samba /var/spool/squid /etc/squid
 
 cat >/etc/krb5.conf <<'EOF'
@@ -23,12 +24,12 @@ EOF
 cat >/etc/squid/common.conf <<'EOF'
 visible_hostname SCENARIO_HOSTNAME
 http_port 3128
-acl SSL_ports port 443 8443 18443
-acl Safe_ports port 80 443 8080 8443 18080 18443 18081 18888
+acl SSL_ports port 443 8443 8888 18443
+acl Safe_ports port 80 443 8080 8443 8888 18080 18443 18081 18888
 acl CONNECT method CONNECT
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
-acl max_client_connections maxconn 16
+acl max_client_connections maxconn MAXCONN_VALUE
 http_access deny max_client_connections
 access_log stdio:/var/log/squid/access.log
 cache_log /var/log/squid/cache.log
@@ -36,6 +37,7 @@ cache deny all
 coredump_dir /var/spool/squid
 EOF
 sed -i "s/SCENARIO_HOSTNAME/$(hostname -f)/" /etc/squid/common.conf
+sed -i "s/MAXCONN_VALUE/$MAXCONN/" /etc/squid/common.conf
 
 case "$SCHEME" in
 basic|close|child)

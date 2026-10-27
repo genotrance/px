@@ -1,7 +1,10 @@
 import contextlib
+import datetime
 import glob
 import hashlib
+import json
 import os
+import pathlib
 import platform
 import re
 import shutil
@@ -216,7 +219,7 @@ def latest_python(minor=PY_MINOR, asset=None):
 
     asset - file name template ({} is the version) that the release must ship,
             defaults to the source tarball. Used both to pick the Windows
-            embeddable zip to bundle and, by tools/auto_release.py, to detect
+            embeddable zip to bundle and, by --auto-release, to detect
             a new upstream patch worth cutting an automatic release for.
     """
     listing = fetch_text(PY_FTP)
@@ -802,6 +805,115 @@ def get_history():
     return h.strip()
 
 
+# Automatic patch release
+
+AR_ROOT = pathlib.Path(os.environ.get("PX_RELEASE_ROOT", pathlib.Path(__file__).resolve().parent)).resolve()
+PYTHON_VERSION_FILE = AR_ROOT / ".github" / "bundled-python-version"
+INITIAL_BUNDLED_PYTHON = "3.13.17"
+
+
+def package_versions(lock: bytes) -> dict[str, tuple[str, ...]]:
+    packages: dict[str, set[str]] = {}
+    import tomllib
+
+    for package in tomllib.loads(lock.decode())["package"]:
+        packages.setdefault(package["name"], set()).add(package["version"])
+    return {name: tuple(sorted(versions)) for name, versions in packages.items()}
+
+
+def bump_patch(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def replace_requirement(text: str, name: str, version: str) -> str:
+    pattern = rf'("{re.escape(name)}>=)[^"]+(")'
+    updated, count = re.subn(pattern, rf"\g<1>{version}\2", text, count=1)
+    if count != 1:
+        raise ValueError(f"could not update the {name} minimum")  # noqa: TRY003
+    return updated
+
+
+def dependency_changes(old: dict[str, tuple[str, ...]], new: dict[str, tuple[str, ...]]) -> list[str]:
+    changes = []
+    for name in sorted(old.keys() | new.keys()):
+        before = ", ".join(old.get(name, ("not locked",)))
+        after = ", ".join(new.get(name, ("removed",)))
+        if before != after:
+            changes.append(f"`{name}` {before} -> {after}")
+    return changes
+
+
+def insert_changelog(version: str, dependencies: list[str], old_python: str, new_python: str) -> None:
+    path = AR_ROOT / "docs" / "changelog.md"
+    text = path.read_text()
+    lines = [
+        f"## v{version} — {datetime.date.today().isoformat()}",
+        "",
+        "### Improvements",
+    ]
+    if dependencies:
+        lines.append("- Refreshed locked dependencies:")
+        lines.extend(f"  - {change}" for change in dependencies)
+    if old_python != new_python:
+        lines.extend([
+            f"- Updated standalone binaries and Docker images from CPython {old_python}",
+            f"  to the newest published CPython {new_python} patch release.",
+        ])
+    lines.extend(["", "---", ""])
+    marker = "---\n"
+    if marker not in text:
+        raise ValueError("could not find changelog insertion point")  # noqa: TRY003
+    path.write_text(text.replace(marker, marker + "\n" + "\n".join(lines), 1))
+
+
+def auto_release() -> dict[str, object]:
+    import tomllib
+
+    old_lock = (AR_ROOT / "uv.lock").read_bytes()
+    old_packages = package_versions(old_lock)
+    old_python = PYTHON_VERSION_FILE.read_text().strip() if PYTHON_VERSION_FILE.exists() else INITIAL_BUNDLED_PYTHON
+
+    subprocess.run(["uv", "lock", "--upgrade"], cwd=AR_ROOT, check=True)
+    new_lock = (AR_ROOT / "uv.lock").read_bytes()
+    new_packages = package_versions(new_lock)
+    new_python = latest_python()
+    dependencies = dependency_changes(old_packages, new_packages)
+
+    if old_lock == new_lock and old_python == new_python:
+        return {
+            "changed": False,
+            "dependencies": [],
+            "python": new_python,
+        }
+
+    pyproject_path = AR_ROOT / "pyproject.toml"
+    pyproject = pyproject_path.read_text()
+    current_version = tomllib.loads(pyproject)["project"]["version"]
+    version = bump_patch(current_version)
+    pyproject = re.sub(r'(?m)^version = "[^"]+"$', f'version = "{version}"', pyproject, count=1)
+    for dependency in ("pymcurl", "quickjs-ng"):
+        resolved = new_packages.get(dependency)
+        if not resolved or len(resolved) != 1:
+            raise ValueError(f"expected one resolved {dependency} version")  # noqa: TRY003
+        pyproject = replace_requirement(pyproject, dependency, resolved[0])
+    pyproject_path.write_text(pyproject)
+    PYTHON_VERSION_FILE.write_text(new_python + "\n")
+    insert_changelog(version, dependencies, old_python, new_python)
+
+    # Refresh the project metadata recorded in the lock after changing its version
+    # and dependency minimums.
+    subprocess.run(["uv", "lock"], cwd=AR_ROOT, check=True)
+    return {
+        "changed": True,
+        "version": version,
+        "branch": f"release/auto-{version}",
+        "dependencies": dependencies,
+        "python": new_python,
+        "previous_python": old_python,
+    }
+
+
 # Main
 
 
@@ -848,9 +960,15 @@ def main():
     if "--history" in sys.argv:
         print(get_history())
 
+    if "--auto-release" in sys.argv and "--help" not in sys.argv:
+        output = json.dumps(auto_release(), indent=2)
+        print(output)
+        if "--output" in sys.argv:
+            pathlib.Path(sys.argv[sys.argv.index("--output") + 1]).write_text(output + "\n")
+
     # Help
 
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 or "--help" in sys.argv:
         print(f"""
 Build:
 --check-ssl	Fail unless ssl and spnego import and do not link Homebrew or /usr/local libraries (macOS)
@@ -868,6 +986,8 @@ Build:
   --wheels-dir=DIR	Wheels directory (default: px.dist-linux-musl-x86_64-wheels)
 --docker-plan=VER	Print comma-separated Docker tags that need pushing for VER
 --history	Print latest changelog section
+--auto-release	Upgrade locks/CPython and prepare an automatic patch release
+  --output FILE	Write the result JSON to FILE
 """)
 
 

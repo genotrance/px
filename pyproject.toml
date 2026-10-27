@@ -131,8 +131,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Benchmark script: S101/S110/S603 subprocess and asserts, SIM115/TRY003/TRY300 script-style code
-"tools/bench_dns_stalls.py" = ["S101", "S110", "S603", "SIM115", "TRY003", "TRY300"]
 # S101: assert in tests; F405: star imports for pytest fixtures; S105/S107: test credentials; S602/S605: shell=True for test infrastructure
 "tests/*" = ["F405", "S101", "S105", "S107", "S602", "S605"]
 # C901: generate_config complexity; TRY003: long exception messages

@@ -41,7 +41,70 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FULL_INPUT: ${{ inputs.full }}
-        run: python3 tools/ci_matrix.py
+          FAST_MARKER: not integration and not benchmark and not largedata and not slow
+          TESTS_FAST: |
+            {"include": [
+              {"os": "ubuntu-latest", "python-version": "3.10"},
+              {"os": "ubuntu-latest", "python-version": "3.14"},
+              {"os": "ubuntu-latest", "python-version": "3.14", "event-loop": "asyncio"},
+              {"os": "windows-latest", "python-version": "3.14"},
+              {"os": "windows-latest", "python-version": "3.14", "event-loop": "asyncio"}
+            ]}
+          TESTS_FULL: |
+            {"include": [
+              {"os": "ubuntu-latest", "python-version": "3.10"},
+              {"os": "ubuntu-latest", "python-version": "3.11"},
+              {"os": "ubuntu-latest", "python-version": "3.12"},
+              {"os": "ubuntu-latest", "python-version": "3.13"},
+              {"os": "ubuntu-latest", "python-version": "3.14"},
+              {"os": "ubuntu-latest", "python-version": "3.14", "event-loop": "asyncio"},
+              {"os": "ubuntu-24.04-arm", "python-version": "3.10"},
+              {"os": "ubuntu-24.04-arm", "python-version": "3.14"},
+              {"os": "macos-latest", "python-version": "3.10"},
+              {"os": "macos-latest", "python-version": "3.14"},
+              {"os": "windows-latest", "python-version": "3.10"},
+              {"os": "windows-latest", "python-version": "3.14"},
+              {"os": "windows-latest", "python-version": "3.14", "event-loop": "asyncio"}
+            ]}
+          MUSL_FAST: |
+            {"include": [
+              {"os": "ubuntu-latest", "image": "quay.io/pypa/musllinux_1_2_x86_64", "name": "musl-x86_64", "pyver": "314"}
+            ]}
+          MUSL_FULL: |
+            {"include": [
+              {"os": "ubuntu-latest", "image": "quay.io/pypa/musllinux_1_2_x86_64", "name": "musl-x86_64", "pyver": "310"},
+              {"os": "ubuntu-latest", "image": "quay.io/pypa/musllinux_1_2_x86_64", "name": "musl-x86_64", "pyver": "314"},
+              {"os": "ubuntu-24.04-arm", "image": "quay.io/pypa/musllinux_1_2_aarch64", "name": "musl-aarch64", "pyver": "310"},
+              {"os": "ubuntu-24.04-arm", "image": "quay.io/pypa/musllinux_1_2_aarch64", "name": "musl-aarch64", "pyver": "314"}
+            ]}
+          SCENARIO_FULL: |
+            {"include": [
+              {"os": "ubuntu-latest", "python-version": "3.10", "event-loop": "auto"},
+              {"os": "ubuntu-latest", "python-version": "3.10", "event-loop": "asyncio"},
+              {"os": "ubuntu-latest", "python-version": "3.11", "event-loop": "auto"},
+              {"os": "ubuntu-latest", "python-version": "3.11", "event-loop": "asyncio"},
+              {"os": "ubuntu-latest", "python-version": "3.12", "event-loop": "auto"},
+              {"os": "ubuntu-latest", "python-version": "3.12", "event-loop": "asyncio"},
+              {"os": "ubuntu-latest", "python-version": "3.13", "event-loop": "auto"},
+              {"os": "ubuntu-latest", "python-version": "3.13", "event-loop": "asyncio"},
+              {"os": "ubuntu-latest", "python-version": "3.14", "event-loop": "auto"},
+              {"os": "ubuntu-latest", "python-version": "3.14", "event-loop": "asyncio"}
+            ]}
+        run: |
+          # An explicit `full` input wins; otherwise only schedules run the full lane
+          if [ "$FULL_INPUT" = true ] || { [ "$FULL_INPUT" != false ] && [ "$EVENT_NAME" = schedule ]; }; then
+            echo full=true
+            echo marker=
+            echo "tests=$(jq -c . <<< "$TESTS_FULL")"
+            echo "musl=$(jq -c . <<< "$MUSL_FULL")"
+            echo "scenario=$(jq -c . <<< "$SCENARIO_FULL")"
+          else
+            echo full=false
+            echo "marker=$FAST_MARKER"
+            echo "tests=$(jq -c . <<< "$TESTS_FAST")"
+            echo "musl=$(jq -c . <<< "$MUSL_FAST")"
+            echo 'scenario={"include":[]}'
+          fi >> "$GITHUB_OUTPUT"
 
   quality:
     runs-on: ubuntu-latest
@@ -220,7 +283,7 @@ jobs:
           managed-python: "true"
 
       - name: Bring up the corporate proxy scenario environment
-        run: tools/scenario-env.sh up
+        run: tests/scenarios/env/scenario-env.sh up
 
       - name: Run the scenario suite
         timeout-minutes: 20
@@ -235,7 +298,7 @@ jobs:
         if: failure()
         run: |
           mkdir -p "${{ runner.temp }}/scenario-artifacts"
-          tools/scenario-env.sh logs > "${{ runner.temp }}/scenario-artifacts/compose.log" 2>&1 || true
+          tests/scenarios/env/scenario-env.sh logs > "${{ runner.temp }}/scenario-artifacts/compose.log" 2>&1 || true
           find "${{ runner.temp }}/px-scenario-tmp" -name 'px-*.log' \
             -exec cp {} "${{ runner.temp }}/scenario-artifacts/" \; 2>/dev/null || true
 
@@ -249,7 +312,7 @@ jobs:
 
       - name: Tear down the scenario environment
         if: always()
-        run: tools/scenario-env.sh down
+        run: tests/scenarios/env/scenario-env.sh down
 
   # GitHub's windows-latest runners have no Linux-container backend, so the
   # Docker corporate-proxy lab cannot run directly on the runner, and a
@@ -294,7 +357,7 @@ jobs:
         run: |
           service docker start
           for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
-          bash tools/scenario-env.sh up
+          bash tests/scenarios/env/scenario-env.sh up
 
       - name: px --test against the NTLM proxy with explicit credentials
         shell: bash
@@ -345,7 +408,7 @@ jobs:
       - name: Collect Squid and Samba logs from WSL2
         if: failure()
         shell: wsl-bash {0}
-        run: bash tools/scenario-env.sh logs > compose.log 2>&1 || true
+        run: bash tests/scenarios/env/scenario-env.sh logs > compose.log 2>&1 || true
 
       - name: Upload scenario logs
         if: failure()
@@ -360,4 +423,4 @@ jobs:
       - name: Tear down the scenario environment
         if: always()
         shell: wsl-bash {0}
-        run: bash tools/scenario-env.sh down
+        run: bash tests/scenarios/env/scenario-env.sh down

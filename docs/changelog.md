@@ -5,6 +5,12 @@
 ## Unreleased
 
 ### Internal
+- `test_wrong_password_block_and_authretry` counted every line Squid's
+  access log gained during the test, including the `dc` container's own
+  `HEALTHCHECK` probing its Squid port every 5 seconds, which Squid logs as a
+  headerless transaction; a probe landing inside the test's tight window
+  intermittently pushed real-suite runs over the assertion's allowed delta.
+  Now excludes that probe's log line instead of counting it as Px traffic.
 - Wired the real-Px corporate proxy scenario suite into `ci.yml`'s full
   matrix (`scenario-linux`: Ubuntu, Python 3.10–3.14, both event loops;
   `scenario-windows`: a native Windows Px against the lab's NTLM proxy with

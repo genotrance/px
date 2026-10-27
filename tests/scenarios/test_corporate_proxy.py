@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,8 @@ def _docker(*args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]
     command = [
         "docker",
         "compose",
+        "-p",
+        _read_env().get("SCENARIO_COMPOSE_PROJECT", "px-scenario"),
         "--project-directory",
         str(ENV_FILE.parent),
         "-f",
@@ -61,23 +64,8 @@ def _docker(*args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]
     )
 
 
-def _squid_sso_log_lines() -> int:
-    # dc's own HEALTHCHECK polls its Squid port with a bare `nc -z` every 5s,
-    # which Squid logs as a headerless "NONE_NONE/000" transaction; excluded
-    # so that noise can't be mistaken for Px's proxy traffic.
-    result = _docker(
-        "exec",
-        "-T",
-        "dc",
-        "sh",
-        "-c",
-        "grep -v 'NONE_NONE/000' /var/log/squid/access.log | wc -l",
-    )
-    return int(result.stdout.strip())
-
-
 @pytest.fixture(scope="session")
-def scenario_env() -> dict[str, str]:
+def scenario_env() -> Iterator[dict[str, str]]:
     started = False
     if os.getenv("PX_SCENARIO_ENV") == "start":
         subprocess.run([str(ENV_TOOL), "up"], check=True, timeout=300)  # noqa: S603
@@ -88,13 +76,33 @@ def scenario_env() -> dict[str, str]:
             "corporate proxy scenario environment is not running; use tools/scenario-env.sh up or PX_SCENARIO_ENV=start"
         )
     try:
-        with socket.create_connection(("127.0.0.1", 31280), timeout=1):
+        port = int(values["SCENARIO_BASIC_PROXY"].rsplit(":", 1)[1])
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
             pass
     except OSError:
         pytest.skip("corporate proxy scenario.env exists but its proxies are not reachable")
     yield values
     if started:
         subprocess.run([str(ENV_TOOL), "down"], check=True, timeout=120)  # noqa: S603
+
+
+def _toxiproxy(env: dict[str, str], method: str, path: str, body: bytes | None = None) -> bytes:
+    request = urllib.request.Request(  # noqa: S310
+        f"{env['SCENARIO_TOXIPROXY_API']}{path}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
+        return response.read()
+
+
+@pytest.fixture(autouse=True)
+def fault_free(scenario_env):
+    """Every scenario starts and ends with no Toxiproxy toxic on the SSO hop."""
+    _toxiproxy(scenario_env, "POST", "/reset")
+    yield
+    _toxiproxy(scenario_env, "POST", "/reset")
 
 
 @pytest.fixture(scope="session")
@@ -247,12 +255,14 @@ def _status(px: PxProcess, url: str = ORIGIN_HTTP) -> int:
     return 200 if result.stdout == BODY else 502
 
 
-@pytest.mark.parametrize("scheme", ["NTLM", "BASIC", "DIGEST"])
-@pytest.mark.parametrize("source", ["proxy", "pac"])
+@pytest.mark.parametrize(
+    ("source", "scheme"),
+    # The lab PAC intentionally selects its SSO (NTLM/Negotiate) proxy
+    [("proxy", "NTLM"), ("proxy", "BASIC"), ("proxy", "DIGEST"), ("pac", "NTLM")],
+    ids=["proxy-NTLM", "proxy-BASIC", "proxy-DIGEST", "pac-NTLM"],
+)
 def test_px_test_credentials(scenario_env, tmp_path, scheme, source):
     """`px --test` succeeds with the same proxy/PAC and PX_PASSWORD users supply."""
-    if source == "pac" and scheme not in {"NTLM", "NEGOTIATE"}:
-        pytest.skip("the lab PAC intentionally selects its SSO (NTLM/Negotiate) proxy")
     proxy, username = _scheme_config(scenario_env, scheme)
     config = tmp_path / "empty.ini"
     config.touch()
@@ -291,10 +301,21 @@ def test_kerberos_ticket_no_password(scenario_env, kerberos_cache, tmp_path):
         px.assert_healthy()
 
 
+def _sso_origin_requests() -> int:
+    """Count SSO Squid log entries for origin requests.
+
+    The DC's health check connects to Squid every few seconds and logs a
+    `NONE_NONE/000` entry, so counting every line would include probes that
+    land during a test.
+    """
+    command = "grep -c ' http://origin.corp.test:8080/' /var/log/squid/access.log || true"
+    return int(_docker("exec", "-T", "dc", "sh", "-c", command).stdout.strip() or 0)
+
+
 @pytest.mark.parametrize("authretry", [0, 0.5], ids=["disabled", "interval"])
 def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
     """Repeated bad credentials are bounded and never leave Px hung or crashed."""
-    before = _squid_sso_log_lines()
+    before = _sso_origin_requests()
     with running_px(
         tmp_path,
         scenario_env,
@@ -307,7 +328,7 @@ def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
         time.sleep(authretry + 0.2)
         assert _status(px) != 200
         px.assert_healthy()
-    after = _squid_sso_log_lines()
+    after = _sso_origin_requests()
     # NTLM challenge exchanges add two log entries beyond Px's three attempts.
     assert after - before <= (7 if authretry else 5)
     with running_px(tmp_path, scenario_env, scheme="NTLM", authretry=authretry) as recovered:
@@ -319,7 +340,7 @@ def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
 @pytest.mark.parametrize("event_loop", ["auto", "asyncio"])
 @pytest.mark.parametrize("workers", [1, 2])
 def test_burst_25_px268(scenario_env, kerberos_cache, tmp_path, scheme, protocol, event_loop, workers):
-    """px#268 regression: 25 simultaneous real-client requests all complete."""
+    """px#268 load half: 25 simultaneous real-client requests all complete."""
     cache = kerberos_cache if scheme == "NEGOTIATE" else None
     with running_px(
         tmp_path,
@@ -330,17 +351,82 @@ def test_burst_25_px268(scenario_env, kerberos_cache, tmp_path, scheme, protocol
         kerberos_cache=cache,
     ) as px:
         url = ORIGIN_HTTPS if protocol == "https" else ORIGIN_HTTP
-        gate = threading.Barrier(25)
-
-        def request(_):
-            gate.wait(timeout=10)
-            result = _curl(px, url, timeout=30)
-            return result.returncode, result.stdout, result.stderr
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as pool:
-            results = list(pool.map(request, range(25)))
+        results = _burst(px, url)
         assert all(code == 0 and body == BODY for code, body, _ in results), results
         assert not any(b"407" in error or b"502" in error for _, _, error in results)
+        px.assert_healthy()
+
+
+def _burst(px: PxProcess, url: str, count: int = 25) -> list[tuple[int, bytes, bytes]]:
+    gate = threading.Barrier(count)
+
+    def request(_):
+        gate.wait(timeout=10)
+        result = _curl(px, url, timeout=30)
+        return result.returncode, result.stdout, result.stderr
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
+        return list(pool.map(request, range(count)))
+
+
+# Squid's first 407 is ~0.5 KiB of headers plus a 3 KiB error page: cutting the
+# stream at 1500 bytes drops every handshake after its 407 status line arrived.
+CUT_407_BYTES = 1500
+
+
+@pytest.mark.parametrize("scheme", ["NTLM", "ANY"])
+@pytest.mark.parametrize("protocol", ["http", "https"])
+@pytest.mark.parametrize("event_loop", ["auto", "asyncio"])
+def test_cut_handshakes_do_not_lock_out_proxy_px268(
+    scenario_env, kerberos_cache, tmp_path, scheme, protocol, event_loop
+):
+    """px#268: a network drop during a burst of SSO handshakes must not lock Px out.
+
+    The SSO Squid is reached through Toxiproxy, which cuts each connection in
+    the middle of its first 407, as a Wi-Fi change or VPN drop does. libcurl
+    then still reports that intermediate 407 as the CONNECT code. pymcurl
+    8.23.0.2 counted every such cut handshake as a failed login, blocked the
+    proxy after three, and Px answered every later request with
+    `401 Proxy server authentication failed` until it was restarted. Once the
+    network is back, the same 25-client burst must succeed again.
+
+    NTLM always needs a 407 leg. Negotiate is cut only when Px starts without
+    a token, as with the default `--auth=ANY` and a Kerberos ticket (the issue
+    reporter's single sign-on setup): `--auth=NEGOTIATE` sends its token in the
+    first request, so there is no 407 to interrupt. With ANY, Px also sends
+    the token up front once a request has found the method, so that variant
+    cuts the first burst after Px starts, as when `px --test` or a browser
+    fires while the VPN is still reconnecting.
+    """
+    cache = kerberos_cache if scheme == "ANY" else None
+    proxy = scenario_env["SCENARIO_TOXIPROXY"]
+    if scheme == "ANY":
+        proxy = proxy.replace("127.0.0.1", "localhost")
+    url = ORIGIN_HTTPS if protocol == "https" else ORIGIN_HTTP
+    with running_px(
+        tmp_path,
+        scenario_env,
+        scheme=scheme,
+        proxy=proxy,
+        event_loop=event_loop,
+        kerberos_cache=cache,
+    ) as px:
+        if scheme == "NTLM":
+            assert _curl(px, url).stdout == BODY
+        toxic = (
+            '{"name":"cut407","type":"limit_data","stream":"downstream","toxicity":1.0,'
+            f'"attributes":{{"bytes":{CUT_407_BYTES}}}}}'
+        )
+        _toxiproxy(scenario_env, "POST", "/proxies/sso/toxics", toxic.encode())
+        try:
+            dropped = _burst(px, url)
+        finally:
+            _toxiproxy(scenario_env, "DELETE", "/proxies/sso/toxics/cut407")
+        # The fault must really have cut handshakes, or the check below is vacuous
+        assert sum(body != BODY for _, body, _ in dropped) >= 3, dropped
+        recovered = _burst(px, url)
+        failures = [(code, body[-200:], error) for code, body, error in recovered if code or body != BODY]
+        assert not failures, f"{len(failures)}/25 requests failed after the network recovered: {failures[:3]}"
         px.assert_healthy()
 
 

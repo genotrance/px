@@ -1,3 +1,5 @@
+# tools/scenario-env.sh sets the project name, ports, and subnet per
+# SCENARIO_INSTANCE so parallel checkouts each run a private lab.
 name: px-scenario
 
 x-proxy: &proxy
@@ -18,39 +20,39 @@ services:
     domainname: corp.test
     volumes:
       - shared:/shared
-    ports: ["127.0.0.1:31282:3128"]
+    ports: ["127.0.0.1:${SCENARIO_SSO_PORT:-31282}:3128"]
     networks:
       corp:
         aliases: [dc.corp.test, squid-sso.corp.test]
-        ipv4_address: 172.30.0.10
+        ipv4_address: ${SCENARIO_SUBNET:-172.30.0}.10
 
   squid-basic:
     <<: *proxy
     hostname: squid-basic
     domainname: corp.test
     environment: [SCHEME=basic]
-    ports: ["127.0.0.1:31280:3128"]
+    ports: ["127.0.0.1:${SCENARIO_BASIC_PORT:-31280}:3128"]
 
   squid-digest:
     <<: *proxy
     hostname: squid-digest
     domainname: corp.test
     environment: [SCHEME=digest]
-    ports: ["127.0.0.1:31281:3128"]
+    ports: ["127.0.0.1:${SCENARIO_DIGEST_PORT:-31281}:3128"]
 
   squid-close:
     <<: *proxy
     hostname: squid-close
     domainname: corp.test
     environment: [SCHEME=close, MAXCONN=16]
-    ports: ["127.0.0.1:31283:3128"]
+    ports: ["127.0.0.1:${SCENARIO_CLOSE_PORT:-31283}:3128"]
 
   squid-parent:
     <<: *proxy
     hostname: squid-parent
     domainname: corp.test
     environment: [SCHEME=parent]
-    ports: ["127.0.0.1:31284:3128"]
+    ports: ["127.0.0.1:${SCENARIO_PARENT_PORT:-31284}:3128"]
     networks:
       corp:
         aliases: [squid-parent.corp.test]
@@ -63,20 +65,20 @@ services:
     depends_on:
       squid-parent:
         condition: service_healthy
-    ports: ["127.0.0.1:31285:3128"]
+    ports: ["127.0.0.1:${SCENARIO_CHAIN_PORT:-31285}:3128"]
 
   origin:
     build: ./origin
     hostname: origin
     domainname: corp.test
-    environment: [PAC_PROXY=127.0.0.1:31282]
+    environment: ["PAC_PROXY=127.0.0.1:${SCENARIO_SSO_PORT:-31282}"]
     volumes:
       - shared:/shared
     ports:
-      - "127.0.0.1:18080:8080"
-      - "127.0.0.1:18443:8443"
-      - "127.0.0.1:18081:8081"
-      - "127.0.0.1:18888:8888"
+      - "127.0.0.1:${SCENARIO_HTTP_ORIGIN_PORT:-18080}:8080"
+      - "127.0.0.1:${SCENARIO_HTTPS_ORIGIN_PORT:-18443}:8443"
+      - "127.0.0.1:${SCENARIO_PAC_PORT:-18081}:8081"
+      - "127.0.0.1:${SCENARIO_ECHO_PORT:-18888}:8888"
     networks:
       corp:
         aliases: [origin.corp.test, pac.corp.test, echo.corp.test]
@@ -90,8 +92,8 @@ services:
       dc:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8474:8474"
-      - "127.0.0.1:31286:8666"
+      - "127.0.0.1:${SCENARIO_TOXIPROXY_API_PORT:-8474}:8474"
+      - "127.0.0.1:${SCENARIO_TOXIPROXY_PORT:-31286}:8666"
     networks: [corp]
 
   client:
@@ -117,7 +119,7 @@ networks:
   corp:
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: ${SCENARIO_SUBNET:-172.30.0}.0/24
 
 volumes:
   shared:

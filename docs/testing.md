@@ -60,12 +60,25 @@ removes the project containers, network, named volume, CA, and generated env
 file. Use `status`, `logs [service]`, or `env` to inspect the lab without
 changing it.
 
+`SCENARIO_INSTANCE` (an integer from 0 to 50, default 0) selects a private lab
+instance: instance N uses Compose project `px-scenario-N`, subnet
+`172.30.N.0/24`, and host ports shifted by `10 * N` (instance 7 serves Basic
+on `31350`, the Toxiproxy API on `8544`, and so on). `scenario.env` records the
+instance's project name and endpoints, and the scenario tests read both from
+it, so set the variable only for `tools/scenario-env.sh`. Previously every
+checkout shared one fixed `px-scenario` project, so a second `up` from
+another checkout silently replaced the first lab's containers in the middle of
+its run, and requests failed for reasons that had nothing to do with Px. `up`,
+`smoke`, and `down` now refuse an instance whose containers another checkout
+started. Pick a different instance when several checkouts or agents test in
+parallel.
+
 The fixed test identity is `CORP\pxgood` / `GoodPass1!` in realm `CORP.TEST`.
 `CORP\pxother` / `OtherPass2!` supports identity-isolation tests, and
 `WrongPass9!` is the deliberately invalid password. These credentials are
 public test data and must never be reused outside this local environment.
 
-| Host endpoint | Purpose |
+| Instance 0 endpoint | Purpose |
 |---|---|
 | `127.0.0.1:31280` | Squid Basic authentication |
 | `127.0.0.1:31281` | Squid Digest authentication |
@@ -79,8 +92,15 @@ public test data and must never be reused outside this local environment.
 | `127.0.0.1:18081/proxy.pac` | PAC file selecting the SSO proxy for `.corp.test` |
 | `127.0.0.1:18888` | Long-lived raw TCP echo endpoint |
 
-The origin also provides `/small`, `/large`, `/stream`, and `/slow`. Every
-Squid limits one client address to 16 concurrent connections. The smoke check
+The origin also provides `/small`, `/large`, `/stream`, and `/slow`. Its HTTPS
+listener completes each TLS handshake in that connection's own thread, with a
+listen backlog of 128. It used to wrap the listening socket instead, which
+ran every handshake one at a time inside `accept()` with a backlog of 5. One
+tunnel whose ClientHello was still in flight then stalled every queued
+connection, and HTTPS bursts failed with `curl: (35) ... unexpected eof while
+reading` on every mcurl version and every auth scheme, Basic included.
+Each Squid limits one client address to 64 concurrent connections, and the
+connection-close Squid to 16. The smoke check
 runs from the client container so Docker DNS resolves the deterministic
 `.corp.test` names; it verifies success and 407 rejection for Basic, Digest,
 NTLM, and Kerberos over both HTTP and HTTPS CONNECT, then checks the chain,
@@ -91,9 +111,14 @@ not AD replication, transparent interception, TLS inspection, or proxy
 auto-discovery. The self-signed certificate is an origin certificate rather
 than a TLS-inspection CA. The Samba DC container alone runs privileged because
 its AD database requires filesystem ACL/xattr operations; its AD ports remain
-private to the Compose network. Toxiproxy is configured without a toxic by default;
-scenario tests add and remove latency, timeout, reset, or bandwidth toxics
-through its API so one test cannot contaminate another.
+private to the Compose network. Toxiproxy is configured without a toxic by default.
+Scenario tests add toxics through its API, and an autouse fixture resets
+Toxiproxy (`POST /reset`) before and after every test, so a toxic left behind
+by an interrupted test cannot affect the next one. The wrong-password scenario
+bounds how many requests Px sends to the SSO Squid by counting only the
+access-log entries for origin requests. The DC's Docker health check logs a
+`NONE_NONE/000` entry every few seconds, and counting every line made the
+bound fail at random.
 
 #### Real Px scenarios
 
@@ -101,12 +126,34 @@ through its API so one test cannot contaminate another.
 same entry point as the `px` console script, and sends traffic from curl and
 Python's HTTP client. The suite covers `px --test` through an explicit proxy
 and PAC, a test-owned Kerberos ticket cache, wrong-password blocking and
-`--authretry`, the px#268 25-client burst regression, sustained CONNECT
+`--authretry`, the px#268 25-client burst and cut-handshake regressions, sustained CONNECT
 tunnels, connection-close behaviour, a mid-handshake reset, Squid connection
 limits, a child/parent proxy chain, and PAC proxy-versus-DIRECT selection.
 Authentication coverage includes NTLM, Negotiate, Basic, and Digest; the burst
 matrix also covers HTTP, HTTPS CONNECT, `auto` and `asyncio` event loops, and
 one and two workers.
+
+`test_cut_handshakes_do_not_lock_out_proxy_px268` reproduces px#268 itself,
+which a clean load burst never triggers. It routes Px to the real SSO Squid
+through Toxiproxy with a `limit_data` toxic. The toxic cuts every connection
+1500 bytes into the downstream stream, which is inside the body of Squid's
+first 407 (about 0.5 KiB of headers plus a 3 KiB error page), as a Wi-Fi
+change or VPN drop would. libcurl then still reports that intermediate 407 as
+the CONNECT code. pymcurl 8.23.0.2 counted each cut handshake as a failed
+login and blocked the proxy after three. With `authretry=0`, Px then answered
+every later request with `401 Proxy server authentication failed`, which is
+what the issue reporter saw from `px --test`. The test asserts that at least
+three requests were really cut, removes the toxic, and requires a second
+25-client burst to succeed completely.
+
+It runs NTLM (`--auth=NTLM` after one successful request) and Negotiate
+single sign-on (the reporter's default `--auth=ANY` with a Kerberos ticket,
+cut on the first burst after Px starts). With `--auth=NEGOTIATE`, or with ANY
+once Px has found the method, the token goes in the first request, so there
+is no 407 leg to cut. Each scheme runs over HTTP and HTTPS CONNECT on both
+event loops. Only the HTTPS CONNECT variants fail on pymcurl 8.23.0.2. For
+plain HTTP, 8.23.0.2 never counted the cut handshake, so those variants guard
+recovery and must pass on every version.
 
 The scenarios skip with an actionable message when the lab is absent. A plain
 test run therefore remains quick, while an already-running lab makes the
@@ -122,7 +169,7 @@ PX_SCENARIO_ENV=start uv run --locked python -m pytest \
 # Reuse a lab started separately and run only the px#268 matrix.
 tools/scenario-env.sh up
 uv run --locked python -m pytest tests/scenarios -m scenario \
-  -k burst_25_px268 -v
+  -k px268 -v
 tools/scenario-env.sh down
 ```
 
@@ -131,8 +178,11 @@ A complete warm run is expected to take about 1.5-3 minutes, including the two
 normal authentication proxies allow the 25-client regression burst, while the
 connection-close variant retains a 16-connection limit for overload testing. Every
 subprocess and network operation has a bounded timeout, and scenarios assert
-that Px remains alive without a traceback. The burst test is deliberately not
-an xfail: pymcurl 8.23.0.2 must fail it, while mcurl devel must pass.
+that Px remains alive without a traceback. The cut-handshake test is
+deliberately not an xfail: its HTTPS variants must fail on pymcurl 8.23.0.2
+and pass on mcurl devel (pymcurl 8.23.0.3), while the rest of the suite passes
+on both. Because the lab is deterministic, any other failure is a real
+regression.
 
 The lab remains a focused single-site Debian Squid model. AD replication,
 transparent interception, TLS inspection, WPAD, platform SSPI, and interaction

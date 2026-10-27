@@ -271,6 +271,10 @@ SSPI is enabled by default on Windows; disable with `--client-nosspi`.
 Multiple client users are supported when using keyring — add each user under the
 `PxClient` network address.
 
+When a client credential or authentication token is rejected, Px returns a
+`407 Proxy Authentication Required` response with fresh challenges so the client
+can retry or select another supported mechanism on the same connection.
+
 ## Examples
 
 Use `proxyserver.com:80` and allow requests from localhost only:

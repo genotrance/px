@@ -15,6 +15,14 @@
   cannot double-publish. `publish.yml` keeps re-publishing Docker and Winget
   for an existing version.
 
+## v0.13.1
+
+### Bug fixes
+- Failed downstream client authentication now returns a fresh `407 Proxy
+  Authentication Required` challenge rather than an origin-server `401`, and
+  correctly restarts connection-oriented NEGOTIATE/NTLM authentication after a
+  scheme change or failed exchange.
+
 ## v0.13.0 — 2026-10-24
 
 ### Improvements

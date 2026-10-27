@@ -13,6 +13,10 @@ with.
 
 Px uses libcurl and supports all the authentication mechanisms supported by
 [libcurl](https://curl.se/libcurl/c/CURLOPT_HTTPAUTH.html).
+It automatically uses winloop on Windows or uvloop on Linux and macOS when
+available; use `--event-loop=asyncio` to select the standard Python event loop.
+After repeated upstream authentication failures, Px also retries a blocked
+proxy periodically instead of sending every request into another 407 response.
 
 **Requires Python ≥ 3.10**
 
@@ -70,6 +74,8 @@ Common options:
 | `--hostonly` | Restrict to local interfaces |
 | `--noproxy=LIST` | Hosts/IPs that bypass the upstream proxy |
 | `--auth=TYPE` | Force upstream auth type (ANY, NTLM, NEGOTIATE, BASIC, NONE) |
+| `--event-loop=MODE` | Select automatic or standard-asyncio event loop |
+| `--authretry=SECONDS` | Retry an upstream proxy blocked by repeated 407s (default 600) |
 | `--username=DOMAIN\user` | Username for upstream proxy auth |
 | `--log=4` | Log to stdout (verbose mode) |
 

@@ -17,9 +17,13 @@ Or using [pipx](https://pipx.pypa.io/):
 
     pipx install px-proxy
 
-These installs select the platform event loop automatically: `uvloop` on Linux
-and macOS, and `winloop` on Windows. Px falls back to Python's built-in
-`asyncio` event loop if that optional import is unavailable.
+These installs include Px's platform-specific event-loop dependency: `uvloop`
+on Linux and macOS, or `winloop` on Windows. There is no separate Px extra to
+select; pip chooses the dependency from the platform markers in
+`pyproject.toml`. Px falls back to Python's built-in `asyncio` event loop if
+the selected loop cannot be imported at runtime. `winloop` does not yet publish
+Python 3.15 wheels, so use a supported Python version on Windows until those
+wheels are available.
 
 On Windows, [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
 and [Scoop](https://scoop.sh) can also be used:
@@ -33,16 +37,16 @@ The whole point of Px is to help tools get through a typical corporate proxy.
 This means using a package manager to install Px might not always be feasible
 which is why Px offers prebuilt wheels:
 
-1. Download the `wheels` package for the target OS from the
-   [releases](https://github.com/genotrance/px/releases) page.
+1. Download the platform-specific `px-v<version>-<platform>-wheels` archive
+   from the [releases](https://github.com/genotrance/px/releases) page. Linux
+   archives use `.tar.gz`; Windows uses `.zip`.
 2. Extract and install:
 
-       python -m pip install px-proxy --no-index -f /path/to/wheels
+       python -m pip install --no-index -f /path/to/extracted-wheels px-proxy
 
-The matching platform archive includes Px's default event-loop dependency
-(`uvloop` for Linux and macOS, or `winloop` for Windows). It must remain in the
-archive because it is a declared dependency of `px-proxy`, even though Px can
-fall back to `asyncio` when the loop cannot be imported at runtime.
+The matching archive includes Px and all of its dependencies, including the
+platform event-loop package (`uvloop` or `winloop`). Keep all of its wheels in
+the extracted directory while installing.
 
 ## Standalone binary
 
@@ -133,9 +137,9 @@ python -m pip install .
 Px can be run as a local Python script without installation:
 
 ```bash
-pip install keyring keyrings.alt netaddr psutil "pymcurl>=8.23.0.2" pyspnego python-dotenv quickjs-ng
-pip install uvloop  # Linux/macOS
-pip install winloop  # Windows
+pip install h11 keyring keyrings.alt netaddr psutil "pymcurl>=8.23.0.2" pyspnego python-dotenv quickjs-ng
+pip install uvloop  # Linux/macOS; selected automatically by a package install
+pip install winloop  # Windows; no Python 3.15 wheels yet
 
 pythonw px.py  # run in the background
 python px.py   # run in a console window
@@ -161,6 +165,10 @@ pip:
     px --quit
     px --uninstall    # Windows only, if auto-start was set up
     python -m pip uninstall px-proxy
+
+For a `uv tool` install, run `uv tool uninstall px-proxy`; for pipx, run
+`pipx uninstall px-proxy`. Remove the extracted offline-wheel directory only
+after every installed package that uses it has been removed.
 
 Standalone binary: run `px --quit`, `px --uninstall` if auto-start was set up,
 then delete the folder containing the binary.

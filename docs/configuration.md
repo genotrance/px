@@ -49,7 +49,7 @@ The `--save` flag writes the current configuration to `px.ini`:
 | `--restart` | Quit and start a new instance |
 | `--password` | Prompt and save password to keyring |
 | `--client-password` | Prompt and save client password to keyring |
-| `--test[=URL]` | Test Px connectivity (defaults to httpbin.org); reports every check before failing if any fail |
+| `--test[=URL]` | Test Px connectivity (defaults to HTTP and HTTPS httpbin GET, POST, PUT, DELETE, and PATCH requests); prints each request's response details and `Passed` on success, then fails after all checks if any fail |
 
 ---
 
@@ -57,7 +57,7 @@ The `--save` flag writes the current configuration to `px.ini`:
 
 | Flag | Env var | INI key | Default | Description |
 |------|---------|---------|---------|-------------|
-| `--proxy=HOST:PORT` | `PX_SERVER` | `proxy:server` | *(none)* | Upstream proxy server(s), comma-separated |
+| `--proxy=HOST:PORT` or `--server=HOST:PORT` | `PX_SERVER` | `proxy:server` | *(none)* | Upstream proxy server(s), comma-separated |
 | `--pac=URL` | `PX_PAC` | `proxy:pac` | *(none)* | PAC file URL or local path |
 | `--pac_encoding=ENC` | `PX_PAC_ENCODING` | `proxy:pac_encoding` | auto-detect | PAC file encoding (auto-detects via Content-Type charset/BOM/UTF-8/cp1252/cp1251/Latin-1; set only if needed) |
 | `--listen=IP` | `PX_LISTEN` | `proxy:listen` | `127.0.0.1` | Local interface(s) to bind, comma-separated |
@@ -126,10 +126,13 @@ Set `--event-loop=asyncio` if the platform loop causes a compatibility issue.
 The choice is applied before Px starts workers, so it also applies to every
 child process.
 
-### Other flags
+### Logging and other flags
 
 | Flag | Description |
 |------|-------------|
+| `--debug` | Shortcut for `--log=1` (log to the Px script or binary directory) |
+| `--uniqlog` | Shortcut for `--log=3` (unique log file in the working directory) |
+| `--verbose` | Shortcut for `--log=4` (log to stdout) and implies `--foreground` |
 | `--config=PATH` | Specify config file path (also `PX_CONFIG`) |
 
 ---

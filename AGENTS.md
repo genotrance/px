@@ -33,6 +33,7 @@ Px has both **user-facing** and **developer-facing** documentation. Both must be
 ### Changelog
 
 - Each release in `docs/changelog.md` should separate **user-facing** changes (under `Bug fixes`, `New features`, `Improvements`) from **internal** changes (under `Internal`). Users should not need to read about tooling, CI, or refactoring unless it affects them directly.
+- `docs/changelog.md` is user-facing — terse, one line per user-visible change with issue/PR references, no implementation detail (detail belongs in the other docs).
 
 ### General principles
 
@@ -44,6 +45,7 @@ Px has both **user-facing** and **developer-facing** documentation. Both must be
 
 - Do not remove any capability or support unless explicitly asked by the user.
 - Do not weaken or delete tests without explicit direction.
+- Keep build and release helpers in build.sh or tools.py; do not add new top-level scripts, folders or tools without the user's approval; prefer extending existing files.
 
 ## Test coverage
 

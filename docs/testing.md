@@ -388,12 +388,62 @@ Why the split:
 3.14, macOS on 3.10 and 3.14 with `PX_CI_MINIMAL=1`, Windows on 3.10 and 3.14
 plus asyncio on 3.14), 4 `tests-musl` jobs (x86_64 and aarch64, Python 3.10 and
 3.14), `large-data-linux`, `large-data-windows`, 3 `benchmark` jobs (Ubuntu,
-macOS, Windows), `kerberos` and `quality`, with no `-m` override so the `slow`
-tests run too. The asyncio jobs set `PX_EVENT_LOOP=asyncio`; all other jobs
-cover automatic winloop/uvloop selection.
+macOS, Windows), `kerberos`, `quality`, 10 `scenario-linux` jobs and
+`scenario-windows`, with no `-m` override so the `slow` tests run too. The
+asyncio jobs set `PX_EVENT_LOOP=asyncio`; all other jobs cover automatic
+winloop/uvloop selection.
 
 Every pytest invocation in CI passes `--durations=30`, so each job log lists
 the 30 slowest tests; use it to spot tests that grow slow.
+
+### Real Px scenarios in CI
+
+Full mode also runs the Docker corporate-proxy lab's real-Px suite
+(`tests/scenarios`, marker `scenario`, see
+[Running tests](#corporate-proxy-scenario-environment)):
+
+- **`scenario-linux`** (`tools/ci_matrix.py`'s `SCENARIO` list) runs on
+  `ubuntu-latest` across Python 3.10–3.14 and both event loops (10 jobs, each
+  bringing the lab up and down itself with `tools/scenario-env.sh`). A job
+  that fails uploads an artifact with `docker compose logs` for every Squid,
+  the Samba domain controller, and every Px process's `--log=4` output; the
+  lab is torn down whether the suite passed, failed, or the job was
+  cancelled.
+- **`scenario-windows`** runs a real Windows Px against the same lab's NTLM
+  proxy (`127.0.0.1:31282`) with explicit credentials: `--auth=NTLM`,
+  `--username=CORP\pxgood`, `PX_PASSWORD` (keyring works the same way
+  locally). It checks `px --test` against the origin and then a 20-request
+  HTTPS burst through a running Px, both over the same connection-oriented
+  NTLM handshake the lab exists to exercise. GitHub's `windows-latest`
+  runners cannot run the lab's Linux containers directly, and a separate
+  Linux job cannot expose the lab either since jobs run on distinct machines
+  with no shared network between them. The job instead brings the lab up
+  inside WSL2 on the same runner (`Vampire/setup-wsl`); WSL2's built-in
+  localhost forwarding then makes the lab's `127.0.0.1` ports reachable from
+  the Windows side of the same job. This works because DNS for a proxied
+  target (`origin.corp.test`) is resolved by Squid inside the lab, never by
+  the client, so the Windows host never needs to resolve lab-internal names
+  itself.
+- **Domain-joined SSPI single sign-on is out of scope for GitHub runners.**
+  `--auth=NTLM`/`--auth=NEGOTIATE` with no `--username`/`--password` relies on
+  the OS caching a logged-on domain user's credentials (Windows SSPI, or a
+  Kerberos ticket on Linux/macOS); that requires the runner itself to be
+  joined to `CORP.TEST`, which GitHub-hosted runners cannot be. Verify it by
+  hand instead, on a domain-joined Windows host that can reach the lab's
+  Squid (or an equivalent corporate SSO proxy):
+  1. Join the host to the test domain (or point it at a real corporate
+     domain) and log on as a domain user the proxy accepts.
+  2. Run `px --auth=NTLM` (or `--auth=NEGOTIATE`) with no `--username` and no
+     `PX_PASSWORD`/keyring entry; confirm it authenticates using the logged-on
+     user's cached credentials alone.
+  3. Run `px --test` through that Px and confirm it passes.
+  4. Repeat the 20-request HTTPS burst used in `scenario-windows` through
+     that Px and confirm every request succeeds.
+  5. Safety-check wrong-password lockout: force a bad credential (for example
+     a second, deliberately mismatched account) and confirm Px surfaces the
+     407 instead of retrying into an account lockout, matching
+     `test_wrong_password_block_and_authretry` in
+     `tests/scenarios/test_corporate_proxy.py`.
 
 ### Coverage before a release
 
@@ -405,6 +455,14 @@ platforms: glibc and musl on x86_64 and aarch64, macOS arm64 and Windows amd64.
 `test-binary` runs on the devel dry run and on the master push that publishes,
 and the `release` job needs it to pass. The mechanics are in
 [Build](build.md#github-actions).
+
+The full set's `scenario-linux` and `scenario-windows` jobs mean the real-Px
+corporate-proxy scenario suite also runs on the devel dry run and the
+automatic-release candidate before every release.
+`tools/release-check.sh`'s `scenario` stage (default, part of `all`) runs the
+same suite locally first. The one thing neither covers is domain-joined SSPI
+single sign-on; see the manual checklist above, and run it before a release
+that touches NTLM/Negotiate or SSPI handling.
 
 ---
 

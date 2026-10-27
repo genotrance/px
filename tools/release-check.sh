@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Local replica of build.yml's Linux x86_64 release jobs (sdist, wheels,
 # binary, test-binary) using the same containers, commands and artifact
-# hand-offs as the workflow. Run this before dispatching build.yml.
+# hand-offs as the workflow, plus the real-Px scenario suite against the
+# Docker corporate-proxy lab (tools/scenario-env.sh). Run this before
+# dispatching build.yml.
 #
-# Usage: tools/release-check.sh [--fresh] [glibc|musl|all]
+# Usage: tools/release-check.sh [--fresh] [glibc|musl|scenario|all]
 #
 # Environment:
 #   RELEASE_CHECK_DIR  work directory (default: px-release-check under
@@ -12,9 +14,11 @@
 #   TEST_IMAGE_GLIBC   glibc test-binary container (default: ubuntu, as in build.yml)
 #
 # The current working tree (tracked and untracked, not ignored) is copied for
-# each job, so the checkout is never touched. Finished stages are recorded in
-# the work directory and skipped on re-runs while the tree is unchanged;
-# --fresh starts over.
+# each glibc/musl job, so the checkout is never touched. Finished stages are
+# recorded in the work directory and skipped on re-runs while the tree is
+# unchanged; --fresh starts over. The scenario stage runs directly against
+# the checkout (it builds nothing) and is skipped with a message, not a
+# failure, when Docker is unavailable.
 
 set -euo pipefail
 
@@ -27,12 +31,12 @@ TARGETS=()
 for arg in "$@"; do
     case "$arg" in
         --fresh) FRESH=1 ;;
-        glibc|musl) TARGETS+=("$arg") ;;
-        all) TARGETS+=(glibc musl) ;;
-        *) echo "Usage: $0 [--fresh] [glibc|musl|all]" >&2; exit 2 ;;
+        glibc|musl|scenario) TARGETS+=("$arg") ;;
+        all) TARGETS+=(glibc musl scenario) ;;
+        *) echo "Usage: $0 [--fresh] [glibc|musl|scenario|all]" >&2; exit 2 ;;
     esac
 done
-[ ${#TARGETS[@]} -gt 0 ] || TARGETS=(glibc musl)
+[ ${#TARGETS[@]} -gt 0 ] || TARGETS=(glibc musl scenario)
 
 # Keep in sync with the wheels, binary and test-binary matrices in build.yml
 # (verified by check_workflow below).
@@ -149,11 +153,33 @@ run_target() {
     log "$name: PASSED"
 }
 
+run_scenario() {
+    log "scenario: corporate proxy lab suite"
+    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        echo "Docker is not available; skipping the scenario stage" >&2
+        return
+    fi
+    "$REPO/tools/scenario-env.sh" up
+    local rc=0
+    (cd "$REPO" && uv run --locked python -m pytest tests/scenarios -m scenario -v --durations=30) || rc=$?
+    "$REPO/tools/scenario-env.sh" down
+    [ $rc -eq 0 ] || exit $rc
+    log "scenario: PASSED"
+}
+
 check_workflow
 TREE_HASH="$(tree_hash)"
 mkdir -p "$ROOT"
-build_sdist
 for t in "${TARGETS[@]}"; do
-    run_target "$t"
+    if [ "$t" != scenario ]; then
+        build_sdist
+        break
+    fi
+done
+for t in "${TARGETS[@]}"; do
+    case "$t" in
+        scenario) run_scenario ;;
+        *) run_target "$t" ;;
+    esac
 done
 log "release check passed for: ${TARGETS[*]} (work dir: $ROOT)"

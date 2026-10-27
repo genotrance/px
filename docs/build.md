@@ -172,6 +172,22 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   (`make docker-kerberos`) and runs the Kerberos integration tests against
   local MIT and Heimdal KDCs on Ubuntu. Exercises real ticket acquisition,
   renewal, expiry parsing, and Heimdal detection.
+- **scenario-linux** — full mode only; brings up the Docker corporate-proxy
+  lab (`tools/scenario-env.sh up`) and runs `tests/scenarios` (marker
+  `scenario`) on Ubuntu across Python 3.10–3.14 and both event loops (10
+  jobs), uploading Squid/Samba/Px logs as an artifact and tearing the lab
+  down whenever a job fails or finishes. See
+  [Testing](testing.md#ci-testing) and
+  [Testing](testing.md#corporate-proxy-scenario-environment).
+- **scenario-windows** — full mode only; runs real Px natively on
+  `windows-latest` against the same lab's NTLM proxy with explicit
+  credentials (`--auth=NTLM`, `--username`, `PX_PASSWORD`), including
+  `px --test` and a 20-request HTTPS burst through a running Px. GitHub's
+  Windows runners have no Linux-container backend, so the lab runs inside
+  WSL2 (`Vampire/setup-wsl`) on the same runner; WSL2's built-in localhost
+  forwarding exposes the lab's `127.0.0.1` ports to the Windows side of the
+  job. Domain-joined SSPI single sign-on cannot be exercised this way — see
+  the manual checklist in [Testing](testing.md#ci-testing).
 
 Every pytest call in the workflow passes `--durations=30` so the job logs show
 the slowest tests.
@@ -480,16 +496,21 @@ resolve the newest release from PyPI.
 CI on `devel` and `working` runs only the fast `ci.yml` set. It never runs
 `build_wheels` or the binary builds from `build.sh`, so the release jobs run only
 when `build.yml` is dispatched or pushed to `master`. Before merging `devel` into
-`master` for a release, run `tools/release-check.sh`, then the dry run
-`gh workflow run build.yml --ref devel`, which must pass. The dry run does not
-publish, because the `release` job is `master`-only. The first release build for
-v0.13.0 failed in every wheels job because `build.sh` used `pip wheel --upgrade`,
-an option `pip wheel` does not have. Nothing was published, but only the real
-jobs revealed the failure, and the dry run is slow and shared, so failures should
-be found locally first.
+`master` for a release, run `tools/release-check.sh` (now including the
+corporate-proxy scenario suite by default), then the dry run
+`gh workflow run build.yml --ref devel`, which also runs `ci.yml`'s full
+matrix including `scenario-linux` and `scenario-windows`; both must pass. The
+dry run does not publish, because the `release` job is `master`-only. The
+first release build for v0.13.0 failed in every wheels job because `build.sh`
+used `pip wheel --upgrade`, an option `pip wheel` does not have. Nothing was
+published, but only the real jobs revealed the failure, and the dry run is
+slow and shared, so failures should be found locally first. The release
+checklist also includes the manual domain-joined SSPI checklist in
+[Testing](testing.md#ci-testing), since GitHub runners cannot exercise it.
 
 The script replays the Linux x86_64 jobs of `build.yml` with Docker, using the
-same containers, `build.sh` functions and artifact hand-offs:
+same containers, `build.sh` functions and artifact hand-offs, plus a
+`scenario` stage that is not part of `build.yml`:
 
 1. `sdist` on the host with uv, refreshing `quickjs-ng`, into `wheel/`.
 2. `wheels` in `manylinux2014_x86_64` and `musllinux_1_2_x86_64`
@@ -499,13 +520,20 @@ same containers, `build.sh` functions and artifact hand-offs:
 4. `test-binary` in `ubuntu` and `musllinux_1_2_x86_64` against a fresh tree
    that only contains the binary archives, as the workflow's download step
    provides (`extract_archives`, then `test_binary` with tox).
+5. `scenario` brings up the Docker corporate-proxy lab
+   (`tools/scenario-env.sh up`) and runs `tests/scenarios -m scenario`
+   directly against the checkout, then tears the lab down. It needs no
+   wheels or binaries, so it skips with a message instead of failing when
+   Docker is unavailable, and ignores `--fresh` (there is no tree copy to
+   discard).
 
-Usage is `tools/release-check.sh [--fresh] [glibc|musl|all]`; the default is
-both. Each job works on its own copy of the working tree (tracked and
-untracked, not ignored) under `RELEASE_CHECK_DIR` (default `px-release-check`
-under `$ORC_SCRATCH_DIR` or `/tmp`), so the checkout never receives root-owned
-build output. Completed stages are remembered and skipped on re-runs, which
-makes iterating on a failing stage cheap; `--fresh` discards them. The glibc
+Usage is `tools/release-check.sh [--fresh] [glibc|musl|scenario|all]`; the
+default is all three. Each glibc/musl job works on its own copy of the
+working tree (tracked and untracked, not ignored) under `RELEASE_CHECK_DIR`
+(default `px-release-check` under `$ORC_SCRATCH_DIR` or `/tmp`), so the
+checkout never receives root-owned build output. Completed stages are
+remembered and skipped on re-runs, which makes iterating on a failing stage
+cheap; `--fresh` discards them. The glibc
 test container defaults to `ubuntu` as in `build.yml` and can be changed with
 `TEST_IMAGE_GLIBC`. The script fails if `build.yml` stops referencing the
 images it replays, so the two cannot drift silently. A full run downloads

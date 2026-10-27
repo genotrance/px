@@ -32,6 +32,7 @@ jobs:
       marker: ${{ steps.plan.outputs.marker }}
       tests: ${{ steps.plan.outputs.tests }}
       musl: ${{ steps.plan.outputs.musl }}
+      scenario: ${{ steps.plan.outputs.scenario }}
     steps:
       - uses: actions/checkout@v7
 
@@ -200,3 +201,157 @@ jobs:
       - name: Run Kerberos integration tests
         timeout-minutes: 10
         run: uv run --locked python -m pytest tests/test_kerberos.py -m integration -v --durations=30
+
+  scenario-linux:
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.scenario) }}
+    runs-on: ubuntu-latest
+    name: scenario py${{ matrix.python-version }} ${{ matrix.event-loop }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ matrix.python-version }}
+          managed-python: "true"
+
+      - name: Bring up the corporate proxy scenario environment
+        run: tools/scenario-env.sh up
+
+      - name: Run the scenario suite
+        timeout-minutes: 20
+        run: |
+          if [ "${{ matrix.event-loop }}" == "asyncio" ]; then
+            export PX_EVENT_LOOP=asyncio
+          fi
+          uv run --locked python -m pytest tests/scenarios -m scenario -v --durations=30 \
+            --basetemp="${{ runner.temp }}/px-scenario-tmp"
+
+      - name: Collect Squid, Samba and Px logs
+        if: failure()
+        run: |
+          mkdir -p "${{ runner.temp }}/scenario-artifacts"
+          tools/scenario-env.sh logs > "${{ runner.temp }}/scenario-artifacts/compose.log" 2>&1 || true
+          find "${{ runner.temp }}/px-scenario-tmp" -name 'px-*.log' \
+            -exec cp {} "${{ runner.temp }}/scenario-artifacts/" \; 2>/dev/null || true
+
+      - name: Upload scenario logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-logs-py${{ matrix.python-version }}-${{ matrix.event-loop }}
+          path: ${{ runner.temp }}/scenario-artifacts
+          retention-days: 7
+
+      - name: Tear down the scenario environment
+        if: always()
+        run: tools/scenario-env.sh down
+
+  # GitHub's windows-latest runners have no Linux-container backend, so the
+  # Docker corporate-proxy lab cannot run directly on the runner, and a
+  # separate Linux job cannot expose it either: jobs run on distinct
+  # machines with no shared network. WSL2 is the one place on this runner
+  # that can run the lab; its built-in localhost forwarding then makes the
+  # lab's 127.0.0.1 ports reachable from the Windows side of the same job,
+  # which is all a native Windows px needs (DNS for proxied targets such as
+  # origin.corp.test is resolved by Squid inside the lab, never by the
+  # client). This only exercises explicit-credential NTLM; domain-joined
+  # SSPI single sign-on cannot be set up on a GitHub runner at all (see
+  # docs/testing.md).
+  scenario-windows:
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
+    runs-on: windows-latest
+    name: scenario windows NTLM
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: "3.14"
+
+      - name: Set up WSL2
+        uses: Vampire/setup-wsl@v5
+        with:
+          distribution: Debian-12
+
+      - name: Install Docker in WSL2
+        shell: wsl-bash {0}
+        run: curl -fsSL https://get.docker.com | sh
+
+      - name: Bring up the corporate proxy scenario environment in WSL2
+        shell: wsl-bash {0}
+        run: |
+          service docker start
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+          bash tools/scenario-env.sh up
+
+      - name: px --test against the NTLM proxy with explicit credentials
+        shell: bash
+        env:
+          PX_PASSWORD: GoodPass1!
+        run: |
+          config="$RUNNER_TEMP/px-scenario-test.ini"
+          : > "$config"
+          uv run --locked python -m px --config="$config" --noproxy= \
+            --test=http://origin.corp.test:8080/small \
+            --proxy=127.0.0.1:31282 --auth=NTLM --username='CORP\pxgood'
+
+      - name: Run px and burst 20 HTTPS requests through it
+        shell: bash
+        env:
+          PX_PASSWORD: GoodPass1!
+        run: |
+          config="$RUNNER_TEMP/px-scenario-burst.ini"
+          : > "$config"
+          uv run --locked python -m px --config="$config" --foreground --log=4 \
+            --listen=127.0.0.1 --port=3129 --noproxy= \
+            --proxy=127.0.0.1:31282 --auth=NTLM --username='CORP\pxgood' \
+            --threads=64 --socktimeout=10 > "$RUNNER_TEMP/px-windows.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/px.pid"
+          for i in $(seq 1 30); do
+            curl --connect-timeout 1 --silent --output /dev/null http://127.0.0.1:3129
+            [ $? -ne 7 ] && break
+            sleep 1
+          done
+          fail=0
+          for i in $(seq 1 20); do
+            code=$(curl --silent --show-error --insecure --max-time 15 \
+              --proxy 127.0.0.1:3129 --output /dev/null --write-out '%{http_code}' \
+              https://origin.corp.test:8443/small) || code=000
+            [ "$code" = "200" ] || { echo "request $i failed: $code"; fail=1; }
+          done
+          kill "$(cat "$RUNNER_TEMP/px.pid")" 2>/dev/null || true
+          exit $fail
+
+      - name: Collect Px log
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p scenario-artifacts
+          cp "$RUNNER_TEMP/px-windows.log" scenario-artifacts/ 2>/dev/null || true
+
+      - name: Collect Squid and Samba logs from WSL2
+        if: failure()
+        shell: wsl-bash {0}
+        run: bash tools/scenario-env.sh logs > compose.log 2>&1 || true
+
+      - name: Upload scenario logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-logs-windows
+          path: |
+            scenario-artifacts
+            compose.log
+          retention-days: 7
+
+      - name: Tear down the scenario environment
+        if: always()
+        shell: wsl-bash {0}
+        run: bash tools/scenario-env.sh down

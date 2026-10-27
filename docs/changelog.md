@@ -13,7 +13,7 @@
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
 
 ### Internal
-- Real-proxy corporate scenario suite (Docker lab) added to CI and `tools/release-check.sh`.
+- Real-proxy corporate scenario suite (Docker lab) added to CI and `./build.sh release_check`.
 - Release workflow simplified: `build.yml` always builds and publishes; `auto-release.yml` dispatches it after fast-forwarding `master`.
 
 ## v0.13.0 — 2026-10-24
@@ -40,7 +40,7 @@
 - Re-running a partially published release no longer republishes existing artifacts.
 
 ### Internal
-- Release automation split into `build.yml` and `publish.yml`, with a weekly automatic patch release and a local `tools/release-check.sh`.
+- Release automation split into `build.yml` and `publish.yml`, with a weekly automatic patch release and a local `./build.sh release_check`.
 - CI split into fast and full matrices; macOS jobs use uv-managed CPython.
 - Added `uv.lock`, `px/resolver.py` and a `slow` pytest marker.
 

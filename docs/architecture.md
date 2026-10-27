@@ -17,10 +17,15 @@ scaling via `--workers`):
    `IPPROTO_TCP`). `handle_connection` sets `TCP_NODELAY` on every accepted
    TCP socket itself, because Windows `accept()` sockets report protocol 0 and plain asyncio
    would otherwise skip enabling it.
-   The event loop uses libuv via `winloop` on Windows and `uvloop` on
-   Linux/macOS for improved throughput and to avoid a CPython ProactorEventLoop
-   bug on Windows (#93821).  Falls back to the default asyncio event loop if
-   the libuv library is not available.  Additional worker processes can be
+   The event loop is chosen by `--event-loop` / `PX_EVENT_LOOP`
+   (`_configure_event_loop()` in `main.py`, run in the main process and again in
+   each worker after it parses its configuration). `auto` (default) uses libuv
+   via `winloop` on Windows and `uvloop` on Linux/macOS for improved throughput
+   and to avoid a CPython ProactorEventLoop bug on Windows (#93821), and falls
+   back to the standard asyncio loop if the libuv library is not installed;
+   `asyncio` always uses the standard loop. On Python 3.12+ the libuv loop is
+   passed to `asyncio.run()` as `loop_factory`; on 3.10-3.11 it is installed
+   as the global policy. Additional worker processes can be
    spawned with `--workers` on all platforms but the default is 1 since the
    async event loop handles concurrency efficiently.
 2. **Thread pool** (`--threads`, default 32) — blocking `mcurl.do()` calls are
@@ -253,7 +258,7 @@ mcurl tracks per-proxy authentication failures in `MCurl.failed` and refuses
 to send further requests to a proxy once `failure_threshold` (3) consecutive
 407s have been recorded — `Curl.set_proxy()` returns `False` and the handler
 sends 401 to the client without contacting the upstream proxy. `--authretry`
-(`STATE.authretry`, default `0`) is handed to `mcurl.MCurl.set_auth_retry()`
+(`STATE.authretry`, default `600` seconds; `0` disables retrying) is handed to `mcurl.MCurl.set_auth_retry()`
 right after the multi object is created in `parse_config()`. Px requires
 pymcurl 8.23.0.2 or newer, which supplies this API. mcurl itself owns all
 retry/backoff state (the
@@ -275,9 +280,9 @@ establishes the upstream connection (and performs proxy authentication if
 needed), the proxy must relay raw bytes bidirectionally between the client
 socket and the upstream socket until one side closes or an idle timeout fires.
 
-Plain-HTTP requests use the same `--idle` value as a transfer inactivity
-timeout: when the installed mcurl provides `Curl.set_low_speed`, the handler
-calls `set_low_speed(1, STATE.idle)` on non-CONNECT handles so a stalled
+Plain-HTTP requests use the same `--idle` value (default 30 seconds) as a
+transfer inactivity timeout: the handler calls `set_low_speed(1, STATE.idle)`
+on non-CONNECT handles so a stalled
 response is aborted by libcurl instead of blocking a worker thread.
 
 ### Design goals

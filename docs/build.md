@@ -143,11 +143,12 @@ candidate call it with `full: true`. Start the full set with
 are expensive, slow and few. The policy, per-mode job lists and rationale are in
 [Testing](testing.md#ci-testing).
 
-- **plan** — runs `tools/ci_matrix.py`, which resolves the mode (an explicit
-  `full` input wins, a schedule is full, push/PR is fast) and emits the
-  `tests` and `tests-musl` matrices as JSON plus the pytest `-m` expression
-  (empty in full mode, so slow tests run). Keeping both matrices in one
-  script gives each job kind a single definition instead of duplicated blocks.
+- **plan** — resolves the mode (an explicit `full` input wins, a schedule is
+  full, push/PR is fast) and emits the `tests`, `musl` and `scenario` matrices
+  as JSON plus the pytest `-m` expression (empty in full mode, so slow tests
+  run). The fast and full matrices are static lists in the step's `env`, so
+  each job kind has one definition in `ci.yml`; `tests/test_ci_plan.py` checks
+  the selection and job counts.
 - **quality** — runs `make check` (pre-commit, ruff, mypy).
 - **tests** — runs `pytest` across the planned matrix. Fast: Ubuntu Python
   3.10 and 3.14, Ubuntu asyncio, Windows Python 3.14 and asyncio (5 jobs).
@@ -173,7 +174,7 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   local MIT and Heimdal KDCs on Ubuntu. Exercises real ticket acquisition,
   renewal, expiry parsing, and Heimdal detection.
 - **scenario-linux** — full mode only; brings up the Docker corporate-proxy
-  lab (`tools/scenario-env.sh up`) and runs `tests/scenarios` (marker
+  lab (`tests/scenarios/env/scenario-env.sh up`) and runs `tests/scenarios` (marker
   `scenario`) on Ubuntu across Python 3.10–3.14 and both event loops (10
   jobs), uploading Squid/Samba/Px logs as an artifact and tearing the lab
   down whenever a job fails or finishes. See
@@ -199,7 +200,7 @@ started manually. Scheduled workflows run from the default `devel` branch, but
 this workflow explicitly checks out `master`; unreleased work on `devel` can
 therefore never enter an automatic release.
 
-`tools/auto_release.py` upgrades `uv.lock` and looks up the newest CPython
+`tools.py --auto-release` upgrades `uv.lock` and looks up the newest CPython
 3.14 patch published on python.org to compare against
 `.github/bundled-python-version`, which records the patch bundled by the last
 release. This lookup only decides whether a new patch is worth cutting a
@@ -255,7 +256,7 @@ A manual dispatch on `devel` is the single pre-release gate: it calls `ci.yml`
 with its full matrix at the same time as the release artifact jobs, so it
 checks every CI configuration plus every wheel, binary and built-artifact test
 before a merge to `master`. Run it with `gh workflow run build.yml --ref devel`
-after `tools/release-check.sh` passes, and do not merge until it is green.
+after `./build.sh release_check` passes, and do not merge until it is green.
 Publishing never runs from this dispatch because the `release` job is guarded
 by a master-only condition, so a devel dispatch is effectively a dry run.
 Master pushes do not call CI again. Automatic release already runs the full
@@ -491,12 +492,12 @@ resolve the newest release from PyPI.
   submission requires a `WINGET_TOKEN` repository secret (classic PAT with
   `public_repo` and `workflow` scopes).
 
-### Local release check (`tools/release-check.sh`)
+### Local release check (`./build.sh release_check`)
 
 CI on `devel` and `working` runs only the fast `ci.yml` set. It never runs
 `build_wheels` or the binary builds from `build.sh`, so the release jobs run only
 when `build.yml` is dispatched or pushed to `master`. Before merging `devel` into
-`master` for a release, run `tools/release-check.sh` (now including the
+`master` for a release, run `./build.sh release_check` (now including the
 corporate-proxy scenario suite by default), then the dry run
 `gh workflow run build.yml --ref devel`, which also runs `ci.yml`'s full
 matrix including `scenario-linux` and `scenario-windows`; both must pass. The
@@ -521,13 +522,13 @@ same containers, `build.sh` functions and artifact hand-offs, plus a
    that only contains the binary archives, as the workflow's download step
    provides (`extract_archives`, then `test_binary` with tox).
 5. `scenario` brings up the Docker corporate-proxy lab
-   (`tools/scenario-env.sh up`) and runs `tests/scenarios -m scenario`
+   (`tests/scenarios/env/scenario-env.sh up`) and runs `tests/scenarios -m scenario`
    directly against the checkout, then tears the lab down. It needs no
    wheels or binaries, so it skips with a message instead of failing when
    Docker is unavailable, and ignores `--fresh` (there is no tree copy to
    discard).
 
-Usage is `tools/release-check.sh [--fresh] [glibc|musl|scenario|all]`; the
+Usage is `./build.sh release_check [--fresh] [glibc|musl|scenario|all]`; the
 default is all three. Each glibc/musl job works on its own copy of the
 working tree (tracked and untracked, not ignored) under `RELEASE_CHECK_DIR`
 (default `px-release-check` under `$ORC_SCRATCH_DIR` or `/tmp`), so the

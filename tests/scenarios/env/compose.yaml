@@ -1,4 +1,4 @@
-# tools/scenario-env.sh sets the project name, ports, and subnet per
+# tests/scenarios/env/scenario-env.sh sets the project name, ports, and subnet per
 # SCENARIO_INSTANCE so parallel checkouts each run a private lab.
 name: px-scenario
 

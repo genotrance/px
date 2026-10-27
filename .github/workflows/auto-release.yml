@@ -56,7 +56,7 @@ jobs:
           PX_RELEASE_ROOT: ${{ github.workspace }}/release
         run: |
           BASE_SHA=$(git rev-parse HEAD)
-          python3 ../automation/tools/auto_release.py --output /tmp/auto-release.json
+          python3 ../automation/tools.py --auto-release --output /tmp/auto-release.json
           {
             echo "changed=$(jq -r .changed /tmp/auto-release.json)"
             echo "version=$(jq -r '.version // empty' /tmp/auto-release.json)"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 ENV_DIR="$ROOT/tests/scenarios/env"
 ENV_FILE=${SCENARIO_ENV_FILE:-"$ENV_DIR/scenario.env"}
 

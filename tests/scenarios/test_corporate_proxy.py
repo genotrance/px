@@ -27,7 +27,7 @@ pytestmark = pytest.mark.scenario
 
 ROOT = Path(__file__).parents[2]
 ENV_FILE = Path(__file__).parent / "env" / "scenario.env"
-ENV_TOOL = ROOT / "tools" / "scenario-env.sh"
+ENV_TOOL = ROOT / "tests" / "scenarios" / "env" / "scenario-env.sh"
 BODY = b"px scenario origin\n"
 ORIGIN_HTTP = "http://origin.corp.test:8080/small"
 ORIGIN_HTTPS = "https://origin.corp.test:8443/small"
@@ -73,7 +73,7 @@ def scenario_env() -> Iterator[dict[str, str]]:
     values = _read_env()
     if not values:
         pytest.skip(
-            "corporate proxy scenario environment is not running; use tools/scenario-env.sh up or PX_SCENARIO_ENV=start"
+            "corporate proxy scenario environment is not running; use tests/scenarios/env/scenario-env.sh up or PX_SCENARIO_ENV=start"
         )
     try:
         port = int(values["SCENARIO_BASIC_PROXY"].rsplit(":", 1)[1])

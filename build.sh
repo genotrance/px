@@ -1,6 +1,6 @@
 #!/bin/sh
 # CI helper functions for build.yml
-# Usage: . ./build.sh && <function> [args]
+# Usage: . ./build.sh && <function> [args]   or   ./build.sh <function> [args]
 
 set -e
 
@@ -389,11 +389,10 @@ test_binary() {
 
 # --- Local build and test ---
 
-# Build wheels, binary, and run tests locally using Docker containers
-# Usage: . ./build.sh && build_local [musl|glibc]
-build_local() {
-    TYPE="${1:-musl}"
-    case "$TYPE" in
+# Container images and shells of a local Linux x86_64 target (musl|glibc);
+# keep in sync with the wheels, binary and test-binary matrices in build.yml
+target_config() {
+    case "$1" in
         musl)
             NAME="linux-musl-x86_64"
             WHEELS_IMAGE="quay.io/pypa/musllinux_1_2_x86_64"
@@ -407,14 +406,21 @@ build_local() {
             WHEELS_IMAGE="quay.io/pypa/manylinux2014_x86_64"
             BINARY_IMAGE="$WHEELS_IMAGE"
             BINARY_SHELL="/bin/bash"
-            TEST_IMAGE="ubuntu"
+            TEST_IMAGE="${TEST_IMAGE_GLIBC:-ubuntu}"
             TEST_SHELL="/bin/bash"
             ;;
-        *)
-            echo "Usage: build_local [musl|glibc]"
-            return 1
-            ;;
+        *) return 1 ;;
     esac
+}
+
+# Build wheels, binary, and run tests locally using Docker containers
+# Usage: . ./build.sh && build_local [musl|glibc]
+build_local() {
+    TYPE="${1:-musl}"
+    target_config "$TYPE" || {
+        echo "Usage: build_local [musl|glibc]"
+        return 1
+    }
 
     WHEELS_DIR="px.dist-${NAME}-wheels/px.dist"
     HOSTUID="$(id -u)"
@@ -467,3 +473,147 @@ build_local() {
 
     echo "=== All done ==="
 }
+
+# --- Local release check ---
+
+# Local replica of build.yml's Linux x86_64 release jobs (sdist, wheels, binary,
+# test-binary) using the same containers, commands and artifact hand-offs, plus
+# the real-Px scenario suite against the Docker corporate-proxy lab
+# (tests/scenarios/env/scenario-env.sh). Run before dispatching build.yml.
+# Usage: ./build.sh release_check [--fresh] [glibc|musl|scenario|all]
+# Environment: RELEASE_CHECK_DIR (work dir, default px-release-check under
+#   $ORC_SCRATCH_DIR or /tmp), UV_PYTHON (host sdist build, default 3.13),
+#   TEST_IMAGE_GLIBC (glibc test container, default ubuntu).
+# The working tree (tracked and untracked, not ignored) is copied per job, so
+# the checkout is never touched. Finished stages are skipped on re-runs while
+# the tree is unchanged; --fresh starts over. The scenario stage runs against
+# the checkout and is skipped, not failed, when Docker is unavailable.
+
+rc_log() { printf '\n=== %s ===\n' "$*"; }
+
+rc_check_workflow() {
+    for img in "$@"; do
+        grep -q "image: \"$img\"\|container: \"$img\"" .github/workflows/build.yml || {
+            echo "build.yml no longer references $img; update target_config in build.sh" >&2
+            return 1
+        }
+    done
+}
+
+# Regular files only: skips deleted paths and non-file placeholders
+rc_tree_files() {
+    git ls-files -z --cached --others --exclude-standard --deduplicate |
+        xargs -0 sh -c 'for f; do if [ -f "$f" ]; then printf "%s\0" "$f"; fi; done' sh
+}
+
+rc_prepare() {
+    [ "$(cat "$1/.tree-hash" 2>/dev/null)" != "$RC_HASH" ] || return 0
+    mkdir -p "$1"
+    rm -f "$1"/.done-*
+    rc_tree_files | tar --null -T - -cf - | tar -C "$1" -xf -
+    echo "$RC_HASH" > "$1/.tree-hash"
+}
+
+# rc_stage <dir> <name> <command...>: run once, remember success
+rc_stage() {
+    _dir="$1" _name="$2"
+    shift 2
+    if [ -f "$_dir/.done-$_name" ]; then echo "(skipping $_name: already done in $_dir)"; return 0; fi
+    "$@"
+    touch "$_dir/.done-$_name"
+}
+
+# rc_run_in <dir> <image> <shell> <script> [docker args...]: run a build.sh
+# function in a container with the tree at /px, then give the files back to
+# the host user so the work directory stays removable
+rc_run_in() {
+    _dir="$1" _image="$2" _shell="$3" _script="$4"
+    shift 4
+    docker run --rm "$@" -v "$_dir":/px -w /px "$_image" "$_shell" -c \
+        "$_script; RC=\$?; chown -R $(id -u):$(id -g) /px 2>/dev/null || true; exit \$RC"
+}
+
+rc_sdist() {
+    rc_log "sdist (host, uv with latest quickjs-ng, as the sdist job)"
+    rc_prepare "$RC_ROOT/sdist"
+    rc_stage "$RC_ROOT/sdist" sdist sh -c "cd '$RC_ROOT/sdist' && uv sync --upgrade-package quickjs-ng &&
+        uv pip install -e . && uv pip install build twine && uv run --locked python tools.py --wheel"
+}
+
+rc_target() {
+    target_config "$1"
+    rc_log "$NAME: wheels in $WHEELS_IMAGE"
+    rc_prepare "$RC_ROOT/$1/wheels"
+    rc_stage "$RC_ROOT/$1/wheels" wheels rc_run_in "$RC_ROOT/$1/wheels" "$WHEELS_IMAGE" /bin/bash \
+        ". /px/build.sh && build_wheels"
+
+    rc_log "$NAME: binary in $BINARY_IMAGE"
+    _b="$RC_ROOT/$1/binary" _t="$RC_ROOT/$1/test"
+    rc_prepare "$_b"
+    # wheels artifact -> px.dist-NAME-wheels/px.dist/, sdist artifact -> wheel/
+    mkdir -p "$_b/px.dist-$NAME-wheels/px.dist" "$_b/wheel"
+    cp "$RC_ROOT/$1"/wheels/wheels/*.whl "$_b/px.dist-$NAME-wheels/px.dist/"
+    cp "$RC_ROOT"/sdist/wheel/* "$_b/wheel/"
+    rc_stage "$_b" binary rc_run_in "$_b" "$BINARY_IMAGE" "$BINARY_SHELL" ". /px/build.sh && build_binary $NAME"
+
+    rc_log "$NAME: test-binary in $TEST_IMAGE"
+    rc_prepare "$_t"
+    # binary artifact (px.dist-*/px-v*) -> fresh checkout, as test-binary downloads it
+    (cd "$_b" && for f in px.dist-*/px-v*; do mkdir -p "$_t/$(dirname "$f")" && cp "$f" "$_t/$f"; done)
+    rc_stage "$_t" extract sh -c "cd '$_t' && . ./build.sh && extract_archives $NAME"
+    rc_stage "$_t" test rc_run_in "$_t" "$TEST_IMAGE" /bin/sh ". /px/build.sh && test_binary $NAME" --privileged
+    rc_log "$NAME: PASSED"
+}
+
+rc_scenario() {
+    rc_log "scenario: corporate proxy lab suite"
+    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        echo "Docker is not available; skipping the scenario stage" >&2
+        return 0
+    fi
+    tests/scenarios/env/scenario-env.sh up
+    _rc=0
+    uv run --locked python -m pytest tests/scenarios -m scenario -v --durations=30 || _rc=$?
+    tests/scenarios/env/scenario-env.sh down
+    [ "$_rc" -eq 0 ] || return "$_rc"
+    rc_log "scenario: PASSED"
+}
+
+release_check() {
+    RC_FRESH=0 RC_TARGETS=""
+    for _arg in "$@"; do
+        case "$_arg" in
+            --fresh) RC_FRESH=1 ;;
+            glibc|musl|scenario) RC_TARGETS="$RC_TARGETS $_arg" ;;
+            all) RC_TARGETS="$RC_TARGETS glibc musl scenario" ;;
+            *) echo "Usage: release_check [--fresh] [glibc|musl|scenario|all]" >&2; return 2 ;;
+        esac
+    done
+    RC_TARGETS="${RC_TARGETS:-glibc musl scenario}"
+    RC_ROOT="${RELEASE_CHECK_DIR:-${ORC_SCRATCH_DIR:-/tmp}/px-release-check}"
+    export UV_PYTHON="${UV_PYTHON:-3.13}"
+    cd "$(dirname "$0")"
+
+    target_config glibc && _imgs="$WHEELS_IMAGE $BINARY_IMAGE"
+    target_config musl && _imgs="$_imgs $WHEELS_IMAGE $BINARY_IMAGE $TEST_IMAGE"
+    rc_check_workflow $_imgs
+    RC_HASH="$(rc_tree_files | tar --null -T - -cf - | sha256sum | cut -d' ' -f1)"
+    [ "$RC_FRESH" = 0 ] || rm -rf "$RC_ROOT"
+    mkdir -p "$RC_ROOT"
+    case "$RC_TARGETS" in *glibc*|*musl*) rc_sdist ;; esac
+    for _t in $RC_TARGETS; do
+        case "$_t" in scenario) rc_scenario ;; *) rc_target "$_t" ;; esac
+    done
+    rc_log "release check passed for:$RC_TARGETS (work dir: $RC_ROOT)"
+}
+
+# Run a function directly: ./build.sh <function> [args]
+case "${0##*/}" in
+    build.sh)
+        if [ $# -eq 0 ]; then
+            echo "Usage: ./build.sh <function> [args], e.g. build_local [musl|glibc] or release_check [--fresh] [glibc|musl|scenario|all]" >&2
+            exit 2
+        fi
+        "$@"
+        ;;
+esac

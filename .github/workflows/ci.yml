@@ -112,7 +112,7 @@ jobs:
           MARKER: ${{ needs.plan.outputs.marker }}
         run: |
           docker run --rm -e MARKER -v ${{ github.workspace }}:/px -w /px \
-            -v "$MCURL_WHEELS:/mcurl-wheels" -e UV_FIND_LINKS=/mcurl-wheels \
+            -v "$MCURL_WHEELS:/mcurl-wheels" -e UV_FIND_LINKS=/mcurl-wheels -e PX_REQUIRE_MCURL_FIX=1 \
             ${{ matrix.image }} /bin/bash -c '
               PY=/opt/python/cp${{ matrix.pyver }}-cp${{ matrix.pyver }}/bin/python3
               if [ ! -f "$PY" ]; then echo "Python ${{ matrix.pyver }} not found"; exit 1; fi

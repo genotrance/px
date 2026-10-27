@@ -2,7 +2,8 @@ name: "pymcurl devel wheels (temporary)"
 description: >-
   TEMPORARY until pymcurl 8.23.0.3 is on PyPI: download this runner's pymcurl
   wheels from the latest successful genotrance/mcurl devel build.yml dry run
-  and point pip and uv at them with PIP_FIND_LINKS and UV_FIND_LINKS. Remove
+  and point pip and uv at them with PIP_FIND_LINKS and UV_FIND_LINKS. Also
+  sets PX_REQUIRE_MCURL_FIX=1 so the px#268 burst test cannot skip. Remove
   this action and its callers once mcurl 8.23.0.3 is released (docs/build.md).
 
 runs:
@@ -39,4 +40,5 @@ runs:
           echo "MCURL_WHEELS=$dir"
           echo "PIP_FIND_LINKS=$dir"
           echo "UV_FIND_LINKS=$dir"
+          echo "PX_REQUIRE_MCURL_FIX=1"
         } >> "$GITHUB_ENV"

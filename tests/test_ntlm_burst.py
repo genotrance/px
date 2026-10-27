@@ -9,6 +9,7 @@ import socketserver
 import struct
 import threading
 
+import mcurl
 import pytest
 from fixtures import *  # noqa: F403
 from helpers import *  # noqa: F403
@@ -20,6 +21,12 @@ BURST_SIZE = 15
 # clear the old mcurl's accumulated failures before the second burst begins.
 INTERRUPTED_HANDSHAKES = BURST_SIZE
 RESPONSE_BODY = b"ntlm upstream ok"
+# TEMPORARY until pymcurl 8.23.0.3 is on PyPI (docs/build.md): mcurl added
+# Curl.get_os_errno while fixing px#268, so older installations skip the
+# interrupted-CONNECT test. CI sets PX_REQUIRE_MCURL_FIX=1 so it always runs
+# there and fails instead of being skipped silently.
+MCURL_HAS_CONNECT_FIX = hasattr(mcurl.Curl, "get_os_errno")
+REQUIRE_MCURL_FIX = os.environ.get("PX_REQUIRE_MCURL_FIX") == "1"
 
 
 def _type_2():
@@ -202,6 +209,10 @@ def test_ntlm_upstream_plain_http_burst(fake_ntlm_upstream, px_port, tmp_path, e
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])
+@pytest.mark.skipif(
+    not MCURL_HAS_CONNECT_FIX and not REQUIRE_MCURL_FIX,
+    reason="needs pymcurl>=8.23.0.3 (px#268)",
+)
 def test_ntlm_upstream_interrupted_connect_burst(fake_ntlm_upstream, px_port, tmp_path, event_loop):
     """Dropped Type 1 CONNECT handshakes must not block later NTLM tunnels."""
     subp, cmd, buffer = _start_px("NtlmConnectBurst", px_port, fake_ntlm_upstream, event_loop, tmp_path)

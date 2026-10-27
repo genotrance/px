@@ -35,7 +35,7 @@ dependencies = [
     "keyrings.alt",
     "netaddr",
     "psutil",
-    "pymcurl>=8.23.0.3",
+    "pymcurl>=8.23.0.2",
     "pyspnego",
     "python-dotenv",
     "quickjs-ng>=0.17.0.2",
@@ -76,10 +76,10 @@ envlist = ["py310", "py311", "py312", "py313", "py314", "binary"]
 [tool.tox.env_run_base]
 commands_pre = [["uv", "pip", "install", "keyring", "keyrings.alt", "psutil", "pytest", "pytest-cov", "pytest-xdist", "pytest-httpbin"]]
 commands = [["pytest", "-n", "auto", "tests"]]
-passenv = ["DBUS_SESSION_BUS_ADDRESS", "UV_PYTHON_PREFERENCE", "PX_CI_MINIMAL"]
+passenv = ["DBUS_SESSION_BUS_ADDRESS", "UV_PYTHON_PREFERENCE", "PX_CI_MINIMAL", "PX_REQUIRE_MCURL_FIX"]
 
 [tool.tox.env.binary]
-passenv = ["PXBIN", "DBUS_SESSION_BUS_ADDRESS", "PX_CI_MINIMAL"]
+passenv = ["PXBIN", "DBUS_SESSION_BUS_ADDRESS", "PX_CI_MINIMAL", "PX_REQUIRE_MCURL_FIX"]
 
 [tool.mypy]
 files = ["px"]

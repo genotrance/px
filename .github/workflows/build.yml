@@ -293,10 +293,12 @@ jobs:
           refresh-quickjs: "true"
           managed-python: "true"
 
+      # PX_REQUIRE_MCURL_FIX is TEMPORARY until pymcurl 8.23.0.3 is on PyPI
+      # (docs/build.md); native runners get it from setup-python-env.
       - name: Test (Linux container)
         if: runner.os == 'Linux'
         run: |
-          docker run --rm --privileged \
+          docker run --rm --privileged -e PX_REQUIRE_MCURL_FIX=1 \
             -v ${{ github.workspace }}:/px -w /px \
             ${{ matrix.container }} /bin/sh -c '. /px/build.sh && test_binary ${{ matrix.name }}'
 

@@ -86,10 +86,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # TEMPORARY until pymcurl 8.23.0.3 is on PyPI (docs/build.md). The
+      # pymcurl wheels collected here feed the binary and test-binary jobs.
+      - name: Use pymcurl devel wheels (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/mcurl-devel
+
       - name: Build wheels (Linux container)
         if: runner.os == 'Linux'
         run: |
           docker run --rm -v ${{ github.workspace }}:/px -w /px \
+            -v "$MCURL_WHEELS:/mcurl-wheels" -e PIP_FIND_LINKS=/mcurl-wheels \
             ${{ matrix.image }} /bin/bash -c '. /px/build.sh && build_wheels'
 
       - name: Build wheels (macOS/Windows)
@@ -103,6 +110,10 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: . ./build.sh && build_wheels
+
+      - name: Check pymcurl devel wheels
+        shell: bash
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} .github/actions/mcurl-devel/check.py wheels
 
       - uses: actions/upload-artifact@v7
         with:

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import http.server
 import os
 import socketserver
@@ -49,14 +50,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    # The default backlog of 5 overflows under the 25-client bursts.
+    request_queue_size = 128
+
+
+class TLSThreadingServer(ThreadingServer):
+    """Run each TLS handshake in its connection thread, not in accept().
+
+    Wrapping the listening socket handshakes serially on the serve thread: one
+    tunnel whose ClientHello is still in flight stalls every other accept, and
+    the burst scenarios then see origin-side resets that are not Px faults.
+    """
+
+    def __init__(self, address, handler, context):
+        self.context = context
+        super().__init__(address, handler)
+
+    def finish_request(self, request, client_address):
+        request.settimeout(30)
+        try:
+            tls = self.context.wrap_socket(request, server_side=True)
+        except OSError as error:
+            print(f"tls {client_address[0]} handshake failed: {error}", flush=True)
+            return
+        with tls:
+            super().finish_request(tls, client_address)
+
+    def shutdown_request(self, request):
+        # wrap_socket() detached the plain socket; the TLS socket is closed above
+        with contextlib.suppress(OSError):
+            super().shutdown_request(request)
 
 
 def serve(port, tls=False):
-    server = ThreadingServer(("0.0.0.0", port), Handler)  # noqa: S104
     if tls:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain("/shared/origin.crt", "/shared/origin.key")
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server = TLSThreadingServer(("0.0.0.0", port), Handler, context)  # noqa: S104
+    else:
+        server = ThreadingServer(("0.0.0.0", port), Handler)  # noqa: S104
     server.serve_forever()
 
 

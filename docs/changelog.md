@@ -26,6 +26,16 @@
   real Squid NTLM/Negotiate/Basic/Digest authentication, CONNECT, chained and
   connection-close proxies, constrained connections, Toxiproxy fault
   injection, HTTP/HTTPS/streaming origins, TCP echo, PAC, and a smoke driver.
+- Made the corporate-proxy scenarios deterministic. The HTTPS origin now
+  handshakes per connection thread with a real listen backlog instead of
+  serially in `accept()`, which had made every HTTPS burst fail with curl 35.
+  Toxiproxy is reset around every test. `SCENARIO_INSTANCE` gives each
+  checkout a private lab (its own project, ports, and subnet), and the tool
+  refuses to drive a lab that another checkout started.
+- Added a px#268 scenario that cuts real NTLM and Negotiate SSO handshakes
+  mid-407 during a 25-client burst and requires Px to recover. It fails on
+  pymcurl 8.23.0.2 with the reported `401 Proxy server authentication failed`
+  lockout.
 - `auto-release.yml` now dispatches `build.yml` on `master` after fast-forwarding
   it, because `GITHUB_TOKEN` pushes do not start workflows and the release
   would otherwise never be built or published.

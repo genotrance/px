@@ -2,6 +2,20 @@
 
 ---
 
+## v0.13.1 — 2026-10-27
+
+### Improvements
+- Refreshed locked dependencies:
+  - `importlib-metadata` 10.0.0, 9.0.1 -> 10.1.0, 9.0.1
+  - `platformdirs` 4.12.4, 4.13.5 -> 4.12.4, 4.13.6
+  - `python-discovery` 1.6.4 -> 1.6.5
+  - `virtualenv` 21.14.13 -> 21.15.0
+  - `winloop` 0.8.0 -> 0.8.1
+- Updated standalone binaries and Docker images from CPython 3.13.17
+  to the newest published CPython 3.13.18 patch release.
+
+---
+
 ## Unreleased
 
 ### Internal

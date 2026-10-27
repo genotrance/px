@@ -70,8 +70,7 @@ def scenario_env() -> dict[str, str]:
     values = _read_env()
     if not values:
         pytest.skip(
-            "corporate proxy scenario environment is not running; use "
-            "tools/scenario-env.sh up or PX_SCENARIO_ENV=start"
+            "corporate proxy scenario environment is not running; use tools/scenario-env.sh up or PX_SCENARIO_ENV=start"
         )
     try:
         with socket.create_connection(("127.0.0.1", 31280), timeout=1):
@@ -122,7 +121,7 @@ def _scheme_config(env: dict[str, str], scheme: str) -> tuple[str, str]:
     proxy = env["SCENARIO_SSO_PROXY"]
     if scheme == "NEGOTIATE":
         proxy = proxy.replace("127.0.0.1", "localhost")
-    return proxy, f'{env["SCENARIO_DOMAIN"]}\\{env["SCENARIO_USER"]}'
+    return proxy, f"{env['SCENARIO_DOMAIN']}\\{env['SCENARIO_USER']}"
 
 
 class PxProcess:
@@ -252,11 +251,7 @@ def test_px_test_credentials(scenario_env, tmp_path, scheme, source):
         "--noproxy=",
         f"--test={ORIGIN_HTTP}",
     ]
-    command.append(
-        f'--pac={scenario_env["SCENARIO_PAC_URL"]}'
-        if source == "pac"
-        else f"--proxy={_proxy_addr(proxy)}"
-    )
+    command.append(f"--pac={scenario_env['SCENARIO_PAC_URL']}" if source == "pac" else f"--proxy={_proxy_addr(proxy)}")
     proc_env = os.environ | {
         "PX_PASSWORD": scenario_env["SCENARIO_PASSWORD"],
         "PYTHONUNBUFFERED": "1",
@@ -404,7 +399,7 @@ def test_pac_proxy_and_direct_with_python_client(scenario_env, tmp_path):
     with running_px(tmp_path, scenario_env, scheme="NTLM", pac=scenario_env["SCENARIO_PAC_URL"]) as px:
         assert _curl(px, ORIGIN_HTTP).stdout == BODY
         conn = http.client.HTTPConnection("127.0.0.1", px.port, timeout=10)
-        conn.request("GET", f'{scenario_env["SCENARIO_HTTP_ORIGIN"]}/small')
+        conn.request("GET", f"{scenario_env['SCENARIO_HTTP_ORIGIN']}/small")
         response = conn.getresponse()
         assert response.status == 200
         assert response.read() == BODY

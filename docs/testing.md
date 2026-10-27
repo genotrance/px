@@ -120,6 +120,10 @@ access-log entries for origin requests. The DC's Docker health check logs a
 `NONE_NONE/000` entry every few seconds, and counting every line made the
 bound fail at random.
 
+The test helper starts every Px instance with an explicit empty config file,
+so a `px.ini` that `test_config` temporarily writes next to the px script under
+`pytest -n auto` cannot leak into other tests' Px processes.
+
 #### Real Px scenarios
 
 `tests/scenarios/test_corporate_proxy.py` starts Px through `python -m px`, the

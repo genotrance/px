@@ -1,0 +1,8 @@
+[
+  {
+    "name": "sso",
+    "listen": "0.0.0.0:8666",
+    "upstream": "squid-sso.corp.test:3128",
+    "enabled": true
+  }
+]

@@ -34,6 +34,67 @@ Tests live in `tests/`.
 
 ## Running tests
 
+### Corporate proxy scenario environment
+
+`tests/scenarios/env/` is a reproducible enterprise-proxy lab for scenario
+tests and manual regression work. It exists because protocol-shaped fake
+proxies do not reproduce connection-oriented NTLM, Kerberos tickets, Squid
+helper behaviour, CONNECT authentication, or failures between handshake
+rounds. The lab runs entirely in Docker and does not change the host's DNS,
+Kerberos, or Samba configuration.
+
+Start it and run its independent smoke check with:
+
+```bash
+tools/scenario-env.sh up
+tools/scenario-env.sh smoke
+tools/scenario-env.sh down
+```
+
+`up` builds pinned Debian 12.12 and Python 3.13.9/Alpine 3.22 images, waits for
+service health checks, exports the generated origin CA as
+`tests/scenarios/env/origin-ca.crt`, and writes the same `KEY=VALUE` inventory
+it prints to `tests/scenarios/env/scenario.env`. A cold build normally takes
+two to five minutes; subsequent starts reuse Docker's build cache. `down`
+removes the project containers, network, named volume, CA, and generated env
+file. Use `status`, `logs [service]`, or `env` to inspect the lab without
+changing it.
+
+The fixed test identity is `CORP\pxgood` / `GoodPass1!` in realm `CORP.TEST`.
+`CORP\pxother` / `OtherPass2!` supports identity-isolation tests, and
+`WrongPass9!` is the deliberately invalid password. These credentials are
+public test data and must never be reused outside this local environment.
+
+| Host endpoint | Purpose |
+|---|---|
+| `127.0.0.1:31280` | Squid Basic authentication |
+| `127.0.0.1:31281` | Squid Digest authentication |
+| `127.0.0.1:31282` | Domain-joined Squid offering Negotiate and NTLM fallback |
+| `127.0.0.1:31283` | Basic Squid with client/server persistence disabled |
+| `127.0.0.1:31284` | Unauthenticated parent Squid |
+| `127.0.0.1:31285` | Authenticating child Squid chained to the parent |
+| `127.0.0.1:31286` | Toxiproxy hop in front of the SSO Squid |
+| `127.0.0.1:8474` | Toxiproxy control API for latency/reset toxics |
+| `127.0.0.1:18080`, `18443` | HTTP and self-signed HTTPS origins |
+| `127.0.0.1:18081/proxy.pac` | PAC file selecting the SSO proxy for `.corp.test` |
+| `127.0.0.1:18888` | Long-lived raw TCP echo endpoint |
+
+The origin also provides `/small`, `/large`, `/stream`, and `/slow`. Every
+Squid limits one client address to 16 concurrent connections. The smoke check
+runs from the client container so Docker DNS resolves the deterministic
+`.corp.test` names; it verifies success and 407 rejection for Basic, Digest,
+NTLM, and Kerberos over both HTTP and HTTPS CONNECT, then checks the chain,
+connection-close proxy, and PAC response.
+
+Limitations: the lab models one AD site and one Squid version from Debian,
+not AD replication, transparent interception, TLS inspection, or proxy
+auto-discovery. The self-signed certificate is an origin certificate rather
+than a TLS-inspection CA. The Samba DC container alone runs privileged because
+its AD database requires filesystem ACL/xattr operations; its AD ports remain
+private to the Compose network. Toxiproxy is configured without a toxic by default;
+scenario tests add and remove latency, timeout, reset, or bandwidth toxics
+through its API so one test cannot contaminate another.
+
 ### Quick run
 
 ```bash

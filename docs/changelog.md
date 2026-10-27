@@ -5,6 +5,10 @@
 ## Unreleased
 
 ### Internal
+- Added a Docker corporate-proxy scenario environment with a Samba AD realm,
+  real Squid NTLM/Negotiate/Basic/Digest authentication, CONNECT, chained and
+  connection-close proxies, constrained connections, Toxiproxy fault
+  injection, HTTP/HTTPS/streaming origins, TCP echo, PAC, and a smoke driver.
 - `auto-release.yml` now dispatches `build.yml` on `master` after fast-forwarding
   it, because `GITHUB_TOKEN` pushes do not start workflows and the release
   would otherwise never be built or published.

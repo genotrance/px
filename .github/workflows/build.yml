@@ -181,7 +181,7 @@ jobs:
           check-latest: "true"
           refresh-quickjs: "true"
 
-      # Validate the selected 3.13 interpreter before the build. A newer
+      # Validate the selected 3.14 interpreter before the build. A newer
       # python.org patch is logged as a warning because build tools can lag.
       - name: Check bundled Python (Linux)
         if: runner.os == 'Linux'

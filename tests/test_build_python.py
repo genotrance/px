@@ -13,48 +13,48 @@ _spec.loader.exec_module(tools)
 def test_latest_python_selects_newest_release_with_requested_asset(monkeypatch):
     listings = {
         tools.PY_FTP: """
-            <a href="3.13.14/">3.13.14/</a>
-            <a href="3.13.17/">3.13.17/</a>
-            <a href="3.12.12/">3.12.12/</a>
+            <a href="3.14.14/">3.14.14/</a>
+            <a href="3.14.17/">3.14.17/</a>
+            <a href="3.13.12/">3.13.12/</a>
         """,
-        f"{tools.PY_FTP}3.13.14/": '<a href="python-3.13.14-embed-amd64.zip">',
-        f"{tools.PY_FTP}3.13.17/": '<a href="python-3.13.17-embed-amd64.zip">',
+        f"{tools.PY_FTP}3.14.14/": '<a href="python-3.14.14-embed-amd64.zip">',
+        f"{tools.PY_FTP}3.14.17/": '<a href="python-3.14.17-embed-amd64.zip">',
     }
     monkeypatch.setattr(tools, "fetch_text", listings.__getitem__)
 
-    assert tools.latest_python(asset=tools.PY_EMBED) == "3.13.17"
+    assert tools.latest_python(asset=tools.PY_EMBED) == "3.14.17"
 
 
 def test_latest_python_skips_release_without_requested_asset_yet(monkeypatch):
-    # python.org has published 3.13.17 but the embed zip for it is not up
+    # python.org has published 3.14.17 but the embed zip for it is not up
     # yet; this must not fail, just use the newest release that has one.
     listings = {
         tools.PY_FTP: """
-            <a href="3.13.16/">3.13.16/</a>
-            <a href="3.13.17/">3.13.17/</a>
+            <a href="3.14.16/">3.14.16/</a>
+            <a href="3.14.17/">3.14.17/</a>
         """,
-        f"{tools.PY_FTP}3.13.17/": '<a href="Python-3.13.17.tar.xz">',
-        f"{tools.PY_FTP}3.13.16/": '<a href="python-3.13.16-embed-amd64.zip">',
+        f"{tools.PY_FTP}3.14.17/": '<a href="Python-3.14.17.tar.xz">',
+        f"{tools.PY_FTP}3.14.16/": '<a href="python-3.14.16-embed-amd64.zip">',
     }
     monkeypatch.setattr(tools, "fetch_text", listings.__getitem__)
 
-    assert tools.latest_python(asset=tools.PY_EMBED) == "3.13.16"
+    assert tools.latest_python(asset=tools.PY_EMBED) == "3.14.16"
 
 
 def test_check_python_warns_when_upstream_is_newer(monkeypatch, capsys):
-    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.18")
-    monkeypatch.setattr(tools.platform, "python_version", lambda: "3.13.17")
+    monkeypatch.setattr(tools, "latest_python", lambda: "3.14.18")
+    monkeypatch.setattr(tools.platform, "python_version", lambda: "3.14.17")
 
     tools.check_python()
 
     assert (
-        "WARNING: bundled CPython 3.13.17 is older than newest published 3.13.x release 3.13.18"
+        "WARNING: bundled CPython 3.14.17 is older than newest published 3.14.x release 3.14.18"
         in capsys.readouterr().out
     )
 
 
 def test_check_python_rejects_wrong_minor(monkeypatch):
-    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.18")
+    monkeypatch.setattr(tools, "latest_python", lambda: "3.14.18")
     monkeypatch.setattr(tools.platform, "python_version", lambda: "3.12.9")
 
     with pytest.raises(SystemExit):
@@ -63,32 +63,32 @@ def test_check_python_rejects_wrong_minor(monkeypatch):
 
 def test_check_embed_uses_newest_available_zip_and_warns_when_it_lags(monkeypatch, capsys):
     def latest_python(_minor=tools.PY_MINOR, asset=None):
-        return "3.13.18" if asset is None else "3.13.17"
+        return "3.14.18" if asset is None else "3.14.17"
 
     monkeypatch.setattr(tools, "latest_python", latest_python)
 
-    assert tools.check_embed() == "3.13.17"
+    assert tools.check_embed() == "3.14.17"
     assert (
-        "WARNING: python.org has no python-3.13.18-embed-amd64.zip for newest 3.13.x release 3.13.18; bundling available 3.13.17"
+        "WARNING: python.org has no python-3.14.18-embed-amd64.zip for newest 3.14.x release 3.14.18; bundling available 3.14.17"
         in capsys.readouterr().out
     )
 
 
 def test_check_bundled_version_warns_when_upstream_is_newer(monkeypatch, capsys):
-    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.18")
+    monkeypatch.setattr(tools, "latest_python", lambda: "3.14.18")
 
-    tools.check_bundled_version("3.13.17", "test image")
+    tools.check_bundled_version("3.14.17", "test image")
 
     assert (
-        "WARNING: test image CPython 3.13.17 is older than newest published 3.13.x release 3.13.18"
+        "WARNING: test image CPython 3.14.17 is older than newest published 3.14.x release 3.14.18"
         in capsys.readouterr().out
     )
 
 
 def test_embed_rejects_requested_version_other_than_newest_available_zip(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tools, "latest_python", lambda asset=None: "3.13.17")
-    monkeypatch.setattr(tools, "get_argval", lambda _name: "3.13.16")
+    monkeypatch.setattr(tools, "latest_python", lambda asset=None: "3.14.17")
+    monkeypatch.setattr(tools, "get_argval", lambda _name: "3.14.16")
     _, _, wheels_dir = tools.get_paths("px.dist", "wheels")
     Path(wheels_dir).mkdir(parents=True)
 
@@ -103,15 +103,15 @@ def test_docker_python_pulls_base_image_and_warns_when_upstream_is_newer(monkeyp
         commands.append(cmd)
         if cmd[:2] == ["docker", "pull"]:
             return subprocess.CompletedProcess(cmd, 0)
-        return subprocess.CompletedProcess(cmd, 0, stdout="3.13.10\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="3.14.10\n", stderr="")
 
     monkeypatch.setattr(tools.subprocess, "run", fake_run)
-    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.18")
+    monkeypatch.setattr(tools, "latest_python", lambda: "3.14.18")
 
     tools.docker_python(f"python:{tools.PY_MINOR}-alpine", "Docker base image")
 
     assert (
-        "WARNING: Docker base image CPython 3.13.10 is older than newest published 3.13.x release 3.13.18"
+        "WARNING: Docker base image CPython 3.14.10 is older than newest published 3.14.x release 3.14.18"
         in capsys.readouterr().out
     )
     assert commands[0] == ["docker", "pull", f"python:{tools.PY_MINOR}-alpine"]
@@ -122,10 +122,10 @@ def test_docker_python_checks_local_output_without_pulling(monkeypatch):
 
     def fake_run(cmd, **_kwargs):
         commands.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="3.13.17\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="3.14.17\n", stderr="")
 
     monkeypatch.setattr(tools.subprocess, "run", fake_run)
-    monkeypatch.setattr(tools, "latest_python", lambda: "3.13.17")
+    monkeypatch.setattr(tools, "latest_python", lambda: "3.14.17")
 
     tools.docker_python("genotrance/px:0.13.0-mini", "Docker image", pull=False)
 

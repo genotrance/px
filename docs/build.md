@@ -200,7 +200,7 @@ this workflow explicitly checks out `master`; unreleased work on `devel` can
 therefore never enter an automatic release.
 
 `tools/auto_release.py` upgrades `uv.lock` and looks up the newest CPython
-3.13 patch published on python.org to compare against
+3.14 patch published on python.org to compare against
 `.github/bundled-python-version`, which records the patch bundled by the last
 release. This lookup only decides whether a new patch is worth cutting a
 release for; it never fails the release build itself. If neither the lock nor
@@ -389,12 +389,12 @@ resolve the newest release from PyPI.
   Nuitka invalidate changed inputs itself. Both cache directories are mounted
   into the glibc and Alpine containers, so they survive ephemeral runners
   without mixing architectures or compiler environments.
-  Every job bundles the newest CPython 3.13 patch available to its own build
+  Every job bundles the newest CPython 3.14 patch available to its own build
   tools and logs the interpreter version (and path) it selected. The release
   guards still reject a missing, unparsable, or wrong-minor interpreter, but
   only warn when python.org has published a newer patch than uv's
   python-build-standalone, `actions/setup-python`, the Windows embeddable zip
-  index, or the `python:3.13-alpine` Docker image provide yet. A release build
+  index, or the `python:3.14-alpine` Docker image provide yet. A release build
   previously failed this way in all six binary jobs (dry run 40266792761) the
   day python.org published 3.13.18 before any of those tools did; weekly
   automatic releases (see "Automatic release" above) now keep the bundled
@@ -586,7 +586,7 @@ Local build helper used by both developers and the GitHub Actions workflows:
   with `otool -L` and fails on `/opt/homebrew` or `/usr/local` references.
 - `--embed` — downloads a Python embeddable distribution, installs the wheel,
   and packages `px.exe` (Windows only). It selects the highest versioned
-  amd64 embeddable zip published for the newest CPython 3.13 release rather
+  amd64 embeddable zip published for the newest CPython 3.14 release rather
   than relying on the order of python.org's directory listing. The install
   uses the matching Windows wheel archive, so the platform dependency metadata
   installs `winloop`.
@@ -620,7 +620,7 @@ builds use `BUILDER=local` which copies the source tree and runs `pip install`.
 The CI image uses the Linux musl wheel archive, including its `uvloop` wheel;
 local source installs resolve the same dependency. Thus both image variants use
 the Linux default event loop, with Px retaining its runtime `asyncio` fallback.
-The moving `python:3.13-alpine` base tag is pulled fresh (`docker build --pull`)
+The moving `python:3.14-alpine` base tag is pulled fresh (`docker build --pull`)
 before each image build, and its bundled interpreter version is validated and
 logged. The completed mini and full images are checked again after they build.
 A wrong, missing, or unparsable Python version fails the build; an older patch

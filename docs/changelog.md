@@ -5,6 +5,8 @@
 ## Unreleased
 
 ### Internal
+- Added opt-in real-Px corporate proxy scenarios covering authentication,
+  concurrency, tunnels, failure recovery, proxy chains, and PAC routing.
 - Added a Docker corporate-proxy scenario environment with a Samba AD realm,
   real Squid NTLM/Negotiate/Basic/Digest authentication, CONNECT, chained and
   connection-close proxies, constrained connections, Toxiproxy fault

@@ -264,8 +264,8 @@ build_binary() {
             select_python
             uv pip install pymcurl -f "$WHEELS"
             uv run --locked python -c "import importlib.metadata as m; print(\"quickjs-ng version:\", m.version(\"quickjs-ng\"))"
-            "$PY" tools.py --embed
-            "$PY" tools.py --depspkg
+            uv run --no-sync python tools.py --embed
+            uv run --no-sync python tools.py --depspkg
             ;;
     esac
 

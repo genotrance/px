@@ -283,7 +283,11 @@ jobs:
 
       - name: Install Docker in WSL2
         shell: wsl-bash {0}
-        run: curl -fsSL https://get.docker.com | sh
+        run: |
+          uname -r
+          apt-get update
+          apt-get install -y curl ca-certificates iptables
+          curl -fsSL https://get.docker.com | sh
 
       - name: Bring up the corporate proxy scenario environment in WSL2
         shell: wsl-bash {0}

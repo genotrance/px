@@ -289,8 +289,8 @@ def test_macos_test_jobs_use_uv_managed_python():
 
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     build = (ROOT / ".github/workflows/build.yml").read_text()
-    # tests, benchmark and test-binary; build, wheels and binary jobs keep setup-python
-    assert ci.count('managed-python: "true"') == 2
+    # tests, benchmark and scenario-linux; build, wheels and binary jobs keep setup-python
+    assert ci.count('managed-python: "true"') == 3
     assert build.count('managed-python: "true"') == 1
     assert "UV_PYTHON_PREFERENCE=only-managed" in (ROOT / "build.sh").read_text()
 

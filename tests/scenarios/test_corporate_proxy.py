@@ -15,7 +15,6 @@ import hashlib
 import http.client
 import json
 import os
-import re
 import select
 import socket
 import subprocess
@@ -1051,7 +1050,8 @@ def test_px_test_all_methods_echo(scenario_env, kerberos_cache, tmp_path, scheme
     result = subprocess.run(command, cwd=ROOT, env=proc_env, capture_output=True, text=True, timeout=60)  # noqa: S603
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert re.findall(r"^Passed$", output, re.MULTILINE) == ["Passed"] * 5, output
+    # The five queries run concurrently and their output interleaves, so count rather than match lines
+    assert output.count("Passed") == 5, output
     for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
         assert f"Testing {method} {ECHO_URL}/{method.lower()}" in output, output
     assert "Failed" not in output, output

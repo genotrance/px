@@ -228,10 +228,27 @@ Memory is measured with psutil: `RssSampler` sums the RSS of the Px process and
 all its worker processes every 20 ms, after waiting for startup allocations
 (such as the second worker's imports) to settle, and the 100 MB tests assert
 that growth stays under 40 MiB (80 MiB for two simultaneous 100 MB uploads) and
-the parallel test under 128 MiB. The run summary prints a table of every
+the parallel test under 128 MiB (a quarter of the 480 MiB sent). The run summary prints a table of every
 measurement (`tests/scenarios/conftest.py`); Px streams one chunk per upload in
 flight, so a 100 MB upload grows RSS by 1-2 MiB. Buffering Px would grow by the
 body size.
+
+Measured on the lab (CPython 3.13, mcurl devel): a 100 MB upload grows Px's RSS
+by 0-3 MiB (the process sits at 48-54 MiB), two simultaneous 100 MB uploads
+through two workers by 2-4 MiB, and 60 parallel 8 MiB uploads by 55-85 MiB
+(about 1.3 MiB per upload in flight, the same as with 3 MiB bodies, so it
+scales with concurrency, not with bytes). Px 19daa5e with pymcurl 8.23.0.2 grew
+by about 200 MiB for every 100 MB upload, twice the body size, because it
+buffered the body.
+
+The same scenarios fail on that older Px (19daa5e with pymcurl 8.23.0.2, run
+with `PX_REQUIRE_MCURL_FIX=1` so they are not skipped): 344 of 376 fail with
+a 503 (curl error 65, "necessary data rewind was impossible"), an upload that
+hangs until the client gives up, or a chunked or rewound upload that reaches
+the origin with 0 bytes and still answers 200. The 32 that pass are Content-Length POST and
+PUT with `--auth=NTLM` or `--auth=NEGOTIATE`, where libcurl already knows the
+method and never sends a body before the handshake; they guard the streaming
+path against regressions rather than reproduce the failure.
 
 Lab details that these tests depend on: the origin answers `/echo` for GET,
 POST, PUT, PATCH and DELETE; the SSO Squid's second port (3129) disables
@@ -262,8 +279,12 @@ uv run --locked python -m pytest tests/scenarios -m scenario \
 tests/scenarios/env/scenario-env.sh down
 ```
 
-A complete warm run is expected to take about 1.5-3 minutes, including the two
-30-second tunnel variants; a cold Docker image build adds 2-5 minutes. The
+A complete warm run of the pre-existing scenarios takes about 1.5-3 minutes and the
+streamed upload scenarios add about 11 minutes per event loop (21 minutes with
+both), dominated by the 100 MB uploads (about 18 s each, 36 s chunked); a cold Docker image build adds 2-5 minutes. Run only
+the pre-existing ones with `-k "not (upload or parallel or px_test_all)"`, only the uploads with
+`-k "test_upload or test_parallel or test_px_test_all"`, and pin one loop with `PX_EVENT_LOOP=auto` or
+`PX_EVENT_LOOP=asyncio`. The
 normal authentication proxies allow the 25-client regression burst, while the
 connection-close variant retains a 16-connection limit for overload testing. Every
 subprocess and network operation has a bounded timeout, and scenarios assert

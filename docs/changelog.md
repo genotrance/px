@@ -21,6 +21,7 @@
 - Real-proxy corporate scenario suite (Docker lab) added to CI and `./build.sh release_check`.
 - Docker lab scenarios for plain-HTTP POST/PUT/PATCH uploads through NTLM, Kerberos and Basic proxies (keep-alive and connection-close), including 100 MB, chunked, 60 parallel and `--workers=2` cases with Px memory asserted.
 - Release workflow simplified: `build.yml` always builds and publishes; `auto-release.yml` dispatches it after fast-forwarding `master`.
+- Docker lab gains a Negotiate-only Squid port for multi-leg SPNEGO (NTLM-in-Negotiate); `scenario-windows` now also drives it over real SSPI with upload checks, and `scenario-linux` adds a `gss-ntlmssp` reproduction documenting a Squid-side limitation.
 
 ## v0.13.0 — 2026-10-24
 

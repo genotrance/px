@@ -175,13 +175,16 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   (`make docker-kerberos`) and runs the Kerberos integration tests against
   local MIT and Heimdal KDCs on Ubuntu. Exercises real ticket acquisition,
   renewal, expiry parsing, and Heimdal detection.
-- **scenario-linux** — full mode only; brings up the Docker corporate-proxy
-  lab (`tests/scenarios/env/scenario-env.sh up`) and runs `tests/scenarios` (marker
-  `scenario`) on Ubuntu across Python 3.10–3.14 and both event loops (10
-  jobs), uploading Squid/Samba/Px logs as an artifact and tearing the lab
-  down whenever a job fails or finishes. The suite includes the streamed
-  upload scenarios (POST/PUT/PATCH through NTLM and Kerberos Squids, 100 MB,
-  chunked, parallel, two workers). Every job exports `PX_EVENT_LOOP` (`auto` or
+- **scenario-linux** — full mode only; installs the `gss-ntlmssp` package
+  (lets libcurl's GSSAPI backend produce a real SPNEGO-wrapped NTLM token, see
+  [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)), brings up the
+  Docker corporate-proxy lab (`tests/scenarios/env/scenario-env.sh up`) and
+  runs `tests/scenarios` (marker `scenario`) on Ubuntu across Python
+  3.10–3.14 and both event loops (10 jobs), uploading Squid/Samba/Px logs as
+  an artifact and tearing the lab down whenever a job fails or finishes. The
+  suite includes the streamed upload scenarios (POST/PUT/PATCH through NTLM
+  and Kerberos Squids, 100 MB, chunked, parallel, two workers). Every job
+  exports `PX_EVENT_LOOP` (`auto` or
   `asyncio`, even `auto`) so those scenarios run on exactly the job's loop, and
   `setup-python-env` supplies the pymcurl devel wheels and
   `PX_REQUIRE_MCURL_FIX=1`, so a missing wheel fails them instead of skipping.
@@ -192,9 +195,16 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
 - **scenario-windows** — full mode only; runs real Px natively on
   `windows-latest` against the same lab's NTLM proxy with explicit
   credentials (`--auth=NTLM`, `--username`, `PX_PASSWORD`), including
-  `px --test` and a 20-request HTTPS burst through a running Px. GitHub's
-  Windows runners have no Linux-container backend, so the lab runs inside
-  WSL2 (`Vampire/setup-wsl`) on the same runner; WSL2's built-in localhost
+  `px --test` and a 20-request HTTPS burst through a running Px, and then
+  against the lab's Negotiate-only proxy (`--auth=NEGOTIATE` and `--auth=ANY`,
+  same explicit credentials): `px --test=all:` over GET/POST/PUT/DELETE/PATCH,
+  plus small, multi-MB and chunked POST/PUT/PATCH uploads checked by length
+  and SHA-256 at the origin. This runner has no route to the lab's KDC, so
+  SSPI's Negotiate package falls back to NTLM inside SPNEGO on its own,
+  exercising the multi-leg handshake the Linux lab cannot reach (see
+  [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)). GitHub's Windows
+  runners have no Linux-container backend, so the lab runs inside WSL2
+  (`Vampire/setup-wsl`) on the same runner; WSL2's built-in localhost
   forwarding exposes the lab's `127.0.0.1` ports to the Windows side of the
   job. Domain-joined SSPI single sign-on cannot be exercised this way — see
   the manual checklist in [Testing](testing.md#ci-testing).

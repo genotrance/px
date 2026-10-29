@@ -282,6 +282,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           managed-python: "true"
 
+      # gss-ntlmssp lets the host's own GSSAPI (the library mcurl's CURLAUTH_NEGOTIATE
+      # uses) produce a real SPNEGO-wrapped NTLM token, the Linux side of the Windows
+      # SSPI-falls-back-to-NTLM corporate case; see docs/testing.md for what it proves
+      # and does not prove against this lab's Squid.
+      - name: Install gss-ntlmssp
+        run: sudo apt-get update && sudo apt-get install -y gss-ntlmssp
+
       - name: Bring up the corporate proxy scenario environment
         run: tests/scenarios/env/scenario-env.sh up
 
@@ -324,14 +331,22 @@ jobs:
   # lab's 127.0.0.1 ports reachable from the Windows side of the same job,
   # which is all a native Windows px needs (DNS for proxied targets such as
   # origin.corp.test is resolved by Squid inside the lab, never by the
-  # client). This only exercises explicit-credential NTLM; domain-joined
-  # SSPI single sign-on cannot be set up on a GitHub runner at all (see
-  # docs/testing.md).
+  # client). This exercises explicit-credential NTLM and, against the
+  # Negotiate-only port (31288, SCENARIO_SSO_WRAPPER_PORT's default), SSPI's
+  # own Negotiate package: this runner is not domain-joined and has no route
+  # to the lab AD DC's Kerberos port (WSL2 only forwards the Squid TCP
+  # ports), so SSPI cannot obtain a Kerberos ticket for either hostname and
+  # must fall back to NTLM inside SPNEGO - the multi-leg handshake this job
+  # exists to prove. That fallback is not configured here through ksetup;
+  # docs/testing.md records that choice and what a run must show, including
+  # why the equivalent Linux reproduction with gss-ntlmssp instead hits a
+  # Squid-side limitation. Domain-joined SSPI single sign-on still cannot be
+  # set up on a GitHub runner at all.
   scenario-windows:
     needs: plan
     if: needs.plan.outputs.full == 'true'
     runs-on: windows-latest
-    name: scenario windows NTLM
+    name: scenario windows NTLM and SSPI Negotiate
     steps:
       - uses: actions/checkout@v7
 
@@ -372,6 +387,93 @@ jobs:
             --test=http://origin.corp.test:8080/small \
             --proxy=127.0.0.1:31282 --auth=NTLM --username='CORP\pxgood'
 
+      # 31288 is SCENARIO_SSO_WRAPPER_PORT's default: the Squid negotiate_wrapper_auth
+      # port that advertises only "Proxy-Authenticate: Negotiate". --test=all: runs
+      # GET/POST/PUT/DELETE/PATCH against the origin's /echo endpoint over both auth
+      # values the real corporate case needs (NEGOTIATE pins SSPI's Negotiate package;
+      # ANY must discover it from the first 407).
+      - name: px --test=all against the Negotiate-only proxy with SSPI (NEGOTIATE and ANY)
+        shell: bash
+        env:
+          PX_PASSWORD: GoodPass1!
+        run: |
+          for auth in NEGOTIATE ANY; do
+            config="$RUNNER_TEMP/px-scenario-test-$auth.ini"
+            : > "$config"
+            uv run --locked python -m px --config="$config" --noproxy= \
+              --test=all:http://origin.corp.test:8080/echo \
+              --proxy=127.0.0.1:31288 --auth=$auth --username='CORP\pxgood'
+          done
+
+      # --test=all only sends small bodies; this checks the exact bytes mcurl's
+      # Expect:100-continue handling (docs/testing.md) is meant to protect once SSPI
+      # has settled on NTLM-in-SPNEGO, for small, multi-MB and chunked (unknown
+      # length) bodies on each upload method, by SHA-256 and length at the origin.
+      - name: Run px against the Negotiate-only proxy and upload small, multi-MB and chunked bodies
+        shell: bash
+        env:
+          PX_PASSWORD: GoodPass1!
+        run: |
+          config="$RUNNER_TEMP/px-scenario-negotiate.ini"
+          : > "$config"
+          uv run --locked python -m px --config="$config" --foreground --log=4 \
+            --listen=127.0.0.1 --port=3130 --noproxy= \
+            --proxy=127.0.0.1:31288 --auth=NEGOTIATE --username='CORP\pxgood' \
+            --threads=16 --socktimeout=30 > "$RUNNER_TEMP/px-windows-negotiate.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/px-negotiate.pid"
+          for i in $(seq 1 30); do
+            rc=0
+            curl --connect-timeout 1 --silent --output /dev/null http://127.0.0.1:3130 || rc=$?
+            [ $rc -ne 7 ] && break
+            sleep 1
+          done
+
+          small="$RUNNER_TEMP/upload-small.bin"
+          big="$RUNNER_TEMP/upload-big.bin"
+          uv run --locked python -c "
+          import os
+          open(r'$small', 'wb').write(os.urandom(12345))
+          open(r'$big', 'wb').write(os.urandom(5 * 1024 * 1024))
+          "
+          small_sha=$(uv run --locked python -c "import hashlib; print(hashlib.sha256(open(r'$small','rb').read()).hexdigest())")
+          big_sha=$(uv run --locked python -c "import hashlib; print(hashlib.sha256(open(r'$big','rb').read()).hexdigest())")
+
+          fail=0
+          check_upload() {
+            method=$1; file=$2; want_sha=$3; want_len=$4; chunked=$5; label=$6
+            url="http://origin.corp.test:8080/echo/$label"
+            reply_file="$RUNNER_TEMP/reply-$label.json"
+            if [ "$chunked" = yes ]; then
+              cat "$file" | curl --silent --show-error --max-time 30 --proxy 127.0.0.1:3130 \
+                -X "$method" -H 'Transfer-Encoding: chunked' --data-binary @- "$url" >"$reply_file"
+            else
+              curl --silent --show-error --max-time 30 --proxy 127.0.0.1:3130 \
+                -X "$method" --data-binary @"$file" "$url" >"$reply_file"
+            fi
+            if uv run --locked python -c "
+          import json
+          reply = json.load(open(r'$reply_file'))
+          assert reply.get('sha256') == '$want_sha', reply
+          assert reply.get('length') == $want_len, reply
+          assert reply.get('method') == '$method', reply
+          "; then
+              echo "PASS $label"
+            else
+              echo "FAIL $label: $(cat "$reply_file")"
+              fail=1
+            fi
+          }
+
+          for method in POST PUT PATCH; do
+            lower=$(printf '%s' "$method" | tr 'A-Z' 'a-z')
+            check_upload "$method" "$small" "$small_sha" 12345 no "$lower-small"
+            check_upload "$method" "$big" "$big_sha" $((5 * 1024 * 1024)) no "$lower-big"
+            check_upload "$method" "$small" "$small_sha" 12345 yes "$lower-chunked"
+          done
+
+          kill "$(cat "$RUNNER_TEMP/px-negotiate.pid")" 2>/dev/null || true
+          exit $fail
+
       - name: Run px and burst 20 HTTPS requests through it
         shell: bash
         env:
@@ -406,6 +508,7 @@ jobs:
         run: |
           mkdir -p scenario-artifacts
           cp "$RUNNER_TEMP/px-windows.log" scenario-artifacts/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/px-windows-negotiate.log" scenario-artifacts/ 2>/dev/null || true
 
       - name: Collect Squid and Samba logs from WSL2
         if: failure()

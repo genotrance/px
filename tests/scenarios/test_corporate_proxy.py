@@ -360,6 +360,62 @@ def test_px_test_auth_negotiate_matches_upstream_spn(scenario_env, kerberos_cach
     assert "HTTP/127.0.0.2@" not in trace_text, trace_text
 
 
+###
+# Multi-leg SPNEGO (NTLM-in-Negotiate): the Linux side of the Windows SSPI corporate case.
+# SCENARIO_SSO_WRAPPER_PROXY advertises only "Proxy-Authenticate: Negotiate" via Squid's
+# negotiate_wrapper_auth (docs/testing.md has the full background).
+
+# smbpasswd-format line gss-ntlmssp's NTLM_USER_FILE understands; the NT hash is a precomputed
+# MD4("GoodPass1!" as UTF-16LE). It is never checked here - the proxy below rejects the
+# handshake before any credential reaches a validating helper.
+NTLM_USER_FILE_LINE = (
+    "pxgood:1000:AAD3B435B51404EEAAD3B435B51404EE:82B1AB6E2AAFED007B43698BA2781669:[U          ]:LCT-00000000:\n"
+)
+
+
+def _gss_ntlmssp_available() -> bool:
+    "True if this host's GSSAPI mech glue has gss-ntlmssp registered (the gss-ntlmssp package)."
+    mech_d = Path("/etc/gss/mech.d")
+    return mech_d.is_dir() and any("ntlmssp" in path.name.lower() for path in mech_d.iterdir())
+
+
+@pytest.mark.skipif(not _gss_ntlmssp_available(), reason="gss-ntlmssp is not installed on this host")
+def test_negotiate_wrapper_cannot_route_spnego_wrapped_ntlm(scenario_env, tmp_path, monkeypatch):
+    """Squid's negotiate_wrapper_auth never reaches NTLM for a standards-compliant SPNEGO client.
+
+    gss-ntlmssp makes MIT krb5's GSSAPI do exactly what SSPI does with no Kerberos ticket and no
+    reachable KDC: produce a real SPNEGO negTokenInit wrapping an NTLMSSP type-1 message (verified
+    by decoding a captured "Proxy-Authorization: Negotiate" header from this exact setup).
+
+    Squid's negotiate_wrapper_auth (src/auth/negotiate/wrapper/negotiate_wrapper.cc upstream)
+    decides Kerberos vs. NTLM by checking whether the *decoded* token's first 8 bytes are the
+    literal ASCII "NTLMSSP\\0" signature. A real SPNEGO envelope never starts with that signature -
+    the NTLMSSP bytes are nested about 20 bytes into the ASN.1 structure - so every Negotiate
+    token, Kerberos or SPNEGO-wrapped NTLM alike, is handed to the Kerberos helper, which rejects
+    it; Squid repeats the bare challenge and the handshake never reaches a second, body-bearing
+    leg. This is a Squid limitation, not a px/mcurl one: the client has nothing left to retry, so
+    there is no libcurl leg sequence or mcurl fix to propose here.
+
+    Because the proxy rejects the handshake before it reads a request method or body, the outcome
+    does not depend on POST/PUT/PATCH or on body size/chunking - one representative GET is enough
+    evidence; see docs/testing.md for the decoded token and the Windows SSPI follow-up.
+    """
+    if "SCENARIO_SSO_WRAPPER_PROXY" not in scenario_env:
+        pytest.skip(f"the running lab predates SCENARIO_SSO_WRAPPER_PROXY; restart it with {ENV_TOOL} down and up")
+    user_file = tmp_path / "ntlm_user_file"
+    user_file.write_text(NTLM_USER_FILE_LINE, encoding="utf-8")
+    monkeypatch.setenv("NTLM_USER_FILE", str(user_file))
+    monkeypatch.setenv("NTLMUSER", "pxgood")
+    monkeypatch.setenv("NETBIOS_DOMAIN_NAME", "CORP")
+    monkeypatch.setenv("NETBIOS_COMPUTER_NAME", "PXCLIENT")
+    monkeypatch.delenv("KRB5CCNAME", raising=False)  # no ticket cache: Kerberos cannot be used either
+    with running_px(
+        tmp_path, scenario_env, scheme="NEGOTIATE", proxy=scenario_env["SCENARIO_SSO_WRAPPER_PROXY"], username="pxgood"
+    ) as px:
+        assert _status(px) != 200
+        px.assert_healthy()
+
+
 def _sso_origin_requests() -> int:
     """Count SSO Squid log entries for origin requests.
 

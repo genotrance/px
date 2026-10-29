@@ -20,7 +20,7 @@ export SCENARIO_BASIC_PORT=$((31280 + OFFSET)) SCENARIO_DIGEST_PORT=$((31281 + O
 export SCENARIO_SSO_PORT=$((31282 + OFFSET)) SCENARIO_CLOSE_PORT=$((31283 + OFFSET))
 export SCENARIO_PARENT_PORT=$((31284 + OFFSET)) SCENARIO_CHAIN_PORT=$((31285 + OFFSET))
 export SCENARIO_TOXIPROXY_PORT=$((31286 + OFFSET)) SCENARIO_TOXIPROXY_API_PORT=$((8474 + OFFSET))
-export SCENARIO_SSO_CLOSE_PORT=$((31287 + OFFSET))
+export SCENARIO_SSO_CLOSE_PORT=$((31287 + OFFSET)) SCENARIO_SSO_WRAPPER_PORT=$((31288 + OFFSET))
 export SCENARIO_HTTP_ORIGIN_PORT=$((18080 + OFFSET)) SCENARIO_PAC_PORT=$((18081 + OFFSET))
 export SCENARIO_HTTPS_ORIGIN_PORT=$((18443 + OFFSET)) SCENARIO_ECHO_PORT=$((18888 + OFFSET))
 export SCENARIO_SUBNET=172.30.$INSTANCE
@@ -54,6 +54,7 @@ SCENARIO_DIGEST_PROXY=http://127.0.0.1:$SCENARIO_DIGEST_PORT
 SCENARIO_SSO_PROXY=http://127.0.0.1:$SCENARIO_SSO_PORT
 SCENARIO_CLOSE_PROXY=http://127.0.0.1:$SCENARIO_CLOSE_PORT
 SCENARIO_SSO_CLOSE_PROXY=http://127.0.0.1:$SCENARIO_SSO_CLOSE_PORT
+SCENARIO_SSO_WRAPPER_PROXY=http://127.0.0.1:$SCENARIO_SSO_WRAPPER_PORT
 SCENARIO_PARENT_PROXY=http://127.0.0.1:$SCENARIO_PARENT_PORT
 SCENARIO_CHAIN_PROXY=http://127.0.0.1:$SCENARIO_CHAIN_PORT
 SCENARIO_TOXIPROXY=http://127.0.0.1:$SCENARIO_TOXIPROXY_PORT
@@ -116,6 +117,8 @@ smoke() {
         --proxy-negotiate --proxy-user : http://origin.corp.test:8080/small
     expect_code 200 "negotiate CONNECT" --insecure --proxy squid-sso.corp.test:3128 \
         --proxy-negotiate --proxy-user : https://origin.corp.test:8443/small
+    expect_code 200 "negotiate-wrapper HTTP (Kerberos leg)" --proxy squid-sso.corp.test:3130 \
+        --proxy-negotiate --proxy-user : http://origin.corp.test:8080/small
     compose_exec kdestroy
     if printf '%s\n' 'WrongPass9!' | compose_exec kinit pxgood@CORP.TEST 2>/dev/null; then
         echo "FAIL negotiate wrong password unexpectedly obtained a ticket" >&2

@@ -30,11 +30,19 @@ HAS_NTLM = bool(mcurl.get_curl_vinfo().features & mcurl.libcurl.CURL_VERSION_NTL
 # TEMPORARY until pymcurl 8.23.0.3 is on PyPI (docs/build.md): streamed uploads through proxy
 # auth need mcurl's seek callback and Expect handling. CI sets PX_REQUIRE_MCURL_FIX=1 so these
 # tests always run there and fail instead of being skipped silently.
-MCURL_HAS_STREAMING = hasattr(mcurl, "REWIND_ERROR")
+MCURL_HAS_STREAMING = hasattr(mcurl, "REWIND_ERROR") and hasattr(mcurl.Curl, "resume_upload")
 REQUIRE_MCURL_FIX = os.environ.get("PX_REQUIRE_MCURL_FIX") == "1"
 needs_mcurl_streaming = pytest.mark.skipif(
     not MCURL_HAS_STREAMING and not REQUIRE_MCURL_FIX, reason="needs pymcurl>=8.23.0.3 (streamed uploads)"
 )
+
+
+def test_mcurl_fix_present_when_required():
+    "PX_REQUIRE_MCURL_FIX=1 turns a missing mcurl capability into a failure instead of a skip"
+    if REQUIRE_MCURL_FIX:
+        assert MCURL_HAS_STREAMING, "pymcurl lacks REWIND_ERROR or Curl.resume_upload"
+
+
 needs_ntlm = pytest.mark.skipif(not HAS_NTLM, reason="libcurl was built without NTLM support")
 
 EVENT_LOOPS = ["", "asyncio"]

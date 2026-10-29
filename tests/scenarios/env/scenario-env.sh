@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 ENV_DIR="$ROOT/tests/scenarios/env"
 ENV_FILE=${SCENARIO_ENV_FILE:-"$ENV_DIR/scenario.env"}
+export SCENARIO_SOURCE_DIR="$ROOT"
 
 # Instance 0 is the documented default lab. Each other instance gets its own
 # Compose project, host ports, and subnet, so checkouts running in parallel
@@ -25,6 +26,17 @@ export SCENARIO_HTTP_ORIGIN_PORT=$((18080 + OFFSET)) SCENARIO_PAC_PORT=$((18081 
 export SCENARIO_HTTPS_ORIGIN_PORT=$((18443 + OFFSET)) SCENARIO_ECHO_PORT=$((18888 + OFFSET))
 export SCENARIO_SUBNET=172.30.$INSTANCE
 COMPOSE=(docker compose -p "$PROJECT" --project-directory "$ENV_DIR" -f "$ENV_DIR/compose.yaml")
+if [[ ${SCENARIO_HOST_PORTS:-0} == 1 ]]; then
+    COMPOSE+=(-f "$ENV_DIR/compose.host.yaml")
+fi
+
+# Sandboxed workers can talk to Docker but cannot write their mounted home
+# directory. Keep Docker's mutable CLI state in the task scratch directory.
+if [[ -z ${DOCKER_CONFIG:-} && ! -w "${HOME}/.docker" && ( -e "${HOME}/.docker" || ! -w "$HOME" ) ]]; then
+    : "${ORC_SCRATCH_DIR:?ORC_SCRATCH_DIR is required when ~/.docker is not writable}"
+    export DOCKER_CONFIG="$ORC_SCRATCH_DIR/docker-config-$PROJECT"
+    mkdir -p "$DOCKER_CONFIG"
+fi
 
 check_owner() {
     # Refuse to drive a lab instance that another checkout started
@@ -49,26 +61,100 @@ SCENARIO_PASSWORD=GoodPass1!
 SCENARIO_OTHER_USER=pxother
 SCENARIO_OTHER_PASSWORD=OtherPass2!
 SCENARIO_WRONG_PASSWORD=WrongPass9!
-SCENARIO_BASIC_PROXY=http://127.0.0.1:$SCENARIO_BASIC_PORT
-SCENARIO_DIGEST_PROXY=http://127.0.0.1:$SCENARIO_DIGEST_PORT
-SCENARIO_SSO_PROXY=http://127.0.0.1:$SCENARIO_SSO_PORT
-SCENARIO_CLOSE_PROXY=http://127.0.0.1:$SCENARIO_CLOSE_PORT
-SCENARIO_SSO_CLOSE_PROXY=http://127.0.0.1:$SCENARIO_SSO_CLOSE_PORT
-SCENARIO_SSO_WRAPPER_PROXY=http://127.0.0.1:$SCENARIO_SSO_WRAPPER_PORT
-SCENARIO_PARENT_PROXY=http://127.0.0.1:$SCENARIO_PARENT_PORT
-SCENARIO_CHAIN_PROXY=http://127.0.0.1:$SCENARIO_CHAIN_PORT
-SCENARIO_TOXIPROXY=http://127.0.0.1:$SCENARIO_TOXIPROXY_PORT
-SCENARIO_TOXIPROXY_API=http://127.0.0.1:$SCENARIO_TOXIPROXY_API_PORT
-SCENARIO_HTTP_ORIGIN=http://127.0.0.1:$SCENARIO_HTTP_ORIGIN_PORT
-SCENARIO_HTTPS_ORIGIN=https://127.0.0.1:$SCENARIO_HTTPS_ORIGIN_PORT
-SCENARIO_PAC_URL=http://127.0.0.1:$SCENARIO_PAC_PORT/proxy.pac
-SCENARIO_ECHO=127.0.0.1:$SCENARIO_ECHO_PORT
+SCENARIO_BASIC_PROXY=http://squid-basic:3128
+SCENARIO_DIGEST_PROXY=http://squid-digest:3128
+SCENARIO_SSO_PROXY=http://squid-sso.corp.test:3128
+SCENARIO_CLOSE_PROXY=http://squid-close:3128
+SCENARIO_SSO_CLOSE_PROXY=http://squid-sso.corp.test:3129
+SCENARIO_SSO_WRAPPER_PROXY=http://squid-sso.corp.test:3130
+SCENARIO_PARENT_PROXY=http://squid-parent.corp.test:3128
+SCENARIO_CHAIN_PROXY=http://squid-child:3128
+SCENARIO_TOXIPROXY=http://toxiproxy:8666
+SCENARIO_TOXIPROXY_API=http://toxiproxy:8474
+SCENARIO_HTTP_ORIGIN=http://origin.corp.test:8080
+SCENARIO_HTTPS_ORIGIN=https://origin.corp.test:8443
+SCENARIO_PAC_URL=http://pac.corp.test:8081/proxy.pac
+SCENARIO_ECHO=echo.corp.test:8888
+SCENARIO_SQUID_LOG_DIR=/scenario-logs
 SCENARIO_CA_FILE=tests/scenarios/env/origin-ca.crt
 EOF
 }
 
 compose_exec() {
     "${COMPOSE[@]}" exec -T client "$@"
+}
+
+test() {
+    # This suite includes the streamed-auth regression; fail rather than
+    # letting pytest skip it when a devel pymcurl wheel was not supplied.
+    local wheel require_mcurl_fix=1 started=0 status=0
+    if [[ -n ${MCURL_WHEELS:-} ]]; then
+        [[ -d $MCURL_WHEELS ]] || { echo "MCURL_WHEELS is not a directory: $MCURL_WHEELS" >&2; return 2; }
+        wheel=$(find "$MCURL_WHEELS" -maxdepth 1 -type f -name 'pymcurl-*.whl' -print -quit)
+        [[ -n $wheel ]] || { echo "no pymcurl wheel in MCURL_WHEELS=$MCURL_WHEELS" >&2; return 2; }
+        require_mcurl_fix=1
+    fi
+
+    local -a pytest_args=("$@")
+    if ((${#pytest_args[@]} == 0)); then
+        pytest_args=(tests/scenarios -m scenario -v --durations=30)
+    fi
+    if [[ ${PX_SCENARIO_ENV:-} == start ]]; then
+        "${COMPOSE[@]}" up --build --detach --wait --wait-timeout 180
+        "${COMPOSE[@]}" cp origin:/shared/origin.crt "$ENV_DIR/origin-ca.crt"
+        print_env | tee "$ENV_FILE"
+        started=1
+    fi
+    if compose_exec sh -c 'rm -rf /tmp/mcurl-wheels /tmp/px-venv && mkdir -p /tmp/mcurl-wheels'; then
+        :
+    else
+        status=$?
+    fi
+    if ((status == 0)) && [[ -n ${wheel:-} ]]; then
+        if "${COMPOSE[@]}" cp "$wheel" client:/tmp/mcurl-wheels/; then
+            :
+        else
+            status=$?
+        fi
+    fi
+    if ((status == 0)) && "${COMPOSE[@]}" exec -T \
+        -e "UV_PYTHON=${UV_PYTHON:-}" \
+        -e "PX_EVENT_LOOP=${PX_EVENT_LOOP:-}" \
+        -e "PX_REQUIRE_MCURL_FIX=$require_mcurl_fix" \
+        client sh -ceu '
+            # Build from a fresh copy so setuptools never writes egg-info into
+            # the read-only checkout mount, while still testing this invocation
+            # source rather than an image layer.
+            rm -rf /tmp/px-source
+            mkdir -p /tmp/px-source
+            tar -C /px --exclude=.git --exclude=.o-\* --exclude=.venv -cf - . | tar -C /tmp/px-source -xf -
+            cd /tmp/px-source
+            export UV_PROJECT_ENVIRONMENT=/tmp/px-venv
+            uv sync --locked --group dev
+            wheel=$(find /tmp/mcurl-wheels -maxdepth 1 -type f -name "pymcurl-*.whl" -print -quit)
+            if [ -n "$wheel" ]; then
+                uv pip install --python "$UV_PROJECT_ENVIRONMENT/bin/python" --force-reinstall "$wheel"
+            fi
+            if [ "${PX_REQUIRE_MCURL_FIX:-}" = 1 ]; then
+                "$UV_PROJECT_ENVIRONMENT/bin/python" .github/actions/mcurl-devel/check.py
+            fi
+            exec "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest "$@"
+        ' scenario-pytest "${pytest_args[@]}"; then
+        :
+    else
+        status=$?
+    fi
+    if ((started)); then
+        "${COMPOSE[@]}" down --volumes --remove-orphans || status=$?
+        rm -f "$ENV_FILE" "$ENV_DIR/origin-ca.crt"
+    fi
+    return "$status"
+}
+
+artifacts() {
+    local destination=${1:?usage: scenario-env.sh artifacts DESTINATION}
+    mkdir -p "$destination"
+    "${COMPOSE[@]}" cp client:/tmp/px-scenario-tmp "$destination/px-scenario-tmp" 2>/dev/null || true
 }
 
 expect_code() {
@@ -141,7 +227,7 @@ smoke() {
     "${COMPOSE[@]}" exec -T squid-close grep -q 'maxconn 16' /etc/squid/squid.conf
     expect_code 200 "PAC fetch" http://pac.corp.test:8081/proxy.pac
     compose_exec sh -c \
-        "curl -fsS http://pac.corp.test:8081/proxy.pac | grep -q 'PROXY 127.0.0.1:$SCENARIO_SSO_PORT'"
+        "curl -fsS http://pac.corp.test:8081/proxy.pac | grep -q 'PROXY squid-sso.corp.test:3128'"
     printf 'PASS close semantics, connection limits, and fault-injection hop\n'
     printf 'PASS all corporate proxy smoke checks\n'
 }
@@ -169,11 +255,21 @@ smoke)
     check_owner
     smoke
     ;;
+test)
+    check_owner
+    shift
+    test "$@"
+    ;;
+artifacts)
+    check_owner
+    shift
+    artifacts "$@"
+    ;;
 env)
     print_env
     ;;
 *)
-    echo "usage: $0 {up|down|status|logs|smoke|env}" >&2
+    echo "usage: $0 {up|down|status|logs|smoke|test [pytest args]|artifacts DESTINATION|env}" >&2
     exit 2
     ;;
 esac

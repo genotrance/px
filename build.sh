@@ -571,9 +571,20 @@ rc_scenario() {
         echo "Docker is not available; skipping the scenario stage" >&2
         return 0
     fi
+    # pymcurl's required streaming-upload fix is still unreleased. Archive the
+    # devel checkout rather than installing from or modifying it, then overlay
+    # its wheel only in the network-resident scenario runner.
+    if [ -d /home/gt/code/mcurl/.git ]; then
+        _mcurl_root=$(mktemp -d "$RC_ROOT/mcurl-devel.XXXXXX")
+        _mcurl_wheels=$(mktemp -d "$RC_ROOT/mcurl-wheels.XXXXXX")
+        git -C /home/gt/code/mcurl archive devel | tar -x -C "$_mcurl_root"
+        uv build --wheel "$_mcurl_root" --out-dir "$_mcurl_wheels"
+        export MCURL_WHEELS="$_mcurl_wheels" PX_REQUIRE_MCURL_FIX=1
+    fi
+    export SCENARIO_INSTANCE="${SCENARIO_INSTANCE:-$(( $$ % 50 + 1 ))}"
     tests/scenarios/env/scenario-env.sh up
     _rc=0
-    uv run --locked python -m pytest tests/scenarios -m scenario -v --durations=30 || _rc=$?
+    tests/scenarios/env/scenario-env.sh test tests/scenarios -m scenario -v --durations=30 || _rc=$?
     tests/scenarios/env/scenario-env.sh down
     [ "$_rc" -eq 0 ] || return "$_rc"
     rc_log "scenario: PASSED"

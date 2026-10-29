@@ -175,11 +175,13 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   (`make docker-kerberos`) and runs the Kerberos integration tests against
   local MIT and Heimdal KDCs on Ubuntu. Exercises real ticket acquisition,
   renewal, expiry parsing, and Heimdal detection.
-- **scenario-linux** — full mode only; installs the `gss-ntlmssp` package
-  (lets libcurl's GSSAPI backend produce a real SPNEGO-wrapped NTLM token, see
-  [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)), brings up the
-  Docker corporate-proxy lab (`tests/scenarios/env/scenario-env.sh up`) and
-  runs `tests/scenarios` (marker `scenario`) on Ubuntu across Python
+- **scenario-linux** — full mode only; brings up the Docker corporate-proxy
+  lab and runs pytest through its `client` service
+  (`tests/scenarios/env/scenario-env.sh test`). The runner includes
+  `gss-ntlmssp` (lets libcurl's GSSAPI backend produce a real
+  SPNEGO-wrapped NTLM token, see
+  [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)) and tests the
+  bind-mounted checkout on Ubuntu across Python
   3.10–3.14 and both event loops (10 jobs), uploading Squid/Samba/Px logs as
   an artifact and tearing the lab down whenever a job fails or finishes. The
   suite includes the streamed upload scenarios (POST/PUT/PATCH through NTLM
@@ -522,9 +524,9 @@ corporate-proxy scenario suite by default), then the dry run
 matrix including `scenario-linux` and `scenario-windows`; both must pass. The
 `ci-full` job is how the dry run runs `tests/scenarios`, so the upload scenarios
 run against the same temporary pymcurl devel wheels as the other jobs. The
-mcurl release gate runs this suite on px devel too (Python 3.13,
-`PX_SCENARIO_ENV=start`, `PX_REQUIRE_MCURL_FIX=1`, no `PX_EVENT_LOOP`, so both
-loops run in one job). The
+mcurl release gate runs this suite on px devel too through the scenario
+client (Python 3.13, a devel wheel overlaid with `PX_REQUIRE_MCURL_FIX=1`, no
+`PX_EVENT_LOOP`, so both loops run in one job). The
 dry run does not publish, because the `release` job is `master`-only. The
 first release build for v0.13.0 failed in every wheels job because `build.sh`
 used `pip wheel --upgrade`, an option `pip wheel` does not have. Nothing was
@@ -545,10 +547,11 @@ same containers, `build.sh` functions and artifact hand-offs, plus a
 4. `test-binary` in `ubuntu` and `musllinux_1_2_x86_64` against a fresh tree
    that only contains the binary archives, as the workflow's download step
    provides (`extract_archives`, then `test_binary` with tox).
-5. `scenario` brings up the Docker corporate-proxy lab
-   (`tests/scenarios/env/scenario-env.sh up`) and runs `tests/scenarios -m scenario`
-   directly against the checkout, then tears the lab down. It needs no
-   wheels or binaries, so it skips with a message instead of failing when
+5. `scenario` brings up the Docker corporate-proxy lab and runs
+   `tests/scenarios -m scenario` through its network-resident client, then
+   tears the lab down. It archives `/home/gt/code/mcurl` at `devel` and builds
+   a temporary wheel in the release-check directory for the runner, without
+   modifying that checkout. It skips with a message instead of failing when
    Docker is unavailable, and ignores `--fresh` (there is no tree copy to
    discard).
 

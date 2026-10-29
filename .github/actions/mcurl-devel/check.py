@@ -36,6 +36,8 @@ def main():
     version = importlib.metadata.version("pymcurl")
     require(parse(version) >= MINIMUM, f"pymcurl {version} is older than {MINIMUM}")
     require(hasattr(mcurl.Curl, "get_os_errno"), "pymcurl lacks Curl.get_os_errno")
+    require(hasattr(mcurl.Curl, "resume_upload"), "pymcurl lacks Curl.resume_upload")
+    require(hasattr(mcurl, "REWIND_ERROR"), "pymcurl lacks REWIND_ERROR")
     print(f"pymcurl version: {version} ({mcurl.__file__})")
 
 

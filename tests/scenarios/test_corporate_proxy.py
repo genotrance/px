@@ -582,7 +582,7 @@ def test_pac_proxy_and_direct_with_python_client(scenario_env, tmp_path):
 # its seek callback and Expect handling. CI sets PX_REQUIRE_MCURL_FIX=1 so these tests always run there
 # and fail instead of being skipped silently.
 needs_mcurl_streaming = pytest.mark.skipif(
-    not hasattr(mcurl, "REWIND_ERROR") and os.environ.get("PX_REQUIRE_MCURL_FIX") != "1",
+    not (hasattr(mcurl, "REWIND_ERROR") and hasattr(mcurl.Curl, "resume_upload")) and os.environ.get("PX_REQUIRE_MCURL_FIX") != "1",
     reason="needs pymcurl>=8.23.0.3 (streamed uploads)",
 )
 ECHO_URL = "http://origin.corp.test:8080/echo"

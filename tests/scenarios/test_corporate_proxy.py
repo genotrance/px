@@ -144,6 +144,7 @@ class PxProcess:
     ):
         self.port = _free_port()
         self.event_loop = event_loop
+        tmp_path.mkdir(parents=True, exist_ok=True)
         self.log = tmp_path / f"px-{self.port}.log"
         config = tmp_path / f"px-{self.port}.ini"
         config.touch()
@@ -201,12 +202,27 @@ class PxProcess:
 
     def close(self) -> None:
         if self.proc.poll() is None:
+            # --workers>1 forks additional px processes via multiprocessing; Px installs
+            # no SIGTERM handler to cascade the shutdown, so they must be found and
+            # signalled here or they outlive this process as orphans in the lab.
+            workers = []
+            with contextlib.suppress(psutil.Error):
+                workers = psutil.Process(self.proc.pid).children(recursive=True)
             self.proc.terminate()
+            for worker in workers:
+                with contextlib.suppress(psutil.Error):
+                    worker.terminate()
             try:
                 self.proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait(timeout=5)
+            for worker in workers:
+                with contextlib.suppress(psutil.Error, psutil.TimeoutExpired):
+                    worker.wait(timeout=5)
+                with contextlib.suppress(psutil.Error):
+                    if worker.is_running():
+                        worker.kill()
         self.output.close()
 
     def assert_healthy(self) -> None:
@@ -387,14 +403,14 @@ def test_negotiate_wrapper_cannot_route_spnego_wrapped_ntlm(scenario_env, tmp_pa
         px.assert_healthy()
 
 
-def _sso_origin_requests() -> int:
+def _sso_origin_requests(env: dict[str, str]) -> int:
     """Count SSO Squid log entries for origin requests.
 
     The DC's health check connects to Squid every few seconds and logs a
     `NONE_NONE/000` entry, so counting every line would include probes that
     land during a test.
     """
-    log_dir = Path(os.environ.get("SCENARIO_SQUID_LOG_DIR", ""))
+    log_dir = Path(env["SCENARIO_SQUID_LOG_DIR"])
     access_log = log_dir / "access.log"
     assert access_log.is_file(), f"the scenario runner did not expose {access_log}"
     return sum(" http://origin.corp.test:8080/" in line for line in access_log.read_text(encoding="utf-8").splitlines())
@@ -403,7 +419,7 @@ def _sso_origin_requests() -> int:
 @pytest.mark.parametrize("authretry", [0, 0.5], ids=["disabled", "interval"])
 def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
     """Repeated bad credentials are bounded and never leave Px hung or crashed."""
-    before = _sso_origin_requests()
+    before = _sso_origin_requests(scenario_env)
     with running_px(
         tmp_path,
         scenario_env,
@@ -416,7 +432,7 @@ def test_wrong_password_block_and_authretry(scenario_env, tmp_path, authretry):
         time.sleep(authretry + 0.2)
         assert _status(px) != 200
         px.assert_healthy()
-    after = _sso_origin_requests()
+    after = _sso_origin_requests(scenario_env)
     # NTLM challenge exchanges add two log entries beyond Px's three attempts.
     assert after - before <= (7 if authretry else 5)
     with running_px(tmp_path, scenario_env, scheme="NTLM", authretry=authretry) as recovered:

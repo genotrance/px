@@ -503,8 +503,17 @@ def test_reader_expect_continue_sent_on_first_read(factory):
 
 
 @pytest.mark.parametrize("factory", loop_factories())
-def test_header_writer_suppresses_upstream_continue(factory):
-    """Px owns the downstream 100 response, so bridge only relays the final response."""
+@pytest.mark.parametrize(
+    "final_status",
+    [b"HTTP/1.1 200 OK\r\n", b"HTTP/1.1 407 Proxy Authentication Required\r\n"],
+)
+def test_header_writer_suppresses_upstream_continue(factory, final_status):
+    """Px owns the downstream 100 response, so bridge relays only the real response.
+
+    A client that did not send its own Expect still reaches an upstream that answers
+    with 100 Continue before its real status (200 or 407); the real status and every
+    one of its headers must come through unmodified and in order.
+    """
 
     class Transport:
         def __init__(self):
@@ -519,14 +528,27 @@ def test_header_writer_suppresses_upstream_continue(factory):
     async def run():
         transport = Transport()
         writer = handler.HeaderBridgeWriter(asyncio.get_running_loop(), transport)
-        for line in (b"HTTP/1.1 100 Continue\r\n", b"Header: ignored\r\n", b"\r\n", b"HTTP/1.1 200 OK\r\n"):
+        for line in (
+            b"HTTP/1.1 100 Continue\r\n",
+            b"Header: ignored\r\n",
+            b"\r\n",
+            final_status,
+            b"Proxy-Authenticate: Negotiate\r\n",
+            b"Content-Length: 0\r\n",
+            b"\r\n",
+        ):
             writer.write(line)
         await asyncio.sleep(0)
         return transport.written
 
     loop = factory()
     try:
-        assert loop.run_until_complete(run()) == [b"HTTP/1.1 200 OK\r\n"]
+        assert loop.run_until_complete(run()) == [
+            final_status,
+            b"Proxy-Authenticate: Negotiate\r\n",
+            b"Content-Length: 0\r\n",
+            b"\r\n",
+        ]
     finally:
         loop.close()
 

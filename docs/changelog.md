@@ -10,6 +10,7 @@
 
 ### Bug fixes
 - Plain-HTTP POST/PUT/PATCH uploads (Content-Length and chunked) now stream through NTLM/Negotiate proxies on the first request instead of failing with 503; request bodies are no longer buffered in memory; requires pymcurl 8.23.0.3.
+- A slow or stalled uploading client no longer delays other requests handled by the same worker; requires a pymcurl with upload pause/resume.
 - A client `Connection: close` (and other hop-by-hop headers) is no longer forwarded upstream, which broke NTLM through proxies that honour it.
 - NTLM/Negotiate upstream proxies are no longer blocked after interrupted CONNECT handshakes; requires pymcurl 8.23.0.3 (px#268).
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.

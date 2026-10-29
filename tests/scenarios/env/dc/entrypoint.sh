@@ -48,8 +48,12 @@ acl Safe_ports port 80 443 8080 8443 8888 18080 18443
 acl CONNECT method CONNECT
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
-acl max_client_connections maxconn 64
-http_access deny max_client_connections
+# Squid's default 512 KB request buffer makes it abort uploads whose bodies arrive while the
+# auth helpers are still busy (plain curl loses about 10% of 60 concurrent 3 MB uploads), a Squid
+# limit no client can work around. A larger buffer keeps the lab deterministic. There is no
+# maxconn limit here: after a run of aborted uploads Squid kept counting the closed connections
+# and answered 403 to every later request from the same address.
+client_request_buffer_max_size 16 MB
 auth_param negotiate program /usr/lib/squid/negotiate_kerberos_auth -k /shared/squid-http.keytab -s HTTP/squid-sso.corp.test
 auth_param negotiate children 20 startup=2 idle=2
 auth_param ntlm program /usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp --domain=CORP
@@ -62,5 +66,19 @@ cache_log stdio:/var/log/squid/cache.log
 cache deny all
 coredump_dir /var/spool/squid
 EOF
+
+# A second Squid on 3129 closes every client and origin connection after its
+# response, as many corporate proxies do. It shares the helpers' winbind pipe
+# and keytab so NTLM and Kerberos run against both connection policies.
+sed -e 's/^http_port 3128/http_port 3129/' \
+    -e 's#/var/log/squid/access.log#/var/log/squid/access-close.log#' \
+    -e 's#/var/log/squid/cache.log#/var/log/squid/cache-close.log#' \
+    /etc/squid/squid.conf >/etc/squid/squid-close.conf
+cat >>/etc/squid/squid-close.conf <<'CONF'
+pid_filename /run/squid-close.pid
+client_persistent_connections off
+server_persistent_connections off
+CONF
 touch /shared/dc-ready
+squid -f /etc/squid/squid-close.conf -NYCd 1 &
 exec squid -NYCd 1

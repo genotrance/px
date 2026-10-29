@@ -285,12 +285,14 @@ jobs:
       - name: Bring up the corporate proxy scenario environment
         run: tests/scenarios/env/scenario-env.sh up
 
+      # The upload scenarios take their event loop from PX_EVENT_LOOP, so each
+      # matrix job runs them on exactly one loop; "auto" must be exported too.
+      # PX_REQUIRE_MCURL_FIX=1 comes from the pymcurl devel wheels step of
+      # setup-python-env, so a missing wheel fails the streamed uploads loudly.
       - name: Run the scenario suite
-        timeout-minutes: 20
+        timeout-minutes: 60
         run: |
-          if [ "${{ matrix.event-loop }}" == "asyncio" ]; then
-            export PX_EVENT_LOOP=asyncio
-          fi
+          export PX_EVENT_LOOP=${{ matrix.event-loop }}
           uv run --locked python -m pytest tests/scenarios -m scenario -v --durations=30 \
             --basetemp="${{ runner.temp }}/px-scenario-tmp"
 

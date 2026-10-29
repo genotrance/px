@@ -34,6 +34,7 @@ http_access deny max_client_connections
 access_log stdio:/var/log/squid/access.log
 cache_log /var/log/squid/cache.log
 cache deny all
+client_request_buffer_max_size 16 MB
 coredump_dir /var/spool/squid
 EOF
 sed -i "s/SCENARIO_HOSTNAME/$(hostname -f)/" /etc/squid/common.conf

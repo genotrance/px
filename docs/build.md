@@ -179,7 +179,14 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   lab (`tests/scenarios/env/scenario-env.sh up`) and runs `tests/scenarios` (marker
   `scenario`) on Ubuntu across Python 3.10–3.14 and both event loops (10
   jobs), uploading Squid/Samba/Px logs as an artifact and tearing the lab
-  down whenever a job fails or finishes. See
+  down whenever a job fails or finishes. The suite includes the streamed
+  upload scenarios (POST/PUT/PATCH through NTLM and Kerberos Squids, 100 MB,
+  chunked, parallel, two workers). Every job exports `PX_EVENT_LOOP` (`auto` or
+  `asyncio`, even `auto`) so those scenarios run on exactly the job's loop, and
+  `setup-python-env` supplies the pymcurl devel wheels and
+  `PX_REQUIRE_MCURL_FIX=1`, so a missing wheel fails them instead of skipping.
+  Each job's pytest step has a 60-minute timeout; the suite takes about
+  11 minutes on one loop locally (about 21 for both loops; expect up to roughly twice that on GitHub runners). See
   [Testing](testing.md#ci-testing) and
   [Testing](testing.md#corporate-proxy-scenario-environment).
 - **scenario-windows** — full mode only; runs real Px natively on
@@ -503,6 +510,11 @@ when `build.yml` is dispatched or pushed to `master`. Before merging `devel` int
 corporate-proxy scenario suite by default), then the dry run
 `gh workflow run build.yml --ref devel`, which also runs `ci.yml`'s full
 matrix including `scenario-linux` and `scenario-windows`; both must pass. The
+`ci-full` job is how the dry run runs `tests/scenarios`, so the upload scenarios
+run against the same temporary pymcurl devel wheels as the other jobs. The
+mcurl release gate runs this suite on px devel too (Python 3.13,
+`PX_SCENARIO_ENV=start`, `PX_REQUIRE_MCURL_FIX=1`, no `PX_EVENT_LOOP`, so both
+loops run in one job). The
 dry run does not publish, because the `release` job is `master`-only. The
 first release build for v0.13.0 failed in every wheels job because `build.sh`
 used `pip wheel --upgrade`, an option `pip wheel` does not have. Nothing was

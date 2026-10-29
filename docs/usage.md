@@ -359,6 +359,27 @@ Px depends on the following Python packages:
 
 ## Limitations
 
+- Plain-HTTP request bodies (POST, PUT, PATCH and others, with `Content-Length`
+  or chunked) are streamed to the upstream and never buffered, so uploads of
+  any size work through NTLM/Negotiate proxies on the first request. This needs
+  pymcurl 8.23.0.3. A body cannot be resent, so:
+  - the first upload per worker to an upstream proxy whose authentication
+    method is not known yet (`--auth=ANY`, `NONEGOTIATE` or `ONLY*`) pays one
+    extra probe connection, sent with `Expect: 100-continue` so the proxy
+    answers 407 before the body;
+  - a proxy that ignores `Expect: 100-continue` while the method is unknown
+    makes that first upload fail with a 503 that names the cause; retry the
+    request, the method is cached by then;
+  - NTLM is tied to a connection, so it cannot work through a proxy that
+    closes the connection after every response, with or without a body.
+- A client's `Expect: 100-continue` is answered by Px itself (`100 Continue` is
+  sent once the upstream wants the body, so an early error or client-authentication
+  `407` replaces it) and is not forwarded. Hop-by-hop
+  headers (`Connection` and the headers it names, `Proxy-Connection`,
+  `Keep-Alive`, `TE`, `Trailer`, `Upgrade`) are not forwarded either, and
+  `Proxy-Authorization` from the client is dropped when Px authenticates to the
+  upstream proxy itself.
+
 - On Windows, connection distribution across multiple `--workers` processes may
   not be perfectly even. The default `--workers=1` is sufficient for most
   workloads since the async event loop handles concurrency efficiently.

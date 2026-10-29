@@ -128,7 +128,14 @@ for each request to avoid state conflicts.
    `proxyreload` interval has elapsed) and then `Wproxy.find_proxy_for_url()`
    to get the upstream proxy or DIRECT.
 3. **Curl setup** — creates/reuses a `mcurl.Curl` object, sets proxy, auth,
-   headers, and request body.
+   headers, and request body. `_upstream_headers()` drops the hop-by-hop
+   headers (`Connection` and the headers it names, `Proxy-Connection`,
+   `Keep-Alive`, `TE`, `Trailer`, `Upgrade`), the client's `Expect` and, when
+   Px authenticates itself, `Proxy-Authorization`; a forwarded
+   `Connection: close` otherwise makes a proxy such as Squid drop an NTLM
+   handshake midway. `Content-Length` (or `Transfer-Encoding: chunked` for an
+   unknown length) is passed to `set_headers()` unchanged so mcurl frames the
+   upstream body.
 4. **Streaming** — for plain HTTP, a `BridgeWriter` forwards curl response data
    from the thread pool to the asyncio transport via `call_soon_threadsafe`.
    CONNECT tunnelling uses zero-thread bidirectional relays: `TunnelRelay`
@@ -136,7 +143,52 @@ for each request to avoid state conflicts.
    IOCP) on Windows.
 5. **Keep-alive** — the connection loop supports HTTP/1.1 keep-alive, processing
    multiple requests on a single TCP connection until a `Connection: close`
-   header or a CONNECT tunnel consumes the socket.
+   header or a CONNECT tunnel consumes the socket. A request body must be fully
+   consumed before the next request is parsed: after the transfer the handler
+   asks the `RequestBody` whether h11 reached the end of the message and
+   closes the connection if not (upstream answered early, a read failed, the
+   client went away). After Px's own client-authentication 407 a body the
+   client already sends is discarded without storing it so NTLM/Negotiate
+   handshakes keep their connection.
+
+### Request body data flow
+
+Request bodies are never buffered or stored (memory or temp files).
+`_read_request()` parses only the request head; for everything but CONNECT it
+wraps the per-request `h11.Connection` and the client's `StreamReader` in a
+`RequestBody` and hands that to `Curl.bridge()` as the non-seekable read
+source. mcurl's read callback runs on the transfer thread and calls
+`RequestBody.read()`, which lets h11 frame the stream (exactly
+`Content-Length` bytes, or lazily de-chunked data that ends at the terminating
+chunk with trailers consumed) and, when h11 needs more bytes, runs one
+`StreamReader.read()` of `RECV_SIZE` on the event loop and waits for it. Only
+that chunk is held, asyncio's flow control stops reading the client socket
+meanwhile, and no body size limit exists. It works the same on plain asyncio,
+uvloop and winloop because it only uses `run_coroutine_threadsafe()`.
+
+mcurl then handles proxy authentication for a body that cannot rewind (see its
+"Streamed request bodies"): with an unknown or Negotiate auth method it sends
+`Expect: 100-continue` on the probe leg so the proxy's 407 arrives before any
+body byte, with NTLM/Digest known libcurl sends the body on the final leg only.
+If a proxy ignores `Expect` while the method is unknown, mcurl reports
+503 with `mcurl.REWIND_ERROR`; Px turns it into an error page naming the cause
+and logs it (the method is cached afterwards, so a retry works).
+
+A client `Expect: 100-continue` sent to Px is not forwarded. Px sends
+`HTTP/1.1 100 Continue` itself the first time the body is needed (when the
+upstream is ready for it), so a client waiting for the interim response never
+deadlocks. A final response sent before that point (error, early upstream
+status) replaces it and the connection is closed instead of reused, except
+Px's own client-authentication 407: the client then holds the body back, so
+the connection stays open for the next handshake leg.
+
+mcurl runs transfer callbacks while holding its multi lock, and `remove()` and
+`stop()` take that lock too. The handler therefore calls them through
+`asyncio.to_thread()`; calling them on the event loop could deadlock against a
+body read waiting for that loop. While a body read waits for a slow client,
+other transfers sharing the same mcurl instance wait as well (the read timeout
+is `REQUEST_TIMEOUT`); `--auth=NONE` uses the easy interface and is not
+affected.
 
 ### spnego monkey-patching
 

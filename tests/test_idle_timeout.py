@@ -38,7 +38,7 @@ def _run(method, curl_cls, curl=None):
         unittest.mock.patch.object(handler.STATE, "client_auth", ()),
         pytest.raises(_Stop),
     ):
-        asyncio.run(h._handle_request(method, "http://example.com/", {}, b"", "1.1"))
+        asyncio.run(h._handle_request(method, "http://example.com/", {}, None, "1.1"))
     return h.curl
 
 

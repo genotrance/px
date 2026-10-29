@@ -368,7 +368,9 @@ def test_px_test_auth_negotiate_matches_upstream_spn(scenario_env, kerberos_cach
 # smbpasswd-format line gss-ntlmssp's NTLM_USER_FILE understands; the NT hash is a precomputed
 # MD4("GoodPass1!" as UTF-16LE). It is never checked here - the proxy below rejects the
 # handshake before any credential reaches a validating helper.
-NTLM_USER_FILE_LINE = "pxgood:1000:AAD3B435B51404EEAAD3B435B51404EE:82B1AB6E2AAFED007B43698BA2781669:[U          ]:LCT-00000000:\n"
+NTLM_USER_FILE_LINE = (
+    "pxgood:1000:AAD3B435B51404EEAAD3B435B51404EE:82B1AB6E2AAFED007B43698BA2781669:[U          ]:LCT-00000000:\n"
+)
 
 
 def _gss_ntlmssp_available() -> bool:

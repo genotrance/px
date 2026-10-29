@@ -1,0 +1,35 @@
+# Only the Windows WSL2 job needs host ports. Linux scenario runs use the
+# default compose file and keep the entire lab private to its Docker network.
+services:
+  dc:
+    ports:
+      - "127.0.0.1:${SCENARIO_SSO_PORT:-31282}:3128"
+      - "127.0.0.1:${SCENARIO_SSO_CLOSE_PORT:-31287}:3129"
+      - "127.0.0.1:${SCENARIO_SSO_WRAPPER_PORT:-31288}:3130"
+
+  squid-basic:
+    ports: ["127.0.0.1:${SCENARIO_BASIC_PORT:-31280}:3128"]
+
+  squid-digest:
+    ports: ["127.0.0.1:${SCENARIO_DIGEST_PORT:-31281}:3128"]
+
+  squid-close:
+    ports: ["127.0.0.1:${SCENARIO_CLOSE_PORT:-31283}:3128"]
+
+  squid-parent:
+    ports: ["127.0.0.1:${SCENARIO_PARENT_PORT:-31284}:3128"]
+
+  squid-child:
+    ports: ["127.0.0.1:${SCENARIO_CHAIN_PORT:-31285}:3128"]
+
+  origin:
+    ports:
+      - "127.0.0.1:${SCENARIO_HTTP_ORIGIN_PORT:-18080}:8080"
+      - "127.0.0.1:${SCENARIO_HTTPS_ORIGIN_PORT:-18443}:8443"
+      - "127.0.0.1:${SCENARIO_PAC_PORT:-18081}:8081"
+      - "127.0.0.1:${SCENARIO_ECHO_PORT:-18888}:8888"
+
+  toxiproxy:
+    ports:
+      - "127.0.0.1:${SCENARIO_TOXIPROXY_API_PORT:-8474}:8474"
+      - "127.0.0.1:${SCENARIO_TOXIPROXY_PORT:-31286}:8666"

@@ -6,7 +6,6 @@ are not substitutes for the smaller fake-proxy tests in the main test suite.
 
 from __future__ import annotations
 
-import base64
 import concurrent.futures
 import contextlib
 import dataclasses
@@ -22,6 +21,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Iterator
@@ -51,27 +51,6 @@ def _read_env() -> dict[str, str]:
     )
 
 
-def _docker(*args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]:
-    command = [
-        "docker",
-        "compose",
-        "-p",
-        _read_env().get("SCENARIO_COMPOSE_PROJECT", "px-scenario"),
-        "--project-directory",
-        str(ENV_FILE.parent),
-        "-f",
-        str(ENV_FILE.parent / "compose.yaml"),
-        *args,
-    ]
-    return subprocess.run(  # noqa: S603
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
 @pytest.fixture(scope="session")
 def scenario_env() -> Iterator[dict[str, str]]:
     started = False
@@ -84,11 +63,11 @@ def scenario_env() -> Iterator[dict[str, str]]:
             "corporate proxy scenario environment is not running; use tests/scenarios/env/scenario-env.sh up or PX_SCENARIO_ENV=start"
         )
     try:
-        port = int(values["SCENARIO_BASIC_PROXY"].rsplit(":", 1)[1])
-        with socket.create_connection(("127.0.0.1", port), timeout=1):
+        proxy = urllib.parse.urlsplit(values["SCENARIO_BASIC_PROXY"])
+        with socket.create_connection((proxy.hostname or "", proxy.port or 80), timeout=1):
             pass
-    except OSError:
-        pytest.skip("corporate proxy scenario.env exists but its proxies are not reachable")
+    except (OSError, ValueError):
+        pytest.fail("corporate proxy scenario environment was started but its proxies are not reachable")
     yield values
     if started:
         subprocess.run([str(ENV_TOOL), "down"], check=True, timeout=120)  # noqa: S603
@@ -115,22 +94,16 @@ def fault_free(scenario_env):
 
 @pytest.fixture(scope="session")
 def kerberos_cache(scenario_env, tmp_path_factory) -> Path:
-    """Create a portable cache without exposing the lab KDC on the host."""
-    container_cache = f"/tmp/px-scenario-{os.getpid()}.ccache"  # noqa: S108
-    _docker(
-        "exec",
-        "-T",
-        "-e",
-        f"KRB5CCNAME={container_cache}",
-        "client",
-        "sh",
-        "-c",
-        f"printf '%s\\n' '{scenario_env['SCENARIO_PASSWORD']}' | "
-        f"kinit {scenario_env['SCENARIO_USER']}@{scenario_env['SCENARIO_REALM']} && "
-        "kvno HTTP/localhost",
-    )
+    """Create a test-owned ticket cache inside the network-resident runner."""
     cache = tmp_path_factory.mktemp("kerberos") / "krb5cc"
-    cache.write_bytes(base64.b64decode(_docker("exec", "-T", "client", "base64", container_cache).stdout))
+    command = (
+        f"printf '%s\\n' '{scenario_env['SCENARIO_PASSWORD']}' | "
+        f"kinit -c {cache} {scenario_env['SCENARIO_USER']}@{scenario_env['SCENARIO_REALM']} && "
+        f"kvno -c {cache} HTTP/squid-sso.corp.test"
+    )
+    subprocess.run(  # noqa: S603
+        ["/bin/sh", "-c", command], check=True, capture_output=True, text=True, timeout=30
+    )
     return cache
 
 
@@ -150,8 +123,6 @@ def _scheme_config(env: dict[str, str], scheme: str) -> tuple[str, str]:
     if scheme == "DIGEST":
         return env["SCENARIO_DIGEST_PROXY"], env["SCENARIO_USER"]
     proxy = env["SCENARIO_SSO_PROXY"]
-    if scheme == "NEGOTIATE":
-        proxy = proxy.replace("127.0.0.1", "localhost")
     return proxy, f"{env['SCENARIO_DOMAIN']}\\{env['SCENARIO_USER']}"
 
 
@@ -319,8 +290,8 @@ def test_px_test_auth_negotiate_matches_upstream_spn(scenario_env, kerberos_cach
     the proxy it authenticates to, so before the fix libcurl built the
     Negotiate SPN from that listen address - for which Kerberos has no
     ticket - instead of the upstream SSO proxy's hostname (reached here as
-    "localhost", the only SPN this lab's KDC issued a ticket for). KRB5_TRACE
-    confirms which SPN libcurl actually requested.
+    "squid-sso.corp.test", the service name whose SPN the lab's KDC issued).
+    KRB5_TRACE confirms which SPN libcurl actually requested.
     """
     proxy, username = _scheme_config(scenario_env, "NEGOTIATE")
     config = tmp_path / "empty.ini"
@@ -356,7 +327,7 @@ def test_px_test_auth_negotiate_matches_upstream_spn(scenario_env, kerberos_cach
     assert "passed" in (result.stdout + result.stderr).lower()
 
     trace_text = trace.read_text(encoding="utf-8", errors="replace") if trace.exists() else ""
-    assert "HTTP/localhost@" in trace_text, trace_text
+    assert "HTTP/squid-sso.corp.test@" in trace_text, trace_text
     assert "HTTP/127.0.0.2@" not in trace_text, trace_text
 
 
@@ -423,8 +394,10 @@ def _sso_origin_requests() -> int:
     `NONE_NONE/000` entry, so counting every line would include probes that
     land during a test.
     """
-    command = "grep -c ' http://origin.corp.test:8080/' /var/log/squid/access.log || true"
-    return int(_docker("exec", "-T", "dc", "sh", "-c", command).stdout.strip() or 0)
+    log_dir = Path(os.environ.get("SCENARIO_SQUID_LOG_DIR", ""))
+    access_log = log_dir / "access.log"
+    assert access_log.is_file(), f"the scenario runner did not expose {access_log}"
+    return sum(" http://origin.corp.test:8080/" in line for line in access_log.read_text(encoding="utf-8").splitlines())
 
 
 @pytest.mark.parametrize("authretry", [0, 0.5], ids=["disabled", "interval"])
@@ -515,8 +488,6 @@ def test_cut_handshakes_do_not_lock_out_proxy_px268(
     """
     cache = kerberos_cache if scheme == "ANY" else None
     proxy = scenario_env["SCENARIO_TOXIPROXY"]
-    if scheme == "ANY":
-        proxy = proxy.replace("127.0.0.1", "localhost")
     url = ORIGIN_HTTPS if protocol == "https" else ORIGIN_HTTP
     with running_px(
         tmp_path,
@@ -671,9 +642,6 @@ class UploadScheme:
         if self.proxy_key not in env:
             pytest.skip(f"the running lab predates {self.proxy_key}; restart it with scenario-env.sh down and up")
         proxy = env[self.proxy_key]
-        if self.kerberos:
-            # The lab keytab has HTTP/localhost, not the loopback address
-            proxy = proxy.replace("127.0.0.1", "localhost")
         plain = self.proxy_key in ("SCENARIO_BASIC_PROXY", "SCENARIO_CLOSE_PROXY")
         with running_px(
             tmp_path,
@@ -1123,8 +1091,6 @@ def test_px_test_all_methods_echo(scenario_env, kerberos_cache, tmp_path, scheme
     if scheme.proxy_key not in scenario_env:
         pytest.skip("the running lab predates SCENARIO_SSO_CLOSE_PROXY")
     proxy = scenario_env[scheme.proxy_key]
-    if scheme.kerberos:
-        proxy = proxy.replace("127.0.0.1", "localhost")
     config = tmp_path / "empty.ini"
     config.touch()
     command = [

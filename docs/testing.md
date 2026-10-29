@@ -45,29 +45,40 @@ helper behaviour, CONNECT authentication, or failures between handshake
 rounds. The lab runs entirely in Docker and does not change the host's DNS,
 Kerberos, or Samba configuration.
 
-Start it and run its independent smoke check with:
+Start it, run its independent smoke check, and run scenarios through the
+network-resident client with:
 
 ```bash
 tests/scenarios/env/scenario-env.sh up
 tests/scenarios/env/scenario-env.sh smoke
+MCURL_WHEELS=/path/to/mcurl-wheels tests/scenarios/env/scenario-env.sh test
 tests/scenarios/env/scenario-env.sh down
 ```
 
 `up` builds pinned Debian 12.12 and Python 3.13.9/Alpine 3.22 images, waits for
 service health checks, exports the generated origin CA as
 `tests/scenarios/env/origin-ca.crt`, and writes the same `KEY=VALUE` inventory
-it prints to `tests/scenarios/env/scenario.env`. A cold build normally takes
-two to five minutes; subsequent starts reuse Docker's build cache. `down`
+it prints to `tests/scenarios/env/scenario.env`. `test` uses Docker CLI
+`exec` to run pytest, its Python environment, and every Px subprocess in the
+existing `client` service on the private `corp` network. The checkout is a
+read-only bind mount at `/px` and the runner copies it before installing, so
+this always tests the current source without writing build metadata into the
+checkout or using an image layer. A cold build normally takes two to five minutes;
+subsequent starts reuse Docker's build cache. `down`
 removes the project containers, network, named volume, CA, and generated env
 file. Use `status`, `logs [service]`, or `env` to inspect the lab without
 changing it.
 
+`test` requires pymcurl 8.23.0.3 or later and fails rather than skipping its
+streamed-upload coverage when the capability is missing. Set `MCURL_WHEELS` to
+a directory containing the devel wheel; CI obtains that directory through its
+mcurl wheel action.
+
 `SCENARIO_INSTANCE` (an integer from 0 to 50, default 0) selects a private lab
-instance: instance N uses Compose project `px-scenario-N`, subnet
-`172.30.N.0/24`, and host ports shifted by `10 * N` (instance 7 serves Basic
-on `31350`, the Toxiproxy API on `8544`, and so on). `scenario.env` records the
-instance's project name and endpoints, and the scenario tests read both from
-it, so set the variable only for `tests/scenarios/env/scenario-env.sh`. Previously every
+instance: instance N uses Compose project `px-scenario-N` and subnet
+`172.30.N.0/24`. `scenario.env` records the instance's project name and
+network endpoints, and the scenario tests read both from it, so set the
+variable only for `tests/scenarios/env/scenario-env.sh`. Previously every
 checkout shared one fixed `px-scenario` project, so a second `up` from
 another checkout silently replaced the first lab's containers in the middle of
 its run, and requests failed for reasons that had nothing to do with Px. `up`,
@@ -75,24 +86,31 @@ its run, and requests failed for reasons that had nothing to do with Px. `up`,
 started. Pick a different instance when several checkouts or agents test in
 parallel.
 
+The default lab publishes no host ports: this keeps the test path valid in
+sandboxed workers whose loopback namespace cannot reach Docker's loopback
+ports. The inventory therefore names Docker services such as `squid-basic`,
+`squid-sso.corp.test`, `origin.corp.test`, and `toxiproxy`. The
+`scenario-windows` WSL2 job is the deliberate exception; it sets
+`SCENARIO_HOST_PORTS=1` to load `compose.host.yaml` and retain its native
+Windows port-based path.
+
 The fixed test identity is `CORP\pxgood` / `GoodPass1!` in realm `CORP.TEST`.
 `CORP\pxother` / `OtherPass2!` supports identity-isolation tests, and
 `WrongPass9!` is the deliberately invalid password. These credentials are
 public test data and must never be reused outside this local environment.
 
-| Instance 0 endpoint | Purpose |
+| Private-network endpoint | Purpose |
 |---|---|
-| `127.0.0.1:31280` | Squid Basic authentication |
-| `127.0.0.1:31281` | Squid Digest authentication |
-| `127.0.0.1:31282` | Domain-joined Squid offering Negotiate and NTLM fallback |
-| `127.0.0.1:31288` | Domain-joined Squid advertising only Negotiate (`negotiate_wrapper_auth`) |
-| `127.0.0.1:31283` | Basic Squid with client/server persistence disabled |
-| `127.0.0.1:31284` | Unauthenticated parent Squid |
-| `127.0.0.1:31285` | Authenticating child Squid chained to the parent |
-| `127.0.0.1:31286` | Toxiproxy hop in front of the SSO Squid |
-| `127.0.0.1:8474` | Toxiproxy control API for latency/reset toxics |
-| `127.0.0.1:18080`, `18443` | HTTP and self-signed HTTPS origins |
-| `127.0.0.1:18081/proxy.pac` | PAC file selecting the SSO proxy for `.corp.test` |
+| `squid-basic:3128` | Squid Basic authentication |
+| `squid-digest:3128` | Squid Digest authentication |
+| `squid-sso.corp.test:3128` | Domain-joined Squid offering Negotiate and NTLM fallback |
+| `squid-sso.corp.test:3130` | Domain-joined Squid advertising only Negotiate (`negotiate_wrapper_auth`) |
+| `squid-close:3128` | Basic Squid with client/server persistence disabled |
+| `squid-parent.corp.test:3128` | Unauthenticated parent Squid |
+| `squid-child:3128` | Authenticating child Squid chained to the parent |
+| `toxiproxy:8666`, `toxiproxy:8474` | Toxiproxy proxy hop and control API |
+| `origin.corp.test:8080`, `:8443` | HTTP and self-signed HTTPS origins |
+| `pac.corp.test:8081/proxy.pac` | PAC file selecting the SSO proxy for `.corp.test` |
 | `127.0.0.1:18888` | Long-lived raw TCP echo endpoint |
 
 The origin also provides `/small`, `/large`, `/stream`, and `/slow`. Its HTTPS
@@ -129,9 +147,10 @@ so a `px.ini` that `test_config` temporarily writes next to the px script under
 
 #### Real Px scenarios
 
-`tests/scenarios/test_corporate_proxy.py` starts Px through `python -m px`, the
-same entry point as the `px` console script, and sends traffic from curl and
-Python's HTTP client. The suite covers `px --test` through an explicit proxy
+`tests/scenarios/test_corporate_proxy.py` starts Px through `python -m px` in
+the lab's client container, the same entry point as the `px` console script,
+and sends traffic from curl and Python's HTTP client in that container. The
+suite covers `px --test` through an explicit proxy
 and PAC, a test-owned Kerberos ticket cache, wrong-password blocking and
 `--authretry`, the px#268 25-client burst and cut-handshake regressions, sustained CONNECT
 tunnels, connection-close behaviour, a mid-handshake reset, Squid connection
@@ -268,21 +287,29 @@ run of aborted uploads Squid kept counting the closed connections and answered
 403 to every later request from the same address (the connection-limit test
 uses the close Squid's 16-connection limit instead).
 
-The scenarios skip with an actionable message when the lab is absent. A plain
-test run therefore remains quick, while an already-running lab makes the
-scenarios part of that run. Select individual behaviours with pytest's normal
-`-k` option:
+The scenarios skip with an actionable message only when no lab has been
+requested. Once `up` has written an inventory, a missing or unreachable service
+is a pytest failure rather than a skip. A plain test run therefore remains
+quick, while a requested lab cannot silently hide an infrastructure error.
+Select individual behaviours with pytest's normal `-k` option:
 
 ```bash
-# Use the mcurl devel checkout, start and stop the lab around the run.
-uv pip install --python .venv/bin/python -e /home/gt/code/mcurl
-PX_SCENARIO_ENV=start uv run --locked python -m pytest \
-  tests/scenarios -m scenario -v
+# Build the mcurl devel wheel without modifying its checkout, then overlay it
+# only in the scenario client.
+mkdir -p "$ORC_SCRATCH_DIR/mcurl-src" "$ORC_SCRATCH_DIR/mcurl-wheels"
+git -C /home/gt/code/mcurl archive devel | tar -x -C "$ORC_SCRATCH_DIR/mcurl-src"
+uv build --wheel "$ORC_SCRATCH_DIR/mcurl-src" --out-dir "$ORC_SCRATCH_DIR/mcurl-wheels"
 
-# Reuse a lab started separately and run only the px#268 matrix.
+# Start a unique lab and run only the px#268 matrix on asyncio.
+SCENARIO_INSTANCE=1 tests/scenarios/env/scenario-env.sh up
+SCENARIO_INSTANCE=1 MCURL_WHEELS="$ORC_SCRATCH_DIR/mcurl-wheels" \
+  PX_EVENT_LOOP=asyncio tests/scenarios/env/scenario-env.sh test \
+  tests/scenarios -m scenario -k px268 -v
+SCENARIO_INSTANCE=1 tests/scenarios/env/scenario-env.sh down
+
+# Reuse a lab started separately and run the full suite on its default loop.
 tests/scenarios/env/scenario-env.sh up
-uv run --locked python -m pytest tests/scenarios -m scenario \
-  -k px268 -v
+MCURL_WHEELS="$ORC_SCRATCH_DIR/mcurl-wheels" tests/scenarios/env/scenario-env.sh test
 tests/scenarios/env/scenario-env.sh down
 ```
 
@@ -325,8 +352,9 @@ GSSAPI - the library mcurl's `CURLAUTH_NEGOTIATE` uses - emit a real SPNEGO
 `negTokenInit` wrapping an NTLMSSP type-1 message when no Kerberos ticket is
 available. `test_negotiate_wrapper_cannot_route_spnego_wrapped_ntlm` in
 `test_corporate_proxy.py` drives exactly that against
-`SCENARIO_SSO_WRAPPER_PROXY` (skipped when gss-ntlmssp is not installed;
-`scenario-linux` installs it in CI).
+`SCENARIO_SSO_WRAPPER_PROXY`. The scenario client image includes
+`gss-ntlmssp`; the skip remains useful only for a deliberately custom runner
+that omits it.
 
 That test documents a confirmed Squid-side limitation rather than a working
 upload. Decoding a token captured from this exact setup (a
@@ -621,11 +649,13 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
 
 - **`scenario-linux`** (the `SCENARIO_FULL` matrix in `ci.yml`) runs on
   `ubuntu-latest` across Python 3.10–3.14 and both event loops (10 jobs, each
-  bringing the lab up and down itself with `tests/scenarios/env/scenario-env.sh`). A job
-  that fails uploads an artifact with `docker compose logs` for every Squid,
-  the Samba domain controller, and every Px process's `--log=4` output; the
-  lab is torn down whether the suite passed, failed, or the job was
-  cancelled.
+  bringing the lab up and down itself with `tests/scenarios/env/scenario-env.sh`
+  and invoking pytest with its `test` subcommand). Every job gives the lab a
+  unique instance, bind-mounts the checkout into the client, and copies the
+  CI mcurl devel wheel into it. A job that fails uploads `docker compose logs`
+  for every Squid and the Samba domain controller plus each Px `--log=4`
+  output copied from the client; the lab is torn down whether the suite
+  passed, failed, or the job was cancelled.
 - **`scenario-windows`** runs a real Windows Px against the same lab's NTLM
   proxy (`127.0.0.1:31282`) with explicit credentials: `--auth=NTLM`,
   `--username=CORP\pxgood`, `PX_PASSWORD` (keyring works the same way

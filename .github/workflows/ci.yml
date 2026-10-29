@@ -282,34 +282,32 @@ jobs:
           python-version: ${{ matrix.python-version }}
           managed-python: "true"
 
-      # gss-ntlmssp lets the host's own GSSAPI (the library mcurl's CURLAUTH_NEGOTIATE
-      # uses) produce a real SPNEGO-wrapped NTLM token, the Linux side of the Windows
-      # SSPI-falls-back-to-NTLM corporate case; see docs/testing.md for what it proves
-      # and does not prove against this lab's Squid.
-      - name: Install gss-ntlmssp
-        run: sudo apt-get update && sudo apt-get install -y gss-ntlmssp
-
       - name: Bring up the corporate proxy scenario environment
+        env:
+          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
         run: tests/scenarios/env/scenario-env.sh up
 
-      # The upload scenarios take their event loop from PX_EVENT_LOOP, so each
-      # matrix job runs them on exactly one loop; "auto" must be exported too.
-      # PX_REQUIRE_MCURL_FIX=1 comes from the pymcurl devel wheels step of
-      # setup-python-env, so a missing wheel fails the streamed uploads loudly.
+      # The client container runs pytest and every Px it starts in the private
+      # Docker network. The checkout is bind-mounted at /px; the host's mcurl
+      # devel wheel is copied into that runner and overlaid after uv sync.
       - name: Run the scenario suite
         timeout-minutes: 60
+        env:
+          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
         run: |
+          export UV_PYTHON=${{ matrix.python-version }}
           export PX_EVENT_LOOP=${{ matrix.event-loop }}
-          uv run --locked python -m pytest tests/scenarios -m scenario -v --durations=30 \
-            --basetemp="${{ runner.temp }}/px-scenario-tmp"
+          tests/scenarios/env/scenario-env.sh test tests/scenarios -m scenario -v --durations=30 \
+            --basetemp=/tmp/px-scenario-tmp
 
       - name: Collect Squid, Samba and Px logs
         if: failure()
+        env:
+          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
         run: |
           mkdir -p "${{ runner.temp }}/scenario-artifacts"
           tests/scenarios/env/scenario-env.sh logs > "${{ runner.temp }}/scenario-artifacts/compose.log" 2>&1 || true
-          find "${{ runner.temp }}/px-scenario-tmp" -name 'px-*.log' \
-            -exec cp {} "${{ runner.temp }}/scenario-artifacts/" \; 2>/dev/null || true
+          tests/scenarios/env/scenario-env.sh artifacts "${{ runner.temp }}/scenario-artifacts" || true
 
       - name: Upload scenario logs
         if: failure()
@@ -321,6 +319,8 @@ jobs:
 
       - name: Tear down the scenario environment
         if: always()
+        env:
+          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
         run: tests/scenarios/env/scenario-env.sh down
 
   # GitHub's windows-latest runners have no Linux-container backend, so the
@@ -374,7 +374,7 @@ jobs:
         run: |
           service docker start
           for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
-          bash tests/scenarios/env/scenario-env.sh up
+          SCENARIO_HOST_PORTS=1 bash tests/scenarios/env/scenario-env.sh up
 
       - name: px --test against the NTLM proxy with explicit credentials
         shell: bash
@@ -528,4 +528,4 @@ jobs:
       - name: Tear down the scenario environment
         if: always()
         shell: wsl-bash {0}
-        run: bash tests/scenarios/env/scenario-env.sh down
+        run: SCENARIO_HOST_PORTS=1 bash tests/scenarios/env/scenario-env.sh down

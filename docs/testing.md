@@ -192,6 +192,7 @@ controller container):
 | NTLM, method known | `NTLM` | password | `ntlm-known` | `ntlm-known-close` |
 | NTLM, method unknown | `NONEGOTIATE` | password | `ntlm-unknown` | `ntlm-unknown-close` |
 | Negotiate, method known | `NEGOTIATE` | Kerberos ticket cache | `negotiate-known` | `negotiate-known-close` |
+| Negotiate-only, method known | `NEGOTIATE` | Kerberos ticket cache | `negotiate-wrapper-known` | — |
 | Kerberos, method unknown | `ANY` | Kerberos ticket cache | `kerberos-any` | `kerberos-any-close` |
 | Basic, method unknown | `ANY` | password | `basic-any-keepalive` | `basic-any-close` |
 
@@ -206,6 +207,11 @@ one named by `PX_EVENT_LOOP`, which CI sets so every job covers one loop):
   method per scheme (rotating POST, PUT, PATCH; all three for `ntlm-unknown`)
   and a chunked 100 MB upload for `ntlm-unknown`, `kerberos-any` and
   `basic-any-close`. These also assert Px's memory (below).
+- `test_upload_back_to_back_immediately`: every scheme, event loop,
+  POST/PUT/PATCH and Content-Length/chunked framing sends an upload immediately
+  after the first response, on the same and a new client connection, races two
+  fresh client uploads, and repeats the succession with two Px workers. Each
+  origin echo checks the exact length and SHA-256.
 - `test_upload_later_requests` and `test_upload_later_requests_100mb`: a Px
   per scheme that has already authenticated once (module-scoped fixture
   `warm_px`); uploads on the same client connection and on new ones reuse the
@@ -222,8 +228,8 @@ one named by `PX_EVENT_LOOP`, which CI sets so every job covers one loop):
   Kerberos with unknown auth on both kinds of proxy; GET, POST, PUT, DELETE and
   PATCH must all pass, which requires the echoed body to match what was sent.
 - `test_upload_client_expect_continue`: a client that sends
-  `Expect: 100-continue` receives `100 Continue` and its upload arrives
-  intact.
+  `Expect: 100-continue` receives exactly one `100 Continue` and its upload
+  arrives intact, including known and unknown NTLM.
 
 Memory is measured with psutil: `RssSampler` sums the RSS of the Px process and
 all its worker processes every 20 ms, after waiting for startup allocations

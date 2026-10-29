@@ -181,9 +181,11 @@ awaits that task before discarding the rest of the body. A pymcurl without
 `resume_upload` falls back to the old blocking read on mcurl's thread.
 
 mcurl then handles proxy authentication for a body that cannot rewind (see its
-"Streamed request bodies"): with an unknown or Negotiate auth method it sends
-`Expect: 100-continue` on the probe leg so the proxy's 407 arrives before any
-body byte, with NTLM/Digest known libcurl sends the body on the final leg only.
+"Streamed request bodies"): except for preconfigured Basic, it sends
+`Expect: 100-continue` on authentication probe and body legs, including known
+NTLM/Digest, so a stale connection cannot send a body before a proxy's 407.
+It caches the selected authentication method while final headers arrive, before
+the downstream client can issue its next request.
 If a proxy ignores `Expect` while the method is unknown, mcurl reports
 503 with `mcurl.REWIND_ERROR`; Px turns it into an error page naming the cause
 and logs it (the method is cached afterwards, so a retry works).
@@ -191,7 +193,8 @@ and logs it (the method is cached afterwards, so a retry works).
 A client `Expect: 100-continue` sent to Px is not forwarded. Px sends
 `HTTP/1.1 100 Continue` itself the first time the body is needed (when the
 upstream is ready for it), so a client waiting for the interim response never
-deadlocks. A final response sent before that point (error, early upstream
+deadlocks. Px suppresses an upstream `100 Continue`, so the client receives
+exactly one interim response per request. A final response sent before that point (error, early upstream
 status) replaces it and the connection is closed instead of reused, except
 Px's own client-authentication 407: the client then holds the body back, so
 the connection stays open for the next handshake leg.

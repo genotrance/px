@@ -175,6 +175,24 @@ class BridgeWriter:
         self._closed = True
 
 
+class HeaderBridgeWriter(BridgeWriter):
+    """Forward upstream headers except its 100 response, which Px has already answered."""
+
+    def __init__(self, loop, transport):
+        super().__init__(loop, transport)
+        self._dropping_continue = False
+
+    def write(self, data):
+        data = bytes(data)
+        if data.startswith(b"HTTP/"):
+            self._dropping_continue = data.split(None, 2)[1:2] == [b"100"]
+        if self._dropping_continue:
+            if data in (b"\r\n", b"\n"):
+                self._dropping_continue = False
+            return len(data)
+        return super().write(data)
+
+
 class RequestBody:
     """Streaming, non-seekable reader over the client's request body.
 
@@ -1085,12 +1103,13 @@ class ConnectionHandler:
             loop = asyncio.get_event_loop()
             body_reader = body if body is not None else RequestBody()
             response_writer = BridgeWriter(loop, self.transport)
+            header_writer = HeaderBridgeWriter(loop, self.transport)
             if hasattr(self.curl, "resume_upload"):
                 body_reader.resume = self.curl.resume_upload
             else:
                 # pymcurl without pause/resume: block mcurl's thread instead (a stalled client delays others)
                 body_reader.blocking = True
-            self.curl.bridge(body_reader, response_writer, response_writer)
+            self.curl.bridge(body_reader, response_writer, header_writer)
 
             # Support NTLM auth from http client in auth=NONE mode with upstream proxy
             if ipport is None and STATE.auth == "NONE" and method in ("POST", "PUT", "PATCH"):

@@ -9,6 +9,7 @@
 - Release binaries now bundle CPython 3.14 (px#280).
 
 ### Bug fixes
+- Clients using `Expect: 100-continue` now receive one `100 Continue` per upload instead of a duplicate relayed from the upstream proxy.
 - Plain-HTTP POST/PUT/PATCH uploads (Content-Length and chunked) now stream through NTLM/Negotiate proxies on the first request instead of failing with 503; request bodies are no longer buffered in memory; requires pymcurl 8.23.0.3.
 - A slow or stalled uploading client no longer delays other requests handled by the same worker; requires a pymcurl with upload pause/resume.
 - A client `Connection: close` (and other hop-by-hop headers) is no longer forwarded upstream, which broke NTLM through proxies that honour it.

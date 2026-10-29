@@ -389,10 +389,10 @@ Px depends on the following Python packages:
     closes the connection after every response, with or without a body. This
     also applies when a Negotiate-only proxy falls back from Kerberos to NTLM
     inside SPNEGO (Windows SSPI with no reachable KDC): `Expect:
-    100-continue` is still added whenever the auth method is not NTLM,
-    Digest or Basic (Negotiate included), so an unrewindable upload still
-    waits for that proxy's final challenge rather than risking the body on
-    an earlier SPNEGO leg; `scenario-windows` in CI validates it against
+    100-continue` is added for all streamed authentication cases except
+    preconfigured Basic, including known NTLM and Digest, so an unrewindable
+    upload waits for that proxy's final challenge rather than risking the body
+    on an earlier SPNEGO leg; `scenario-windows` in CI validates it against
     real Windows SSPI (see
     [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)). The
     equivalent Linux reproduction with `gss-ntlmssp` instead hits a

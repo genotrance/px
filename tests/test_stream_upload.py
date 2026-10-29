@@ -293,16 +293,19 @@ class Client:
         interim = []
         if expect:
             # px must answer 100 so a client that holds back the body does not deadlock
-            interim.append(self.read_response(until_final=False).status)
+            interim.append(self.read_response().status)
         for block in body_blocks(size):
             self.sock.sendall(f"{len(block):x}\r\n".encode() + block + b"\r\n" if chunked else block)
         if chunked:
             self.sock.sendall(b"0\r\n" + "".join(t + "\r\n" for t in trailers).encode() + b"\r\n")
         response = self.read_response()
+        while response.status == 100:
+            interim.append(response.status)
+            response = self.read_response()
         response.interim = interim
         return response
 
-    def read_response(self, until_final=True):
+    def read_response(self):
         status = int(self.rfile.readline().split()[1])
         headers = {}
         while True:
@@ -311,8 +314,6 @@ class Client:
                 break
             name, _, value = line.decode("latin-1").partition(":")
             headers[name.strip().lower()] = value.strip()
-        if until_final and status == 100:
-            return self.read_response()
         body = self.rfile.read(int(headers.get("content-length", "0")))
         return Response(status, headers, body, [])
 
@@ -499,6 +500,35 @@ def test_reader_expect_continue_sent_on_first_read(factory):
     data, body, _, written = run_reader(wire, factory)
     assert data == b"abc" and body.finish()
     assert written == [handler.CONTINUE_RESPONSE]
+
+
+@pytest.mark.parametrize("factory", loop_factories())
+def test_header_writer_suppresses_upstream_continue(factory):
+    """Px owns the downstream 100 response, so bridge only relays the final response."""
+
+    class Transport:
+        def __init__(self):
+            self.written = []
+
+        def is_closing(self):
+            return False
+
+        def write(self, data):
+            self.written.append(data)
+
+    async def run():
+        transport = Transport()
+        writer = handler.HeaderBridgeWriter(asyncio.get_running_loop(), transport)
+        for line in (b"HTTP/1.1 100 Continue\r\n", b"Header: ignored\r\n", b"\r\n", b"HTTP/1.1 200 OK\r\n"):
+            writer.write(line)
+        await asyncio.sleep(0)
+        return transport.written
+
+    loop = factory()
+    try:
+        assert loop.run_until_complete(run()) == [b"HTTP/1.1 200 OK\r\n"]
+    finally:
+        loop.close()
 
 
 def test_reader_without_body_is_complete():

@@ -696,6 +696,7 @@ UPLOAD_SCHEMES = [
     UploadScheme("ntlm-known", "NTLM", "SCENARIO_SSO_PROXY"),
     UploadScheme("ntlm-unknown", "NONEGOTIATE", "SCENARIO_SSO_PROXY"),
     UploadScheme("negotiate-known", "NEGOTIATE", "SCENARIO_SSO_PROXY", kerberos=True),
+    UploadScheme("negotiate-wrapper-known", "NEGOTIATE", "SCENARIO_SSO_WRAPPER_PROXY", kerberos=True),
     UploadScheme("kerberos-any", "ANY", "SCENARIO_SSO_PROXY", kerberos=True),
     UploadScheme("basic-any-keepalive", "ANY", "SCENARIO_BASIC_PROXY"),
     UploadScheme("basic-any-close", "ANY", "SCENARIO_CLOSE_PROXY"),
@@ -968,10 +969,51 @@ def warm_px(request, scenario_env, kerberos_cache, tmp_path_factory):
         with UploadClient(px.port) as client:
             # A failed warm-up must show up as failing tests, not as a fixture error
             client.upload("POST", 1000)
-        # mcurl records the discovered auth method after the response has reached the client, so an
-        # upload sent at once can still start as unknown-auth and fail to rewind; let the cache settle
-        time.sleep(1)
         yield scheme, px
+
+
+@by_scheme
+@by_loop
+@by_method
+@by_body
+@needs_mcurl_streaming
+def test_upload_back_to_back_immediately(scenario_env, kerberos_cache, tmp_path, scheme, event_loop, method, chunked):
+    """First and subsequent uploads have no settling time for every connection and worker arrangement."""
+    specs = [(method, SMALL_SIZE, chunked), (method, SMALL_SIZE + 1, chunked)]
+
+    # The second request shares the client connection with the authenticated first request.
+    with scheme.px(tmp_path / "same-client", scenario_env, kerberos_cache, event_loop=event_loop) as px:
+        with UploadClient(px.port) as client:
+            first = client.upload(method, SMALL_SIZE, chunked=chunked)
+            second = client.upload(method, SMALL_SIZE + 1, chunked=chunked)
+        first.check()
+        second.check()
+        px.assert_healthy()
+
+    # A new downstream connection must see the method cached by the first response immediately.
+    with scheme.px(tmp_path / "new-client", scenario_env, kerberos_cache, event_loop=event_loop) as px:
+        with UploadClient(px.port) as client:
+            first = client.upload(method, SMALL_SIZE, chunked=chunked)
+        with UploadClient(px.port) as client:
+            second = client.upload(method, SMALL_SIZE + 1, chunked=chunked)
+        first.check()
+        second.check()
+        px.assert_healthy()
+
+    # Two fresh client connections can authenticate and stream their first upload concurrently.
+    with scheme.px(tmp_path / "racing-clients", scenario_env, kerberos_cache, event_loop=event_loop) as px:
+        for upload in _run_parallel(px.port, specs):
+            upload.check()
+        px.assert_healthy()
+
+    # The same immediate succession succeeds with independent worker processes too.
+    with scheme.px(tmp_path / "two-workers", scenario_env, kerberos_cache, event_loop=event_loop, workers=2) as px:
+        with UploadClient(px.port) as client:
+            first = client.upload(method, SMALL_SIZE, chunked=chunked)
+            second = client.upload(method, SMALL_SIZE + 1, chunked=chunked)
+        first.check()
+        second.check()
+        px.assert_healthy()
 
 
 @by_method
@@ -1120,7 +1162,7 @@ def test_px_test_all_methods_echo(scenario_env, kerberos_cache, tmp_path, scheme
 
 @pytest.mark.parametrize(
     "scheme",
-    [SCHEMES_BY_NAME[name] for name in ("ntlm-unknown", "kerberos-any", "basic-any-close")],
+    [SCHEMES_BY_NAME[name] for name in ("ntlm-known", "ntlm-unknown", "kerberos-any", "basic-any-close")],
     ids=lambda scheme: scheme.name,
 )
 @by_loop
@@ -1130,8 +1172,6 @@ def test_upload_client_expect_continue(scenario_env, kerberos_cache, tmp_path, s
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop) as px:
         with UploadClient(px.port) as client:
             upload = client.upload("POST", SMALL_SIZE, expect=True)
-            # Px answers 100 Continue itself and may also relay the proxy's own
-            assert upload.interim
-            assert set(upload.interim) == {100}, upload
+            assert upload.interim == [100], upload
             upload.check()
         px.assert_healthy()

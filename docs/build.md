@@ -72,10 +72,10 @@ changes to transitive dependencies that do not have a minimum in
 
 ### Temporary: pymcurl 8.23.0.3 from mcurl devel builds
 
-Px 0.13.1 needs pymcurl 8.23.0.3, the mcurl release that fixes px#268 (it
+Px 0.13.1 needs pymcurl 8.23.0.3, including mcurl commit `7e25b12`, the release that fixes px#268 (it
 adds `Curl.get_os_errno`) and streams `bridge()` request bodies through proxy
 authentication (it adds `mcurl.REWIND_ERROR`, a seek callback and the
-`Expect: 100-continue` probe that px's streamed uploads rely on). Until that version is on PyPI it exists only as
+`Expect: 100-continue` probe and immediate auth-method cache that px's streamed uploads rely on). Until that version is on PyPI it exists only as
 artifacts of a dry-run `build.yml` run on genotrance/mcurl `devel`, so
 `pyproject.toml` deliberately keeps the minimum at `pymcurl>=8.23.0.2` and the
 committed `uv.lock` keeps pinning the PyPI 8.23.0.2. Raising the minimum first

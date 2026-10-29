@@ -77,9 +77,21 @@ restore automatic winloop or uvloop selection.
 
 `px --test` exercises GET, POST, PUT, DELETE, and PATCH requests against both
 HTTP and HTTPS httpbin endpoints, and prints the request, response headers,
-response length, and `Passed` for every successful check. Px completes every
-request before returning a non-zero exit code if any fail. Use `--test=URL` to
-print the same result for one configured endpoint instead.
+response length, and `Passed` for every successful check. A request whose
+final response is `401` or `407`, or whose body does not match what was
+expected, fails the check instead of being reported as a pass. Px completes
+every request before returning a non-zero exit code if any fail. Use
+`--test=URL` to print the same result for one configured endpoint instead.
+
+`--test-auth` has the test client present the configured `--auth` credentials
+to Px itself, to verify that Px's listener accepts them the way an upstream
+proxy would. With Negotiate (Kerberos) and a single explicit `--proxy`, Px is
+addressed by that upstream proxy's hostname instead of its own listen
+address, so the SPN libcurl requests matches the one the upstream proxy
+expects. With a PAC file or multiple proxies configured there is no single
+upstream hostname to borrow, so Px keeps being addressed by its listen
+address, which Kerberos may not have an SPN for — Px logs this limitation
+when it applies.
 
 ## Credentials
 

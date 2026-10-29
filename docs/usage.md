@@ -386,7 +386,18 @@ Px depends on the following Python packages:
     makes that first upload fail with a 503 that names the cause; retry the
     request, the method is cached by then;
   - NTLM is tied to a connection, so it cannot work through a proxy that
-    closes the connection after every response, with or without a body.
+    closes the connection after every response, with or without a body. This
+    also applies when a Negotiate-only proxy falls back from Kerberos to NTLM
+    inside SPNEGO (Windows SSPI with no reachable KDC): `Expect:
+    100-continue` is still added whenever the auth method is not NTLM,
+    Digest or Basic (Negotiate included), so an unrewindable upload still
+    waits for that proxy's final challenge rather than risking the body on
+    an earlier SPNEGO leg; `scenario-windows` in CI validates it against
+    real Windows SSPI (see
+    [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)). The
+    equivalent Linux reproduction with `gss-ntlmssp` instead hits a
+    Squid-side limitation unrelated to Px (same reference), so it is not
+    covered by the automated Linux scenario suite.
 - A client's `Expect: 100-continue` is answered by Px itself (`100 Continue` is
   sent once the upstream wants the body, so an early error or client-authentication
   `407` replaces it) and is not forwarded. Hop-by-hop

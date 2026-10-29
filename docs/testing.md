@@ -85,6 +85,7 @@ public test data and must never be reused outside this local environment.
 | `127.0.0.1:31280` | Squid Basic authentication |
 | `127.0.0.1:31281` | Squid Digest authentication |
 | `127.0.0.1:31282` | Domain-joined Squid offering Negotiate and NTLM fallback |
+| `127.0.0.1:31288` | Domain-joined Squid advertising only Negotiate (`negotiate_wrapper_auth`) |
 | `127.0.0.1:31283` | Basic Squid with client/server persistence disabled |
 | `127.0.0.1:31284` | Unauthenticated parent Squid |
 | `127.0.0.1:31285` | Authenticating child Squid chained to the parent |
@@ -297,6 +298,56 @@ regression.
 The lab remains a focused single-site Debian Squid model. AD replication,
 transparent interception, TLS inspection, WPAD, platform SSPI, and interaction
 with a real organisation's proxy policies remain manual tests.
+
+#### Multi-leg SPNEGO (NTLM-in-Negotiate)
+
+A Windows corporate proxy that is Negotiate-only (advertises only
+"Proxy-Authenticate: Negotiate", no bare "NTLM") falls back from Kerberos to
+NTLM *inside* SPNEGO when SSPI cannot reach a KDC for the target SPN - type-1,
+type-2 and type-3 NTLM messages wrapped in SPNEGO tokens, more legs than
+libcurl otherwise assumes for Negotiate. `SCENARIO_SSO_WRAPPER_PROXY` (port
+31288, the domain controller's third Squid instance) models that proxy: it
+uses Squid's `negotiate_wrapper_auth` to multiplex the lab's existing
+Kerberos and NTLM helpers behind a single `negotiate` `auth_param`, so only
+"Negotiate" is advertised (`tests/scenarios/env/dc/entrypoint.sh`). Its
+Kerberos leg works exactly like `SCENARIO_SSO_PROXY`'s (the smoke check's
+`negotiate-wrapper HTTP (Kerberos leg)`).
+
+Reproducing the NTLM-in-SPNEGO leg on Linux needs a GSSAPI mechanism that can
+produce it: `gss-ntlmssp` (registered via `/etc/gss/mech.d`) makes MIT krb5's
+GSSAPI - the library mcurl's `CURLAUTH_NEGOTIATE` uses - emit a real SPNEGO
+`negTokenInit` wrapping an NTLMSSP type-1 message when no Kerberos ticket is
+available. `test_negotiate_wrapper_cannot_route_spnego_wrapped_ntlm` in
+`test_corporate_proxy.py` drives exactly that against
+`SCENARIO_SSO_WRAPPER_PROXY` (skipped when gss-ntlmssp is not installed;
+`scenario-linux` installs it in CI).
+
+That test documents a confirmed Squid-side limitation rather than a working
+upload. Decoding a token captured from this exact setup (a
+`Proxy-Authorization: Negotiate` value starting `YEgGBisGAQUFAqA+...`, a DER
+SPNEGO `negTokenInit`) shows the NTLMSSP bytes start about 20 bytes into the
+ASN.1 structure, never at offset 0. Squid's `negotiate_wrapper_auth`
+(`src/auth/negotiate/wrapper/negotiate_wrapper.cc` upstream) decides Kerberos
+vs. NTLM by checking whether the *decoded* token's first 8 bytes are the
+literal ASCII `NTLMSSP\0` signature; a standards-compliant SPNEGO envelope
+never starts with it, so every Negotiate token - Kerberos or SPNEGO-wrapped
+NTLM alike - is handed to the Kerberos helper, which rejects it. Squid then
+repeats the bare 407 challenge and the handshake never reaches a second,
+body-bearing leg. There is no libcurl leg sequence or mcurl fix to report for
+this path: the failure is entirely inside Squid's own helper, confirmed
+independently of px/mcurl with a bare `curl --proxy-negotiate` against a
+throwaway Squid running the same helper. Because the rejection happens before
+Squid reads a request method or body, the outcome does not depend on
+POST/PUT/PATCH or on body size/chunking, so the test sends one representative
+GET.
+
+This is also why the wrapper port still exists in the lab: Windows SSPI is
+reported to send its NTLM fallback as a bare, unwrapped NTLMSSP token
+labelled "Negotiate" - a long-standing interoperability behaviour
+`negotiate_wrapper_auth`'s detection was written for - which the helper's
+prefix check *would* recognise, unlike MIT krb5's strict RFC 4178 wrapping.
+The `scenario-windows` CI job (below) is what actually settles that for real
+SSPI; this Linux lab cannot.
 
 ### Quick run
 
@@ -584,6 +635,24 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   target (`origin.corp.test`) is resolved by Squid inside the lab, never by
   the client, so the Windows host never needs to resolve lab-internal names
   itself.
+- The same job also runs Px against the Negotiate-only proxy
+  (`127.0.0.1:31288`, see
+  [Multi-leg SPNEGO](#multi-leg-spnego-ntlm-in-negotiate) above) with
+  `--auth=NEGOTIATE` and `--auth=ANY`, still with explicit `CORP\pxgood`
+  credentials. This runner is not domain-joined and WSL2 only forwards the
+  lab's Squid TCP ports, not the domain controller's Kerberos port, so SSPI's
+  Negotiate package cannot obtain a ticket for either hostname and must fall
+  back to NTLM inside SPNEGO on its own - the multi-leg handshake this job
+  exists to prove, with no `ksetup`/domain-trust configuration needed to force
+  it. For each auth value, `px --test=all:http://origin.corp.test:8080/echo`
+  must pass GET/POST/PUT/DELETE/PATCH; a separate step then uploads small
+  (12345-byte), multi-MB (5 MiB) and chunked (unknown-length) bodies for
+  POST, PUT and PATCH through a foregrounded Px and checks the origin's
+  `/echo` reply length and SHA-256 against the bytes actually sent. A run
+  that instead gets stuck on a repeated 407 (mirroring the Linux
+  `negotiate_wrapper_auth` finding above) means SSPI is not reaching NTLM the
+  way this job assumes, and the upload checks fail loudly rather than
+  silently passing on a non-multi-leg path.
 - **Domain-joined SSPI single sign-on is out of scope for GitHub runners.**
   `--auth=NTLM`/`--auth=NEGOTIATE` with no `--username`/`--password` relies on
   the OS caching a logged-on domain user's credentials (Windows SSPI, or a

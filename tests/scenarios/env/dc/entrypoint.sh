@@ -79,6 +79,35 @@ pid_filename /run/squid-close.pid
 client_persistent_connections off
 server_persistent_connections off
 CONF
+
+# A third Squid on 3130 models an AD-joined corporate proxy that advertises only
+# "Proxy-Authenticate: Negotiate" (no bare "NTLM" scheme), using Squid's own
+# negotiate_wrapper_auth to multiplex the same Kerberos and NTLM helpers behind
+# it. negotiate_wrapper_auth picks a helper by checking whether the *decoded*
+# token's first 8 bytes are the literal ASCII "NTLMSSP\0" signature
+# (src/auth/negotiate/wrapper/negotiate_wrapper.cc upstream); a standards-compliant
+# SPNEGO client (MIT krb5's GSSAPI, which curl/mcurl use on Linux, with gss-ntlmssp
+# as the NTLM mechanism) always wraps that signature inside an RFC 4178
+# negTokenInit ASN.1 envelope, so the check never matches and every Negotiate
+# token - Kerberos or SPNEGO-wrapped NTLM alike - is handed to the Kerberos
+# helper. A pure-Kerberos Negotiate client still authenticates normally through
+# this port; a client that falls back to NTLM inside SPNEGO gets stuck at the
+# first 407 instead (docs/testing.md has the full trace). This is a Squid
+# limitation, not a px/mcurl one - it is kept as the lab's only "Negotiate-only"
+# port because real Windows SSPI is reported to send its NTLM fallback as a bare,
+# unwrapped NTLMSSP token under the Negotiate header, which this helper does
+# detect; the Windows CI job is what actually settles that for SSPI.
+sed -e 's/^http_port 3128/http_port 3130/' \
+    -e 's#/var/log/squid/access.log#/var/log/squid/access-wrapper.log#' \
+    -e 's#/var/log/squid/cache.log#/var/log/squid/cache-wrapper.log#' \
+    -e "s#^auth_param negotiate program .*#auth_param negotiate program /usr/lib/squid/negotiate_wrapper_auth --ntlm /usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp --domain=CORP --kerberos /usr/lib/squid/negotiate_kerberos_auth -k /shared/squid-http.keytab -s HTTP/squid-sso.corp.test#" \
+    -e '/^auth_param ntlm /d' \
+    /etc/squid/squid.conf >/etc/squid/squid-wrapper.conf
+cat >>/etc/squid/squid-wrapper.conf <<'CONF'
+pid_filename /run/squid-wrapper.pid
+CONF
+
 touch /shared/dc-ready
 squid -f /etc/squid/squid-close.conf -NYCd 1 &
+squid -f /etc/squid/squid-wrapper.conf -NYCd 1 &
 exec squid -NYCd 1

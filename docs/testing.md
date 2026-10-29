@@ -8,7 +8,7 @@ Tests live in `tests/`.
 
 | File | Scope |
 |------|-------|
-| `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, event-loop selection, xdist auto-parallelism hook, loopback `getfqdn()` shortcut, macOS CI startup probe |
+| `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, event-loop selection, xdist auto-parallelism hook, scenario memory report, loopback `getfqdn()` shortcut, macOS CI startup probe |
 | `fixtures.py` | Shared test fixtures — port allocation, Px server instances (launched with `--verbose`), auth parametrisation |
 | `helpers.py` | Utility functions — subprocess management (`run_px` launches Px with `--verbose`), port checks, keyring setup |
 | `test_benchmark.py` | Concurrency benchmarks — HTTP/CONNECT throughput, thread count, memory at various concurrency levels (marked `benchmark`, run via `make benchmark`) |
@@ -229,7 +229,7 @@ all its worker processes every 20 ms, after waiting for startup allocations
 (such as the second worker's imports) to settle, and the 100 MB tests assert
 that growth stays under 40 MiB (80 MiB for two simultaneous 100 MB uploads) and
 the parallel test under 128 MiB (a quarter of the 480 MiB sent). The run summary prints a table of every
-measurement (`tests/scenarios/conftest.py`); Px streams one chunk per upload in
+measurement (`memory_report` fixture and summary hook in `tests/conftest.py`); Px streams one chunk per upload in
 flight, so a 100 MB upload grows RSS by 1-2 MiB. Buffering Px would grow by the
 body size.
 

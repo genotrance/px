@@ -389,6 +389,20 @@ def loop_factories():
     return factories
 
 
+def consume_body(body, woken):
+    "Read a RequestBody to the end; None means paused until body.resume (woken) fires"
+    data = b""
+    while True:
+        woken.clear()
+        part = body.read(11)
+        if part is None:
+            assert woken.wait(10)
+        elif not part:
+            return data
+        else:
+            data += part
+
+
 def run_reader(wire, factory, pipelined=b"", chunk=7):
     """Feed wire bytes to a RequestBody in small pieces and read it all from another thread.
 
@@ -424,17 +438,12 @@ def run_reader(wire, factory, pipelined=b"", chunk=7):
                 time.sleep(0.0005)
             loop.call_soon_threadsafe(stream.feed_eof)
 
-        def consume():
-            data = b""
-            while True:
-                part = body.read(11)
-                if not part:
-                    return data
-                data += part
+        woken = threading.Event()
+        body.resume = woken.set
 
         feeder = threading.Thread(target=feed, daemon=True)
         feeder.start()
-        result["data"] = await asyncio.to_thread(consume)
+        result["data"] = await asyncio.to_thread(consume_body, body, woken)
         await asyncio.to_thread(feeder.join)
         result["body"], result["conn"], result["written"] = body, conn, transport.written
 
@@ -767,3 +776,104 @@ def test_client_connection_close_does_not_break_ntlm(ntlm_px):
     assert response.status == 200, response.body
     assert all("close" not in leg["headers"].get("connection", "").lower() for leg in proxy.requests)
     assert all("basic" not in leg["headers"].get("proxy-authorization", "").lower() for leg in proxy.requests)
+
+
+###
+# A stalled or slow uploader must not delay other requests on the same worker
+
+STALL_SECONDS = 5
+# Normal latency of a small request through px on loopback is a few ms; far below the stall
+FAST_LATENCY = 2.0
+PARALLEL_UPLOADS = 60
+
+
+def send_stalled(port, url, stall, size=BODY_SIZE, first=1000):
+    "Send headers and the first bytes of a body, stall, then finish; returns the response"
+    client = Client(port, timeout=60)
+    try:
+        client.sock.sendall(f"POST {url} HTTP/1.1\r\nHost: stall.test\r\nContent-Length: {size}\r\n\r\n".encode())
+        data = b"".join(body_blocks(size))
+        client.sock.sendall(data[:first])
+        stall.wait(STALL_SECONDS)
+        client.sock.sendall(data[first:])
+        return client.read_response()
+    finally:
+        client.close()
+
+
+def timed(fn, *args, **kwargs):
+    start = time.monotonic()
+    result = fn(*args, **kwargs)
+    return result, time.monotonic() - start
+
+
+def check_stalled_does_not_delay(port, url, other_url):
+    release = threading.Event()
+    stalled = {}
+    thread = threading.Thread(target=lambda: stalled.update(r=send_stalled(port, url, release)), daemon=True)
+    thread.start()
+    time.sleep(1)
+    started = time.monotonic()
+    latencies = []
+    for _ in range(3):
+        client = Client(port, timeout=30)
+        try:
+            response, took = timed(client.send, "GET", other_url)
+            assert response.status == 200
+            latencies.append(took)
+            response, took = timed(client.send, "POST", other_url, BODY_SIZE)
+            assert response.status == 200
+            assert response.json() == {"sha256": body_sha256(BODY_SIZE), "length": BODY_SIZE}
+            latencies.append(took)
+        finally:
+            client.close()
+    elapsed = time.monotonic() - started
+    assert thread.is_alive(), "the stalled upload must still be stalled while the others complete"
+    print(f"stalled upload, others' latencies: {[round(t, 3) for t in latencies]}")
+    assert max(latencies) < FAST_LATENCY and elapsed < STALL_SECONDS - 1
+    release.set()
+    thread.join(30)
+    assert stalled["r"].status == 200
+    assert stalled["r"].json() == {"sha256": body_sha256(BODY_SIZE), "length": BODY_SIZE}
+
+
+@needs_mcurl_streaming
+def test_stalled_upload_does_not_delay_others_direct(direct_px, origin):
+    port, _ = direct_px
+    url = f"http://{origin.addr}/x"
+    check_stalled_does_not_delay(port, url, url)
+
+
+@needs_ntlm
+@needs_mcurl_streaming
+def test_stalled_upload_does_not_delay_others_ntlm(ntlm_px):
+    port, _proxy = ntlm_px()
+    url = "http://ntlm-upload.test/x"
+    check_stalled_does_not_delay(port, url, url)
+
+
+@needs_mcurl_streaming
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_many_parallel_streamed_uploads_exact(direct_px, origin, chunked):
+    port, _ = direct_px
+    size = BODY_SIZE + 4321
+    results, errors = {}, []
+
+    def upload(i):
+        client = Client(port, timeout=120)
+        try:
+            results[i] = client.send("POST", f"http://{origin.addr}/p{i}", size, chunked=chunked)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            client.close()
+
+    threads = [threading.Thread(target=upload, args=(i,)) for i in range(PARALLEL_UPLOADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(120)
+    assert not errors
+    assert len(results) == PARALLEL_UPLOADS
+    expected = {"sha256": body_sha256(size), "length": size}
+    assert all(r.status == 200 and r.json() == expected for r in results.values())

@@ -161,10 +161,24 @@ source. mcurl's read callback runs on the transfer thread and calls
 `RequestBody.read()`, which lets h11 frame the stream (exactly
 `Content-Length` bytes, or lazily de-chunked data that ends at the terminating
 chunk with trailers consumed) and, when h11 needs more bytes, runs one
-`StreamReader.read()` of `RECV_SIZE` on the event loop and waits for it. Only
-that chunk is held, asyncio's flow control stops reading the client socket
+`StreamReader.read()` of `RECV_SIZE` on the event loop. `read()` never blocks:
+when the client has not sent more yet it returns `None`, which mcurl turns into
+`CURL_READFUNC_PAUSE` for that transfer only, and when the event-loop read
+finishes it calls `Curl.resume_upload()` (mcurl's thread-safe resume, which
+wakes the multi loop). A client that sends headers and then stalls therefore
+never holds mcurl's multi lock, so other transfers on the same worker proceed;
+the stalled transfer ends through `REQUEST_TIMEOUT` like before. Only that one
+chunk is held, asyncio's flow control stops reading the client socket
 meanwhile, and no body size limit exists. It works the same on plain asyncio,
-uvloop and winloop because it only uses `run_coroutine_threadsafe()`.
+uvloop and winloop because the event loop is reached only through
+`call_soon_threadsafe()`.
+
+Locking: a `threading.Lock` in `RequestBody` guards the h11 state and the
+pending chunk shared by mcurl's thread (`read()`) and the event loop
+(`_fetch_done()`). At most one event-loop read is in flight (`_fetching`), so
+`read()` returns `None` again instead of touching h11 meanwhile, and `drain()`
+awaits that task before discarding the rest of the body. A pymcurl without
+`resume_upload` falls back to the old blocking read on mcurl's thread.
 
 mcurl then handles proxy authentication for a body that cannot rewind (see its
 "Streamed request bodies"): with an unknown or Negotiate auth method it sends

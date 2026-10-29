@@ -5,6 +5,7 @@ import contextlib
 import os
 import socket
 import sys
+import threading
 import time
 
 # External dependencies
@@ -181,9 +182,11 @@ class RequestBody:
     lazily (exactly that many bytes) and chunked bodies are de-chunked lazily,
     with trailers consumed and read() returning b"" at the terminating chunk.
     h11 does the framing. read() runs on mcurl's thread, never the event loop:
-    it hands one RECV_SIZE read to the loop and waits for it, so nothing but
-    one chunk is held here (asyncio's StreamReader applies backpressure to the
-    client socket) and no size limit applies.
+    it never blocks: when the client has not sent more yet it returns None, which
+    pauses mcurl's upload, while one RECV_SIZE read runs on the loop and then
+    resumes it. So a stalled client delays nothing else, only one chunk is held
+    here (asyncio's StreamReader applies backpressure to the client socket) and
+    no size limit applies.
 
     complete is True once h11 reported the end of the body, failed after a
     client error, timeout or disconnect. A client "Expect: 100-continue" is
@@ -199,6 +202,11 @@ class RequestBody:
         self._transport = transport
         self._expect_continue = expect_continue
         self._pending = b""
+        self._lock = threading.Lock()
+        self._fetching = False
+        self._task = None
+        self.resume = lambda: None
+        self.blocking = False
         self.complete = h11_conn is None
         self.failed = False
         if not self.complete:
@@ -246,21 +254,67 @@ class RequestBody:
             self._expect_continue = False
             self._loop.call_soon_threadsafe(self._write_continue)
 
-    def read(self, n=-1):
-        "Return up to n bytes (at most one chunk); b'' at the end of the body or when the client fails"
-        if not self._pending:
-            self._send_continue()
+    def _fetch_done(self, data):
+        "On the event loop: feed what the client sent to h11, then wake the paused upload"
+        with self._lock:
             try:
-                while not (self._pending or self.complete or self.failed):
-                    if not self._step():
-                        self._receive(asyncio.run_coroutine_threadsafe(self._recv(), self._loop).result())
+                self._receive(data)
+                self._step()
             except Exception as exc:
                 dprint("Error reading request body: " + str(exc))
                 self.failed = True
-        if n is None or n < 0:
-            n = len(self._pending)
-        data, self._pending = self._pending[:n], self._pending[n:]
-        return data
+            self._fetching = False
+        try:
+            self.resume()
+        except Exception as exc:
+            dprint("Error resuming upload: " + str(exc))
+
+    async def _fetch(self):
+        self._fetch_done(await self._recv())
+
+    def _start_fetch(self):
+        self._task = self._loop.create_task(self._fetch())
+
+    def read(self, n=-1):
+        """Return up to n bytes (at most one chunk), b'' at the end of the body or when the client fails.
+
+        Never blocks mcurl's thread: when the client has not sent more yet it returns None, which
+        mcurl turns into a paused upload, and a single event loop read resumes it via resume().
+        """
+        with self._lock:
+            if not self._pending:
+                if self._fetching:
+                    return None
+                self._send_continue()
+                try:
+                    while not (self._pending or self.complete or self.failed):
+                        if self._step():
+                            continue
+                        if self.blocking:
+                            self._receive(asyncio.run_coroutine_threadsafe(self._recv(), self._loop).result())
+                        else:
+                            self._fetching = True
+                            self._loop.call_soon_threadsafe(self._start_fetch)
+                            return None
+                except Exception as exc:
+                    dprint("Error reading request body: " + str(exc))
+                    self.failed = True
+            if n is None or n < 0:
+                n = len(self._pending)
+            data, self._pending = self._pending[:n], self._pending[n:]
+            if not (self._pending or self.blocking or self.complete or self.failed):
+                self._read_ahead()
+            return data
+
+    def _read_ahead(self):
+        "While mcurl sends the chunk just handed over, fetch the next one so read() rarely has to pause"
+        try:
+            if not self._step():
+                self._fetching = True
+                self._loop.call_soon_threadsafe(self._start_fetch)
+        except Exception as exc:
+            dprint("Error reading request body: " + str(exc))
+            self.failed = True
 
     @property
     def held_back(self):
@@ -269,12 +323,16 @@ class RequestBody:
 
     def finish(self):
         "After the transfer, on the event loop: True if the whole body was consumed (connection reusable)"
+        if self._fetching:
+            return False
         if not (self.complete or self.failed or self._pending):
             self._step()
         return self.complete
 
     async def drain(self):
         "Discard the rest of the body without storing it so the connection can be reused"
+        if self._task is not None:
+            await asyncio.wait([self._task])
         self._pending = b""
         while not (self.complete or self.failed):
             if self._step():
@@ -1027,6 +1085,11 @@ class ConnectionHandler:
             loop = asyncio.get_event_loop()
             body_reader = body if body is not None else RequestBody()
             response_writer = BridgeWriter(loop, self.transport)
+            if hasattr(self.curl, "resume_upload"):
+                body_reader.resume = self.curl.resume_upload
+            else:
+                # pymcurl without pause/resume: block mcurl's thread instead (a stalled client delays others)
+                body_reader.blocking = True
             self.curl.bridge(body_reader, response_writer, response_writer)
 
             # Support NTLM auth from http client in auth=NONE mode with upstream proxy

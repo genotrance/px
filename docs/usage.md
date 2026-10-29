@@ -374,7 +374,10 @@ Px depends on the following Python packages:
 - Plain-HTTP request bodies (POST, PUT, PATCH and others, with `Content-Length`
   or chunked) are streamed to the upstream and never buffered, so uploads of
   any size work through NTLM/Negotiate proxies on the first request. This needs
-  pymcurl 8.23.0.3. A body cannot be resent, so:
+  pymcurl 8.23.0.3. A client that uploads slowly or stalls mid-body does not
+  delay other requests on the same worker (the transfer pauses; needs
+  pymcurl pause/resume support), but it keeps
+  one worker thread (`--threads`) until it finishes or times out. A body cannot be resent, so:
   - the first upload per worker to an upstream proxy whose authentication
     method is not known yet (`--auth=ANY`, `NONEGOTIATE` or `ONLY*`) pays one
     extra probe connection, sent with `Expect: 100-continue` so the proxy

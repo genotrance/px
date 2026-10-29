@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
+import hashlib
 import http.server
+import json
 import os
 import socketserver
 import ssl
@@ -8,11 +10,16 @@ import subprocess
 import threading
 import time
 
+ECHO_BODY_MAX = 4096
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
+        if self._is_echo():
+            self._dispatch()
+            return
         if self.path == "/large":
             body = b"x" * (4 * 1024 * 1024)
         elif self.path == "/stream":
@@ -41,6 +48,91 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_exact(self, remaining):
+        while remaining:
+            data = self.rfile.read(min(remaining, 65536))
+            if not data:
+                raise EOFError
+            remaining -= len(data)
+            yield data
+
+    def _body_blocks(self):
+        """Yield the request body in blocks of at most 64 KiB, de-chunked when it is chunked."""
+        if "chunked" not in self.headers.get("Transfer-Encoding", "").lower():
+            yield from self._read_exact(int(self.headers.get("Content-Length") or 0))
+            return
+        while size := int(self.rfile.readline(65537).split(b";")[0].strip() or b"0", 16):
+            yield from self._read_exact(size)
+            self.rfile.readline(65537)
+        while self.rfile.readline(65537) not in (b"\r\n", b"\n", b""):
+            pass
+
+    def _echo(self):
+        """Hash the request body as it streams in and answer with its method, URL, length and SHA-256.
+
+        Nothing larger than one read block is held in memory, so 100 MB bodies
+        cost the origin no more than small ones. Bodies up to ECHO_BODY_MAX are
+        also returned, which is what `px --test=all:URL` checks for.
+        """
+        digest = hashlib.sha256()
+        length = 0
+        kept = bytearray()
+        for data in self._body_blocks():
+            digest.update(data)
+            length += len(data)
+            if length <= ECHO_BODY_MAX:
+                kept.extend(data)
+        reply = {
+            "method": self.command,
+            "url": self._full_url(),
+            "length": length,
+            "sha256": digest.hexdigest(),
+            "chunked": "chunked" in self.headers.get("Transfer-Encoding", "").lower(),
+            "connection": self.headers.get("Connection", ""),
+        }
+        if length <= ECHO_BODY_MAX:
+            reply["body"] = kept.decode("utf-8", "replace")
+        body = json.dumps(reply).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        self._dispatch()
+
+    do_PUT = do_PATCH = do_DELETE = do_POST
+
+    def _full_url(self):
+        """The URL as the client addressed it: the proxy sends origin-form paths, so rebuild it from Host."""
+        if "://" in self.path:
+            return self.path
+        scheme = "https" if isinstance(self.server, TLSThreadingServer) else "http"
+        return f"{scheme}://{self.headers.get('Host', '')}{self.path}"
+
+    def _is_echo(self):
+        path = self.path
+        if "://" in path:
+            path = "/" + path.split("://", 1)[1].partition("/")[2]
+        return path.startswith("/echo")
+
+    def _dispatch(self):
+        if self._is_echo():
+            try:
+                self._echo()
+            except (ConnectionError, EOFError, ValueError) as error:
+                print(f"echo {self.command} {self.path} failed: {error}", flush=True)
+                self.close_connection = True
+            return
+        body = b"not found\n"
+        self.close_connection = True
+        self.send_response(404)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 

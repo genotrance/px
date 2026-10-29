@@ -20,7 +20,9 @@ services:
     domainname: corp.test
     volumes:
       - shared:/shared
-    ports: ["127.0.0.1:${SCENARIO_SSO_PORT:-31282}:3128"]
+    ports:
+      - "127.0.0.1:${SCENARIO_SSO_PORT:-31282}:3128"
+      - "127.0.0.1:${SCENARIO_SSO_CLOSE_PORT:-31287}:3129"
     networks:
       corp:
         aliases: [dc.corp.test, squid-sso.corp.test]

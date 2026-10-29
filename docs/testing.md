@@ -165,6 +165,85 @@ event loops. Only the HTTPS CONNECT variants fail on pymcurl 8.23.0.2. For
 plain HTTP, 8.23.0.2 never counted the cut handshake, so those variants guard
 recovery and must pass on every version.
 
+#### Streamed upload scenarios
+
+Plain-HTTP request bodies cannot be replayed once Px has streamed them, yet
+NTLM (and Negotiate or Basic after a first unauthenticated 407) needs the
+request sent again on the authenticated connection. Before Px streamed bodies
+into mcurl, such uploads failed with curl error 65 ("necessary data rewind was
+impossible") and Px answered 503. The upload scenarios in
+`test_corporate_proxy.py` send generated, streamed bodies through real Px
+processes and real Squid proxies to the origin's `/echo` endpoint
+(`tests/scenarios/env/origin/server.py`), which hashes the body as it arrives
+(Content-Length or chunked, never buffering it) and answers with the method,
+URL, length and SHA-256. Every test asserts status 200 and the exact length and
+digest at the origin. Bodies are generated block by block and hashed on the
+fly, so neither the tests nor Px hold a large body in memory.
+
+The schemes cover each way Px can authenticate, against Squids that keep
+connections alive (`SCENARIO_SSO_PROXY`, `SCENARIO_BASIC_PROXY`) and Squids
+that close every connection after each response (`SCENARIO_CLOSE_PROXY`, and
+the second SSO Squid on `SCENARIO_SSO_CLOSE_PROXY`, port 3129 of the domain
+controller container):
+
+| Scheme | `--auth` | Proxy credentials | Keep-alive proxy | Close proxy |
+|---|---|---|---|---|
+| NTLM, method known | `NTLM` | password | `ntlm-known` | `ntlm-known-close` |
+| NTLM, method unknown | `NONEGOTIATE` | password | `ntlm-unknown` | `ntlm-unknown-close` |
+| Negotiate, method known | `NEGOTIATE` | Kerberos ticket cache | `negotiate-known` | `negotiate-known-close` |
+| Kerberos, method unknown | `ANY` | Kerberos ticket cache | `kerberos-any` | `kerberos-any-close` |
+| Basic, method unknown | `ANY` | password | `basic-any-keepalive` | `basic-any-close` |
+
+The tests, each on the event loops selected (`auto` and `asyncio`, or only the
+one named by `PX_EVENT_LOOP`, which CI sets so every job covers one loop):
+
+- `test_upload_first_request`: a fresh Px whose very first request is a
+  POST, PUT or PATCH (Content-Length or chunked), so the upload itself carries
+  the authentication handshake. All 10 schemes.
+- `test_upload_first_request_100mb` and
+  `test_upload_chunked_first_request_100mb`: the same with 100 MB bodies, one
+  method per scheme (rotating POST, PUT, PATCH; all three for `ntlm-unknown`)
+  and a chunked 100 MB upload for `ntlm-unknown`, `kerberos-any` and
+  `basic-any-close`. These also assert Px's memory (below).
+- `test_upload_later_requests` and `test_upload_later_requests_100mb`: a Px
+  per scheme that has already authenticated once (module-scoped fixture
+  `warm_px`); uploads on the same client connection and on new ones reuse the
+  authenticated upstream connections, followed by a 100 MB upload and a small
+  request on the same client connection.
+- `test_upload_two_workers_first_requests` and
+  `test_upload_two_workers_100mb`: `--workers=2` on a fresh Px, concurrent
+  uploads spread over both worker processes, each authenticating for itself,
+  and two simultaneous 100 MB uploads (Content-Length and chunked).
+- `test_parallel_uploads`: 60 simultaneous uploads of about 8 MiB (mixed
+  POST/PUT/PATCH, half chunked, 480 MiB in total) through `ntlm-unknown` and
+  `kerberos-any`, with one and two workers.
+- `test_px_test_all_methods_echo`: `px --test=all:<echo URL>` for NTLM and
+  Kerberos with unknown auth on both kinds of proxy; GET, POST, PUT, DELETE and
+  PATCH must all pass, which requires the echoed body to match what was sent.
+- `test_upload_client_expect_continue`: a client that sends
+  `Expect: 100-continue` receives `100 Continue` and its upload arrives
+  intact.
+
+Memory is measured with psutil: `RssSampler` sums the RSS of the Px process and
+all its worker processes every 20 ms, after waiting for startup allocations
+(such as the second worker's imports) to settle, and the 100 MB tests assert
+that growth stays under 40 MiB (80 MiB for two simultaneous 100 MB uploads) and
+the parallel test under 128 MiB. The run summary prints a table of every
+measurement (`tests/scenarios/conftest.py`); Px streams one chunk per upload in
+flight, so a 100 MB upload grows RSS by 1-2 MiB. Buffering Px would grow by the
+body size.
+
+Lab details that these tests depend on: the origin answers `/echo` for GET,
+POST, PUT, PATCH and DELETE; the SSO Squid's second port (3129) disables
+client and server persistent connections; all Squids use
+`client_request_buffer_max_size 16 MB` because Squid's 512 KB default aborts a
+fraction of the concurrent uploads whose bodies arrive while its auth helpers
+are busy (plain `curl`, with no Px involved, loses about 10% of 60 concurrent
+3 MB uploads), and the SSO Squids have no `maxconn` limit because after a long
+run of aborted uploads Squid kept counting the closed connections and answered
+403 to every later request from the same address (the connection-limit test
+uses the close Squid's 16-connection limit instead).
+
 The scenarios skip with an actionable message when the lab is absent. A plain
 test run therefore remains quick, while an already-running lab makes the
 scenarios part of that run. Select individual behaviours with pytest's normal

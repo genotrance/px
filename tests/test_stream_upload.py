@@ -535,6 +535,7 @@ def test_rewind_error_detection():
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH"])
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+@needs_mcurl_streaming
 def test_body_reaches_origin_intact(direct_px, origin, method, chunked):
     port, _ = direct_px
     client = Client(port)
@@ -553,6 +554,7 @@ def test_body_reaches_origin_intact(direct_px, origin, method, chunked):
         assert "transfer-encoding" not in seen["headers"]
 
 
+@needs_mcurl_streaming
 def test_chunked_trailers_and_keep_alive(direct_px, origin):
     "Trailers are consumed and the connection stays usable for the next request"
     port, _ = direct_px
@@ -571,6 +573,7 @@ def test_chunked_trailers_and_keep_alive(direct_px, origin):
     assert "x-checksum" not in origin.requests[0]["headers"]
 
 
+@needs_mcurl_streaming
 def test_empty_post_and_zero_length_chunked(direct_px, origin):
     port, _ = direct_px
     client = Client(port)
@@ -583,6 +586,7 @@ def test_empty_post_and_zero_length_chunked(direct_px, origin):
     assert [r["length"] for r in origin.requests] == [0, 0]
 
 
+@needs_mcurl_streaming
 def test_expect_continue_does_not_deadlock(direct_px, origin):
     "px answers 100 Continue itself, so a client waiting for it sends the body"
     port, _ = direct_px
@@ -626,6 +630,7 @@ def test_hop_by_hop_headers_not_forwarded(direct_px, origin):
 CLIENT_CREDENTIALS = "Proxy-Authorization: Basic " + base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
 
 
+@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_client_auth_discards_body_and_keeps_connection(client_auth_px, origin, chunked):
     "Px's own 407 discards the unread body (without storing it) so the client can authenticate on the same connection"
@@ -641,6 +646,7 @@ def test_client_auth_discards_body_and_keeps_connection(client_auth_px, origin, 
     assert "proxy-authorization" not in origin.requests[0]["headers"]
 
 
+@needs_mcurl_streaming
 def test_client_auth_with_expect_keeps_connection(client_auth_px, origin):
     "A 407 answers a client's Expect as the final response; it holds the body back and the connection stays usable"
     client = Client(client_auth_px, timeout=20)
@@ -656,6 +662,7 @@ def test_client_auth_with_expect_keeps_connection(client_auth_px, origin):
     assert [r["sha256"] for r in origin.requests] == [body_sha256(BODY_SIZE)]
 
 
+@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_large_upload_bounded_memory(direct_px, origin, loop_kind, chunked):
     "A 100 MB body streams through px with RSS far below the body size"

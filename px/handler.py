@@ -2,7 +2,6 @@
 
 import asyncio
 import contextlib
-import io
 import os
 import socket
 import sys
@@ -135,6 +134,19 @@ REQUEST_TIMEOUT = 30
 # Buffer size for socket reads
 RECV_SIZE = 65536
 
+# Interim response sent when a client waits for "Expect: 100-continue"
+CONTINUE_RESPONSE = b"HTTP/1.1 100 Continue\r\n\r\n"
+
+# Headers that apply to the client connection only and are never forwarded
+# upstream, together with the headers named by the client's Connection header
+HOP_BY_HOP_HEADERS = frozenset(("connection", "proxy-connection", "keep-alive", "te", "trailer", "upgrade"))
+
+REWIND_MESSAGE = (
+    "The request body could not be sent through the upstream proxy: its authentication method was not "
+    "known yet and the proxy ignored 'Expect: 100-continue', so the body went out before the proxy asked "
+    "for credentials and Px cannot resend a streamed body. The method is now cached; retry the request."
+)
+
 
 class BridgeWriter:
     """Thread-safe writer that forwards data from the mcurl thread to the asyncio transport.
@@ -162,17 +174,114 @@ class BridgeWriter:
         self._closed = True
 
 
-class BodyReader:
-    """BytesIO wrapper providing rfile-like interface for an already-read request body."""
+class RequestBody:
+    """Streaming, non-seekable reader over the client's request body.
 
-    def __init__(self, body_bytes):
-        self._buf = io.BytesIO(body_bytes)
+    Handed to Curl.bridge() as the read source. Content-Length bodies are read
+    lazily (exactly that many bytes) and chunked bodies are de-chunked lazily,
+    with trailers consumed and read() returning b"" at the terminating chunk.
+    h11 does the framing. read() runs on mcurl's thread, never the event loop:
+    it hands one RECV_SIZE read to the loop and waits for it, so nothing but
+    one chunk is held here (asyncio's StreamReader applies backpressure to the
+    client socket) and no size limit applies.
+
+    complete is True once h11 reported the end of the body, failed after a
+    client error, timeout or disconnect. A client "Expect: 100-continue" is
+    answered with "100 Continue" the first time the body is needed, so the
+    client sends the body only once the upstream wants it; held_back is True
+    until then.
+    """
+
+    def __init__(self, h11_conn=None, stream=None, loop=None, transport=None, expect_continue=False):
+        self._h11 = h11_conn
+        self._stream = stream
+        self._loop = loop
+        self._transport = transport
+        self._expect_continue = expect_continue
+        self._pending = b""
+        self.complete = h11_conn is None
+        self.failed = False
+        if not self.complete:
+            self._step()
+
+    def seekable(self):
+        "A client socket cannot rewind; mcurl relies on this to avoid resending the body"
+        return False
+
+    def _step(self):
+        "Advance over events h11 already holds; False when it needs more client data"
+        try:
+            event = self._h11.next_event()
+        except h11.ProtocolError:
+            self.failed = True
+            return True
+        if event is h11.NEED_DATA:
+            return False
+        if isinstance(event, h11.Data):
+            self._pending = bytes(event.data)
+        elif isinstance(event, h11.EndOfMessage):
+            self.complete = True
+        else:
+            self.failed = True
+        return True
+
+    async def _recv(self):
+        try:
+            return await asyncio.wait_for(self._stream.read(RECV_SIZE), timeout=REQUEST_TIMEOUT)
+        except (TimeoutError, asyncio.TimeoutError, OSError, ConnectionError):
+            return b""
+
+    def _receive(self, data):
+        if data:
+            self._h11.receive_data(data)
+        else:
+            self.failed = True
+
+    def _write_continue(self):
+        if not self._transport.is_closing():
+            self._transport.write(CONTINUE_RESPONSE)
+
+    def _send_continue(self):
+        if self._expect_continue:
+            self._expect_continue = False
+            self._loop.call_soon_threadsafe(self._write_continue)
 
     def read(self, n=-1):
-        return self._buf.read(n)
+        "Return up to n bytes (at most one chunk); b'' at the end of the body or when the client fails"
+        if not self._pending:
+            self._send_continue()
+            try:
+                while not (self._pending or self.complete or self.failed):
+                    if not self._step():
+                        self._receive(asyncio.run_coroutine_threadsafe(self._recv(), self._loop).result())
+            except Exception as exc:
+                dprint("Error reading request body: " + str(exc))
+                self.failed = True
+        if n is None or n < 0:
+            n = len(self._pending)
+        data, self._pending = self._pending[:n], self._pending[n:]
+        return data
 
-    def readline(self, limit=-1):
-        return self._buf.readline(limit)
+    @property
+    def held_back(self):
+        "True while the client waits for 100 Continue and no body byte has arrived"
+        return self._expect_continue and not self._pending and not self.complete
+
+    def finish(self):
+        "After the transfer, on the event loop: True if the whole body was consumed (connection reusable)"
+        if not (self.complete or self.failed or self._pending):
+            self._step()
+        return self.complete
+
+    async def drain(self):
+        "Discard the rest of the body without storing it so the connection can be reused"
+        self._pending = b""
+        while not (self.complete or self.failed):
+            if self._step():
+                self._pending = b""
+            else:
+                self._receive(await self._recv())
+        return self.complete
 
 
 ###
@@ -451,6 +560,7 @@ class ConnectionHandler:
         self.curl = None
         self.proxy_servers = []
         self._close_after_response = False
+        self._drain_body = False
         self._tunnel_established = False
 
         # Client address
@@ -477,19 +587,43 @@ class ConnectionHandler:
 
                 method, target, headers, body, request_version = request
 
-                # Save any data h11 buffered beyond this request (pipelined)
-                trailing = h11_conn.trailing_data
-                if trailing[0]:
-                    self._recv_buf = bytes(trailing[0])
+                if body is None:
+                    # CONNECT: save any data h11 buffered beyond the request (tunnel data)
+                    trailing = h11_conn.trailing_data
+                    if trailing[0]:
+                        self._recv_buf = bytes(trailing[0])
 
                 # Process the request
                 self._close_after_response = False
+                self._drain_body = False
                 self._tunnel_established = False
                 await self._handle_request(method, target, headers, body, request_version)
 
                 # CONNECT tunnels consume the connection (only when actually established)
                 if method == "CONNECT" and self._tunnel_established:
                     break
+
+                if self._close_after_response:
+                    break
+
+                # The body streams straight from the client, so it must be fully consumed
+                # (or discarded after a reply that did not need it) before the next
+                # request can be read from this connection; otherwise close it
+                if body is not None:
+                    trailing = h11_conn.trailing_data
+                    if self._drain_body and body.held_back and not trailing[0]:
+                        # The 407 was sent as the final response to the client's Expect, so the
+                        # client holds the body back and there is nothing to discard
+                        pass
+                    else:
+                        if self._drain_body:
+                            await body.drain()
+                        if not body.finish():
+                            break
+                        # Save any data h11 buffered beyond this request (pipelined)
+                        trailing = h11_conn.trailing_data
+                        if trailing[0]:
+                            self._recv_buf = bytes(trailing[0])
 
                 # Check keep-alive
                 if self._close_after_response or not self._should_keep_alive(request_version, headers):
@@ -498,7 +632,8 @@ class ConnectionHandler:
             easyhash = ""
             if self.curl is not None:
                 easyhash = self.curl.easyhash + ": "
-                STATE.mcurl.stop(self.curl)
+                # mcurl's lock can be held by a transfer waiting for this loop to read a body
+                await asyncio.to_thread(STATE.mcurl.stop, self.curl)
                 self.curl = None
             dprint(easyhash + "Connection error: " + str(exc))
         finally:
@@ -523,6 +658,7 @@ class ConnectionHandler:
         """Read and parse one HTTP request using h11.
 
         Returns (method, target, headers, body, request_version) or None on connection close.
+        body is a RequestBody for everything but CONNECT, which has none.
         """
         while True:
             event = h11_conn.next_event()
@@ -555,28 +691,12 @@ class ConnectionHandler:
                     else:
                         headers[hname] = hvalue
 
-                # Read body if present (not for CONNECT)
-                body = b""
+                # The body is not read here: CONNECT has none and for other
+                # methods it streams lazily to mcurl as upstream needs it
+                body = None
                 if method != "CONNECT":
-                    while True:
-                        bevt = h11_conn.next_event()
-                        if bevt is h11.NEED_DATA:
-                            try:
-                                data = await asyncio.wait_for(self.reader.read(RECV_SIZE), timeout=REQUEST_TIMEOUT)
-                            except (TimeoutError, asyncio.TimeoutError, OSError, ConnectionError):
-                                return None
-                            if not data:
-                                return None
-                            h11_conn.receive_data(data)
-                            continue
-                        if isinstance(bevt, h11.Data):
-                            body += bytes(bevt.data)
-                        elif isinstance(bevt, h11.EndOfMessage):
-                            break
-                        elif isinstance(bevt, (h11.ConnectionClosed, h11.RemoteProtocolError)):
-                            return None
-                        else:
-                            break
+                    expect = headers.get("expect", "").lower() == "100-continue" and request_version == "HTTP/1.1"
+                    body = RequestBody(h11_conn, self.reader, asyncio.get_running_loop(), self.transport, expect)
 
                 return method, target, headers, body, request_version
 
@@ -859,6 +979,8 @@ class ConnectionHandler:
         # Client authentication
         strip_proxy_headers = False
         if not self._do_client_auth(method, headers):
+            # The client resends the request on this connection, so discard its body
+            self._drain_body = True
             return
 
         # If client auth succeeded and was performed, strip proxy headers
@@ -886,7 +1008,7 @@ class ConnectionHandler:
             ret = self.curl.set_proxy(proxy=server, port=port, noproxy=noproxy_hosts)
             if not ret:
                 self._send_error(401, f"Proxy server authentication failed: {server}:{port}")
-                STATE.mcurl.remove(self.curl)
+                await asyncio.to_thread(STATE.mcurl.remove, self.curl)
                 return
 
             set_curl_auth(self.curl, STATE.auth)
@@ -896,17 +1018,14 @@ class ConnectionHandler:
         # Set debug mode
         self.curl.set_debug(STATE.debug is not None)
 
-        # Build headers dict for curl, stripping proxy headers if needed
-        curl_headers = {}
-        for hname, hvalue in headers.items():
-            if strip_proxy_headers and hname.lower().startswith("proxy-"):
-                continue
-            curl_headers[hname] = hvalue
+        # Build headers dict for curl, stripping hop-by-hop and proxy headers
+        strip_proxy_auth = strip_proxy_headers or (ipport is None and STATE.auth != "NONE")
+        curl_headers = self._upstream_headers(headers, strip_proxy_headers, strip_proxy_auth)
 
         # Plain HTTP: bridge request body and response
         if not self.curl.is_connect:
             loop = asyncio.get_event_loop()
-            body_reader = BodyReader(body)
+            body_reader = body if body is not None else RequestBody()
             response_writer = BridgeWriter(loop, self.transport)
             self.curl.bridge(body_reader, response_writer, response_writer)
 
@@ -940,12 +1059,45 @@ class ConnectionHandler:
             ):
                 STATE.reload_kerberos(force=True)
 
-            self._send_error(self.curl.resp, self.curl.errstr)
+            if self.curl.resp == 503 and self._is_rewind_error(self.curl.errstr):
+                dprint(self.curl.easyhash + ": " + REWIND_MESSAGE)
+                self._send_error(503, REWIND_MESSAGE)
+            else:
+                self._send_error(self.curl.resp, self.curl.errstr)
         elif self.curl.is_connect:
             await self._handle_connect_tunnel(h11_trailing=self._recv_buf)
             self._recv_buf = b""  # Consumed by tunnel
 
-        STATE.mcurl.remove(self.curl)
+        await asyncio.to_thread(STATE.mcurl.remove, self.curl)
+
+    @staticmethod
+    def _upstream_headers(headers, strip_proxy_headers=False, strip_proxy_auth=False):
+        """Client headers to forward upstream.
+
+        Drops hop-by-hop headers (Connection and the headers it names, Proxy-Connection,
+        Keep-Alive, TE, Trailer, Upgrade) since they describe the client connection and
+        e.g. a forwarded "Connection: close" makes a proxy drop an NTLM handshake. Expect
+        is dropped too: Px answers the client itself and mcurl picks the upstream Expect.
+        Content-Length is dropped when the body is chunked (Transfer-Encoding wins), and
+        Proxy-Authorization when Px authenticates to the upstream proxy itself.
+        """
+        named = {t.strip().lower() for t in headers.get("connection", "").split(",") if t.strip()}
+        drop = (named | HOP_BY_HOP_HEADERS | {"expect"}) - {"content-length", "transfer-encoding", "host"}
+        if "chunked" in headers.get("transfer-encoding", "").lower():
+            drop.add("content-length")
+        if strip_proxy_auth:
+            drop.add("proxy-authorization")
+        return {
+            name: value
+            for name, value in headers.items()
+            if name.lower() not in drop and not (strip_proxy_headers and name.lower().startswith("proxy-"))
+        }
+
+    @staticmethod
+    def _is_rewind_error(errstr):
+        "True if mcurl could not resend a streamed body (REWIND_ERROR, or libcurl's own text on older mcurl)"
+        rewind = getattr(mcurl, "REWIND_ERROR", None)
+        return bool(rewind and rewind in errstr) or "rewinding of the data stream failed" in errstr
 
     async def _get_destination(self, target):
         "Get destination - returns netloc for DIRECT or None for proxy"

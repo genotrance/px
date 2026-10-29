@@ -27,7 +27,7 @@ Tests live in `tests/`.
 | `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
-| `test_test_action.py` | The `--test` action — unit tests of the probe and its reporting |
+| `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of the probe and its reporting, final-status (401/407) failure, and Negotiate SPN addressing (`_negotiate_test_target`) |
 | `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |
 | `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 
@@ -134,6 +134,10 @@ and PAC, a test-owned Kerberos ticket cache, wrong-password blocking and
 `--authretry`, the px#268 25-client burst and cut-handshake regressions, sustained CONNECT
 tunnels, connection-close behaviour, a mid-handshake reset, Squid connection
 limits, a child/parent proxy chain, and PAC proxy-versus-DIRECT selection.
+`test_px_test_auth_negotiate_matches_upstream_spn` runs Px on a non-loopback
+listen address (`127.0.0.2`) with `--test-auth` and a single explicit
+`--proxy`, and reads `KRB5_TRACE` to confirm libcurl requests the upstream
+SSO proxy's SPN rather than one derived from Px's own listen address.
 Authentication coverage includes NTLM, Negotiate, Basic, and Digest; the burst
 matrix also covers HTTP, HTTPS CONNECT, `auto` and `asyncio` event loops, and
 one and two workers.

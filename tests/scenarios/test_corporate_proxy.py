@@ -301,6 +301,54 @@ def test_kerberos_ticket_no_password(scenario_env, kerberos_cache, tmp_path):
         px.assert_healthy()
 
 
+def test_px_test_auth_negotiate_matches_upstream_spn(scenario_env, kerberos_cache, tmp_path):
+    """`px --test-auth` with NEGOTIATE must SPN-match the upstream proxy, not Px's listen address.
+
+    Px listens on 127.0.0.2 here, not 127.0.0.1. The test client treats Px as
+    the proxy it authenticates to, so before the fix libcurl built the
+    Negotiate SPN from that listen address - for which Kerberos has no
+    ticket - instead of the upstream SSO proxy's hostname (reached here as
+    "localhost", the only SPN this lab's KDC issued a ticket for). KRB5_TRACE
+    confirms which SPN libcurl actually requested.
+    """
+    proxy, username = _scheme_config(scenario_env, "NEGOTIATE")
+    config = tmp_path / "empty.ini"
+    config.touch()
+    trace = tmp_path / "krb5_trace.log"
+    command = [
+        sys.executable,
+        "-m",
+        "px",
+        f"--config={config}",
+        "--auth=NEGOTIATE",
+        f"--username={username}",
+        "--noproxy=",
+        "--listen=127.0.0.2",
+        f"--proxy={_proxy_addr(proxy)}",
+        "--test-auth",
+        f"--test={ORIGIN_HTTP}",
+    ]
+    proc_env = os.environ | {
+        "KRB5CCNAME": str(kerberos_cache),
+        "KRB5_TRACE": str(trace),
+        "PYTHONUNBUFFERED": "1",
+    }
+    result = subprocess.run(  # noqa: S603
+        command,
+        cwd=ROOT,
+        env=proc_env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "passed" in (result.stdout + result.stderr).lower()
+
+    trace_text = trace.read_text(encoding="utf-8", errors="replace") if trace.exists() else ""
+    assert "HTTP/localhost@" in trace_text, trace_text
+    assert "HTTP/127.0.0.2@" not in trace_text, trace_text
+
+
 def _sso_origin_requests() -> int:
     """Count SSO Squid log entries for origin requests.
 

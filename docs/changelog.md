@@ -11,6 +11,8 @@
 ### Bug fixes
 - NTLM/Negotiate upstream proxies are no longer blocked after interrupted CONNECT handshakes; requires pymcurl 8.23.0.3 (px#268).
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
+- `px --test`/`--test-auth` now fail a request whose final response is `401`/`407` instead of reporting it as passed.
+- `--test-auth` with Negotiate and a single explicit `--proxy` now addresses Px by the upstream proxy's hostname, so the Kerberos SPN libcurl requests matches the upstream proxy instead of Px's own listen address.
 
 ### Internal
 - Real-proxy corporate scenario suite (Docker lab) added to CI and `./build.sh release_check`.

@@ -13,7 +13,7 @@ import time
 import traceback
 import warnings
 
-from . import config, handler
+from . import config, handler, wproxy
 from .config import STATE
 from .debug import Debug, dprint, pprint
 from .version import __version__
@@ -275,6 +275,36 @@ def run_pool():
 ###
 # Actions
 
+# HTTP status codes that mean the request never got an authenticated
+# response - a --test run must not report these as success.
+_TEST_AUTH_FAILURE_CODES = (401, 407)
+
+
+def _negotiate_test_target(wp, listen, port):
+    """Pick the host --test-auth's client should address Px as, plus an optional
+    CURLOPT_RESOLVE entry to still connect it to Px's listen address.
+
+    Negotiate (Kerberos) derives its SPN from the proxy address passed to
+    libcurl. In --test-auth, that address is Px's own listen address, which
+    has no SPN registered - only the upstream proxy does. With a single
+    explicit upstream --proxy configured, address Px by that upstream
+    hostname instead and let CURLOPT_RESOLVE route the connection to Px's
+    real listen address, so the SPN libcurl requests matches the upstream
+    proxy. PAC configuration or multiple proxies have no single upstream
+    hostname to borrow, so Px keeps being addressed by its listen address
+    (the pre-existing, SPN-mismatched behaviour); the caller is told so it
+    can warn.
+
+    Returns (host, resolve_entry_or_None, single_explicit_proxy).
+    """
+    single_explicit_proxy = wp is not None and wp.mode == wproxy.MODE_CONFIG and len(wp.servers) == 1
+    if single_explicit_proxy:
+        upstream_host = wp.servers[0][0]
+        if upstream_host != listen:
+            return upstream_host, f"{upstream_host}:{port}:{listen}", single_explicit_proxy
+        return upstream_host, None, single_explicit_proxy
+    return listen, None, single_explicit_proxy
+
 
 def test(testurl):
     # Get Px configuration
@@ -288,11 +318,22 @@ def test(testurl):
     # Tweak Px configuration for test - only 1 process required
     STATE.config.set("settings", "workers", "1")
 
+    test_proxy_host = listen
+    test_proxy_resolve = None
+
     if "--test-auth" in sys.argv:
         # Set Px to --auth=NONE
         auth = STATE.auth
         STATE.auth = "NONE"
         STATE.config.set("proxy", "auth", "NONE")
+
+        test_proxy_host, test_proxy_resolve, single_explicit_proxy = _negotiate_test_target(STATE.wproxy, listen, port)
+        if not single_explicit_proxy:
+            pprint(
+                "Negotiate --test-auth needs a single explicit --proxy to address Px by the "
+                "upstream proxy's hostname; with PAC or multiple proxies configured, Px is "
+                "addressed by its listen address instead, which Kerberos may not have an SPN for"
+            )
     else:
         auth = "NONE"
 
@@ -315,9 +356,13 @@ def test(testurl):
             waitforpx()
 
         pprint(f"\nTesting {method} {url}")
+        resolve_list = None
         try:
             ec = mcurl.Curl(url, method)
-            ec.set_proxy(listen, port)
+            ec.set_proxy(test_proxy_host, port)
+            if test_proxy_resolve is not None:
+                resolve_list = mcurl.libcurl.curl_slist_append(mcurl.ffi.NULL, mcurl.py2cstr(test_proxy_resolve))
+                ec.setopt(mcurl.libcurl.CURLOPT_RESOLVE, resolve_list)
             handler.set_curl_auth(ec, auth)
             if url.startswith("https"):
                 ec.set_insecure(insecure)
@@ -335,6 +380,10 @@ def test(testurl):
                 success = True
                 ret_data = ec.get_data()
                 pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
+                code = ec.get_response_code()
+                if code in _TEST_AUTH_FAILURE_CODES:
+                    pprint(f"Failed: final response status {code} - request was not authenticated")
+                    success = False
                 if check:
                     # Tests against httpbin
                     if url not in ret_data:
@@ -345,6 +394,9 @@ def test(testurl):
                         success = False
         except Exception as exc:
             pprint(f"Failed with exception: {exc}")
+        finally:
+            if resolve_list is not None:
+                mcurl.libcurl.curl_slist_free_all(resolve_list)
 
         if success:
             pprint("Passed")

@@ -356,13 +356,14 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: 2
 
-      # Keep a client attached while subsequent steps run on Windows. Otherwise
-      # WSL can idle-terminate dockerd and the entire corporate-proxy lab.
+      # Keep a detached client attached while subsequent steps run on Windows.
+      # Otherwise WSL can idle-terminate dockerd and the entire corporate-proxy
+      # lab. Do not share the Actions step console: runner cleanup can close it.
       - name: Keep the WSL2 corporate proxy lab host alive
         shell: pwsh
         run: |
           $keepAlive = Start-Process -FilePath wsl.exe `
-            -ArgumentList '-d Ubuntu-24.04 -- sleep infinity' -PassThru -NoNewWindow
+            -ArgumentList @('-d', 'Ubuntu-24.04', '--exec', 'sleep', 'infinity') -PassThru
           Start-Sleep -Seconds 1
           if ($keepAlive.HasExited) { throw "WSL2 keep-alive process exited: $($keepAlive.ExitCode)" }
           $keepAlive.Id | Set-Content -Path "$env:RUNNER_TEMP/px-scenario-wsl-keepalive.pid"
@@ -523,6 +524,14 @@ jobs:
       - name: Confirm the WSL2 corporate proxy lab is healthy before the HTTPS burst
         shell: pwsh
         run: |
+          $pidPath = "$env:RUNNER_TEMP/px-scenario-wsl-keepalive.pid"
+          $keepAlive = if (Test-Path $pidPath) {
+            Get-Process -Id (Get-Content $pidPath) -ErrorAction SilentlyContinue
+          }
+          if (-not $keepAlive -or $keepAlive.HasExited) {
+            throw "WSL2 keep-alive process exited before the HTTPS burst"
+          }
+
           $probe = @'
           import mcurl
 
@@ -538,10 +547,20 @@ jobs:
               raise RuntimeError(f"proxy health check returned HTTP {status}")
           print(f"proxy health check returned HTTP {status}")
           '@
-          & uv run --locked python -c $probe
-          $probeExit = $LASTEXITCODE
+          $probeExit = 1
+          for ($attempt = 1; $attempt -le 15; $attempt++) {
+            & uv run --locked python -c $probe
+            $probeExit = $LASTEXITCODE
+            if ($probeExit -eq 0) { break }
+
+            # A stale Windows localhost relay can accept TCP while the WSL
+            # daemon resumes; wake Docker and give Squid bounded time to listen.
+            Write-Host "NTLM health probe attempt $attempt failed with exit code $probeExit; retrying"
+            & wsl.exe -d Ubuntu-24.04 -- sh -lc 'service docker start >/dev/null 2>&1 || true; docker ps -a || true'
+            Start-Sleep -Seconds 2
+          }
           if ($probeExit -ne 0) {
-            Write-Error "WSL2 corporate proxy lab is unavailable before the HTTPS burst; this is not a Px failure."
+            Write-Host "WSL2 corporate proxy lab is unavailable before the HTTPS burst; this is not a Px failure."
             & wsl.exe -d Ubuntu-24.04 -- sh -lc 'docker ps -a || true'
             throw "Corporate proxy lab health check failed: curl exit code $probeExit"
           }

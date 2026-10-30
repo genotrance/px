@@ -691,13 +691,16 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   target (`origin.corp.test`) is resolved by Squid inside the lab, never by
   the client, so the Windows host never needs to resolve lab-internal names
   itself. Because the following Px, upload, and SSPI steps run on Windows,
-  the job keeps a `wsl.exe` client running until logs are collected and the
-  lab is torn down. Without that client WSL2 can idle-terminate the distro,
-  which stops dockerd and all lab containers with SIGTERM between steps. A
-  direct authenticated NTLM proxy health check using the project's `uv` and
-  `mcurl` environment immediately before the HTTPS burst makes that failure
-  explicit without relying on Windows `curl.exe`'s optional NTLM support,
-  instead of reporting resulting 502 responses as a Px regression.
+  the job keeps a detached `wsl.exe --exec sleep infinity` client running until
+  logs are collected and the lab is torn down. Without that client WSL2 can
+  idle-terminate the distro, which stops dockerd and all lab containers with
+  SIGTERM between steps. The health step confirms that client is still alive
+  and makes a direct authenticated NTLM proxy health check using the project's
+  `uv` and `mcurl` environment immediately before the HTTPS burst. If the
+  Windows localhost relay accepts TCP while WSL's Docker daemon is resuming,
+  it wakes Docker and retries for a bounded 30 seconds; a final failure records
+  `docker ps -a` instead of reporting resulting 502 responses as a Px
+  regression.
 - The same job also runs Px against the Negotiate-only proxy
   (`squid-sso.corp.test:31288`, resolved to the WSL2 localhost-forwarded
   proxy port; see

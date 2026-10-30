@@ -85,7 +85,7 @@ socket sharing or duplication between processes.
 | `px/wproxy.py` | `Wproxy` — proxy discovery from config, environment, Windows Internet Options, PAC |
 | `px/pac.py` | `Pac` — PAC file loading and evaluation via quickjs-ng |
 | `px/pacutils.py` | Mozilla PAC utility functions injected into the QuickJS runtime |
-| `px/resolver.py` | `Resolver` — bounded, cached DNS lookups shared by PAC callbacks and `--noproxy` IP matching; local IPv4 discovery for `myIpAddress` |
+| `px/resolver.py` | `Resolver` — bounded, cached DNS lookups shared by PAC callbacks, `--noproxy` IP matching, and concurrent upstream-proxy connection setup; local IPv4 discovery for `myIpAddress` |
 | `px/debug.py` | `Debug` singleton — stdout/file logging redirection |
 | `px/help.py` | CLI help text (rendered from `--help`) |
 | `px/kerberos.py` | `KerberosManager` — Kerberos ticket lifecycle (kinit, renewal, cleanup) |
@@ -266,6 +266,14 @@ through its `Resolver` with `AF_UNSPEC` and tests the first returned address.
 The resolver's bounded lookup, positive cache, and negative cache prevent
 requests from repeatedly blocking on DNS; an unresolved hostname is left for
 the upstream proxy to handle.
+
+When the selected upstream proxy has a hostname, `ConnectionHandler` also uses
+that resolver result to set libcurl's request-scoped `CURLOPT_RESOLVE` entry.
+The proxy hostname remains the configured name (so Kerberos selects the same
+SPN), while a burst of new curl handles shares one DNS lookup instead of each
+starting its own resolver request. Px clears and frees the libcurl entry after
+the transfer; a failed Px lookup simply leaves libcurl's normal resolution
+path in place.
 
 ## PAC file evaluation (`px.pac`)
 

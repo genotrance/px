@@ -77,6 +77,19 @@ absolute path, because the relocked `uv.lock` records the wheels by that path
 (and the directory holds one wheel per interpreter and platform), then pymcurl
 is reinstalled from it for the client's interpreter.
 
+`test_parallel_uploads` also guards against a DNS-resolution burst at an
+upstream proxy. The GitHub 2-vCPU failure reported libcurl's `Resolving timed
+out after 10000 milliseconds`: 60 simultaneous handles each tried to resolve
+the same proxy before the connection timeout, rather than timing out while
+uploading. Px now shares its cached proxy lookup with libcurl through
+`CURLOPT_RESOLVE`, preserving the proxy hostname for Kerberos while avoiding
+the burst. To reproduce this coverage locally, limit the selected lab client's
+CPU allocation to two, then run the test with `UV_PYTHON=3.11` and
+each of `PX_EVENT_LOOP=asyncio` and `PX_EVENT_LOOP=auto`; restore the
+allocation after the run. The scenario test's 60 mixed, 8 MiB uploads and both
+one- and two-worker parametrisations must pass without changing their load or
+the 10-second connection timeout.
+
 `SCENARIO_INSTANCE` (an integer from 0 to 50, default 0) selects a private lab
 instance: instance N uses Compose project `px-scenario-N` and subnet
 `172.30.N.0/24`. `scenario.env` records the instance's project name and

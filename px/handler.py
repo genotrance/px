@@ -1088,7 +1088,9 @@ class ConnectionHandler:
                 return
 
             set_curl_auth(self.curl, STATE.auth)
+            proxy_resolve = await self._set_proxy_resolve(server, port)
         else:
+            proxy_resolve = None
             dprint(self.curl.easyhash + ": Skipping auth proxying")
 
         # Set debug mode
@@ -1132,7 +1134,14 @@ class ConnectionHandler:
         self.curl.set_useragent(STATE.useragent)
 
         # Execute via thread pool (mcurl.do is blocking)
-        success = await asyncio.to_thread(STATE.mcurl.do, self.curl)
+        try:
+            success = await asyncio.to_thread(STATE.mcurl.do, self.curl)
+        finally:
+            if proxy_resolve is not None:
+                # CURLOPT_RESOLVE retains the slist pointer, so clear it before
+                # releasing the request-scoped DNS override.
+                self.curl.unsetopt(mcurl.libcurl.CURLOPT_RESOLVE)
+                mcurl.libcurl.curl_slist_free_all(proxy_resolve)
 
         if not success:
             dprint(self.curl.easyhash + ": Connection failed: " + self.curl.errstr)
@@ -1153,6 +1162,25 @@ class ConnectionHandler:
             self._recv_buf = b""  # Consumed by tunnel
 
         await asyncio.to_thread(STATE.mcurl.remove, self.curl)
+
+    async def _set_proxy_resolve(self, host, port):
+        """Seed libcurl's DNS cache with Px's shared proxy lookup.
+
+        A burst of new handles otherwise starts one resolver request per
+        handle.  Sharing the existing Wproxy resolver keeps a busy local DNS
+        service from exhausting the connection timeout before uploads begin.
+        """
+        address = await asyncio.to_thread(STATE.wproxy._get_resolver().lookup, host)
+        if address is None or address == host:
+            return None
+
+        entry = f"{host}:{port}:{address}"
+        resolve = mcurl.libcurl.curl_slist_append(mcurl.ffi.NULL, mcurl.py2cstr(entry))
+        if resolve == mcurl.ffi.NULL:
+            dprint(self.curl.easyhash + ": Could not allocate proxy DNS override")
+            return None
+        self.curl.setopt(mcurl.libcurl.CURLOPT_RESOLVE, resolve)
+        return resolve
 
     @staticmethod
     def _upstream_headers(headers, strip_proxy_headers=False, strip_proxy_auth=False):

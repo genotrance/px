@@ -26,9 +26,11 @@ thing to check.
 The job starts a long-lived `wsl.exe` client before Docker and stops it only
 after log collection and scenario teardown. WSL2 otherwise considers the distro
 idle while Windows-only Px, upload, and SSPI steps run; idle termination sends
-SIGTERM to dockerd and every lab container. A direct authenticated proxy request
-immediately before the HTTPS burst verifies that the lab is still alive and
-reports a WSL2 lab failure rather than attributing its 502 responses to Px.
+SIGTERM to dockerd and every lab container. A direct authenticated NTLM request
+through the project's `uv` environment and `mcurl` immediately before the HTTPS
+burst verifies that the lab is still alive without depending on the Windows
+runner's `curl.exe` feature set. It reports a WSL2 lab failure rather than
+attributing its 502 responses to Px.
 The job calls Windows `klist.exe` by its absolute `System32` path: the runner's
 JDK `bin` directory precedes `System32` on `PATH`, and the JDK's Java `klist`
 shadows the bare name, printing its usage instead of showing the ticket cache.

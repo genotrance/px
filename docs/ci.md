@@ -12,6 +12,9 @@ uses Kerberos because libcurl 8.23 excludes NTLM from SPNEGO: the host file
 maps `squid-sso.corp.test` to the published proxy, while the WSL2 address maps
 `dc.corp.test` to the lab AD DC. Compose publishes TCP and UDP Kerberos and
 LDAP ports, and `klist add_bind` directs `CORP.TEST` discovery to that DC.
+The job calls Windows `klist.exe` by its absolute `System32` path: the runner's
+JDK `bin` directory precedes `System32` on `PATH`, and the JDK's Java `klist`
+shadows the bare name, printing its usage instead of binding the realm.
 
 The job first runs native `curl.exe --proxy-negotiate` with the explicit
 `pxgood@CORP.TEST` test identity. Its verbose output and the following `klist`

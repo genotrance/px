@@ -129,6 +129,10 @@ runs from the client container so Docker DNS resolves the deterministic
 `.corp.test` names; it verifies success and 407 rejection for Basic, Digest,
 NTLM, and Kerberos over both HTTP and HTTPS CONNECT, then checks the chain,
 connection-close proxy, and PAC response.
+The domain controller runs three Squid instances concurrently; their service
+names are `squid`, `squidclose`, and `squidwrapper`. Squid 5.7 includes the
+service name in its shared-memory segment prefix, so the instances can start
+without colliding.
 
 Limitations: the lab models one AD site and one Squid version from Debian,
 not AD replication, transparent interception, TLS inspection, or proxy

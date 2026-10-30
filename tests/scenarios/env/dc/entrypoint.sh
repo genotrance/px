@@ -111,6 +111,6 @@ pid_filename /run/squid-wrapper.pid
 CONF
 
 touch /shared/dc-ready
-squid -f /etc/squid/squid-close.conf -NYCd 1 &
-squid -f /etc/squid/squid-wrapper.conf -NYCd 1 &
+squid -n squidclose -f /etc/squid/squid-close.conf -NYCd 1 &
+squid -n squidwrapper -f /etc/squid/squid-wrapper.conf -NYCd 1 &
 exec squid -NYCd 1

@@ -19,10 +19,13 @@ samba-tool user create pxother 'OtherPass2!'
 samba-tool user create squid-sso 'ServicePass3!'
 samba-tool spn add HTTP/squid-sso.corp.test squid-sso
 samba-tool spn add HTTP/localhost squid-sso
+samba-tool spn add HTTP/toxiproxy squid-sso
 samba-tool domain exportkeytab /shared/squid-http.keytab \
     --principal=HTTP/squid-sso.corp.test
 samba-tool domain exportkeytab /shared/squid-http.keytab \
     --principal=HTTP/localhost
+samba-tool domain exportkeytab /shared/squid-http.keytab \
+    --principal=HTTP/toxiproxy
 chmod 0644 /shared/squid-http.keytab
 
 samba -i --debug-stdout &

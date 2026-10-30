@@ -523,9 +523,22 @@ jobs:
       - name: Confirm the WSL2 corporate proxy lab is healthy before the HTTPS burst
         shell: pwsh
         run: |
-          & curl.exe --fail --silent --show-error --connect-timeout 3 --max-time 10 `
-            --proxy-ntlm --proxy-user 'CORP\pxgood:GoodPass1!' `
-            --proxy http://127.0.0.1:31282 http://origin.corp.test:8080/small
+          $probe = @'
+          import mcurl
+
+          curl = mcurl.Curl("http://origin.corp.test:8080/small", connect_timeout=3)
+          curl.set_proxy("127.0.0.1", 31282)
+          curl.set_auth(user=r"CORP\pxgood", password="GoodPass1!", auth="NTLM")
+          curl.buffer()
+          result = curl.perform()
+          status = curl.get_response_code()
+          if result != 0:
+              raise RuntimeError(f"mcurl returned error {result}: {curl.errstr}")
+          if not 200 <= status < 400:
+              raise RuntimeError(f"proxy health check returned HTTP {status}")
+          print(f"proxy health check returned HTTP {status}")
+          '@
+          & uv run --locked python -c $probe
           $probeExit = $LASTEXITCODE
           if ($probeExit -ne 0) {
             Write-Error "WSL2 corporate proxy lab is unavailable before the HTTPS burst; this is not a Px failure."

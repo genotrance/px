@@ -694,9 +694,10 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   the job keeps a `wsl.exe` client running until logs are collected and the
   lab is torn down. Without that client WSL2 can idle-terminate the distro,
   which stops dockerd and all lab containers with SIGTERM between steps. A
-  direct authenticated proxy health check immediately before the HTTPS burst
-  makes that failure explicit instead of reporting its resulting 502 responses
-  as a Px regression.
+  direct authenticated NTLM proxy health check using the project's `uv` and
+  `mcurl` environment immediately before the HTTPS burst makes that failure
+  explicit without relying on Windows `curl.exe`'s optional NTLM support,
+  instead of reporting resulting 502 responses as a Px regression.
 - The same job also runs Px against the Negotiate-only proxy
   (`squid-sso.corp.test:31288`, resolved to the WSL2 localhost-forwarded
   proxy port; see

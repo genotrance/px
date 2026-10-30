@@ -675,23 +675,29 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   the client, so the Windows host never needs to resolve lab-internal names
   itself.
 - The same job also runs Px against the Negotiate-only proxy
-  (`127.0.0.1:31288`, see
+  (`squid-sso.corp.test:31288`, resolved to the WSL2 localhost-forwarded
+  proxy port; see
   [Multi-leg SPNEGO](#multi-leg-spnego-ntlm-in-negotiate) above) with
-  `--auth=NEGOTIATE` and `--auth=ANY`, still with explicit `CORP\pxgood`
-  credentials. This runner is not domain-joined and WSL2 only forwards the
-  lab's Squid TCP ports, not the domain controller's Kerberos port, so SSPI's
-  Negotiate package cannot obtain a ticket for either hostname and must fall
-  back to NTLM inside SPNEGO on its own - the multi-leg handshake this job
-  exists to prove, with no `ksetup`/domain-trust configuration needed to force
-  it. For each auth value, `px --test=all:http://origin.corp.test:8080/echo`
+  `--auth=NEGOTIATE` and `--auth=ANY`, with explicit
+  `pxgood@CORP.TEST` credentials. libcurl 8.23 deliberately excludes NTLM
+  from its SSPI Negotiate package, so the former `CORP\pxgood` request to
+  `127.0.0.1` could neither fall back to NTLM nor obtain a Kerberos ticket:
+  `InitializeSecurityContext` returned `SEC_E_NO_CREDENTIALS` before sending
+  a token. The job now publishes the AD DC's Kerberos and LDAP ports through
+  WSL2, binds `CORP.TEST` to that DC with `klist add_bind`, and uses
+  `squid-sso.corp.test`, matching the lab keytab's
+  `HTTP/squid-sso.corp.test` SPN. A native `curl.exe --proxy-negotiate`
+  probe must succeed and `klist` records the resulting ticket-cache state
+  before Px is tested. For each auth value,
+  `px --test=all:http://origin.corp.test:8080/echo`
   must pass GET/POST/PUT/DELETE/PATCH; a separate step then uploads small
   (12345-byte), multi-MB (5 MiB) and chunked (unknown-length) bodies for
   POST, PUT and PATCH through a foregrounded Px and checks the origin's
   `/echo` reply length and SHA-256 against the bytes actually sent. A run
-  that instead gets stuck on a repeated 407 (mirroring the Linux
-  `negotiate_wrapper_auth` finding above) means SSPI is not reaching NTLM the
-  way this job assumes, and the upload checks fail loudly rather than
-  silently passing on a non-multi-leg path. The `--test=all` step runs both
+  that instead reports `SEC_E_NO_CREDENTIALS` means Windows did not acquire
+  the lab Kerberos credentials; a repeated 407 means the service ticket did
+  not authenticate at Squid. Both fail before upload checks rather than
+  silently passing on a different authentication path. The `--test=all` step runs both
   auth values with `--verbose` (so libcurl's header trace is in the job log)
   even if the first fails, and a failed job uploads the Squid access and cache
   logs (`squid-logs.txt`) next to `compose.log`. `px --test` flushes its

@@ -199,12 +199,14 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   credentials (`--auth=NTLM`, `--username`, `PX_PASSWORD`), including
   `px --test` and a 20-request HTTPS burst through a running Px, and then
   against the lab's Negotiate-only proxy (`--auth=NEGOTIATE` and `--auth=ANY`,
-  same explicit credentials): `px --test=all:` over GET/POST/PUT/DELETE/PATCH,
+  explicit `pxgood@CORP.TEST` credentials): `px --test=all:` over
+  GET/POST/PUT/DELETE/PATCH,
   plus small, multi-MB and chunked POST/PUT/PATCH uploads checked by length
-  and SHA-256 at the origin. This runner has no route to the lab's KDC, so
-  SSPI's Negotiate package falls back to NTLM inside SPNEGO on its own,
-  exercising the multi-leg handshake the Linux lab cannot reach (see
-  [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)). GitHub's Windows
+  and SHA-256 at the origin. libcurl 8.23 blocks NTLM fallback inside SPNEGO,
+  so the job exposes the lab AD DC's Kerberos and LDAP ports to Windows,
+  binds the realm to that DC, and addresses the proxy by the hostname in its
+  HTTP SPN. A native curl probe verifies SSPI ticket acquisition before Px
+  runs (see [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)). GitHub's Windows
   runners have no Linux-container backend, so the lab runs inside WSL2
   (`Vampire/setup-wsl`) on the same runner; WSL2's built-in localhost
   forwarding exposes the lab's `127.0.0.1` ports to the Windows side of the

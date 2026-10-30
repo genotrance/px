@@ -53,12 +53,18 @@ def test_windows_scenario_keeps_wsl_lab_alive_for_the_https_burst():
     stop_keep_alive = steps["Stop the WSL2 keep-alive process"]
 
     assert keep_alive["shell"] == "pwsh"
-    assert "sleep infinity" in keep_alive["run"]
+    assert "--exec" in keep_alive["run"]
+    assert "'sleep', 'infinity'" in keep_alive["run"]
+    assert "-NoNewWindow" not in keep_alive["run"]
     assert "uv run --locked python -c" in health_check["run"]
     assert 'auth="NTLM"' in health_check["run"]
     assert "set_proxy" in health_check["run"]
     assert "curl.exe" not in health_check["run"]
     assert "not a Px failure" in health_check["run"]
+    assert "Get-Process" in health_check["run"]
+    assert "for ($attempt = 1; $attempt -le 15; $attempt++)" in health_check["run"]
+    assert "service docker start" in health_check["run"]
     assert "docker ps -a" in health_check["run"]
+    assert "Write-Host" in health_check["run"]
     assert stop_keep_alive["if"] == "always()"
     assert "Stop-Process" in stop_keep_alive["run"]

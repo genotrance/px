@@ -23,14 +23,16 @@ after a restart; a hosted runner cannot be restarted mid-job, so if the Kerberos
 probe reports no credentials despite a successful `ksetup`, that is the first
 thing to check.
 
-The job starts a long-lived `wsl.exe` client before Docker and stops it only
-after log collection and scenario teardown. WSL2 otherwise considers the distro
-idle while Windows-only Px, upload, and SSPI steps run; idle termination sends
-SIGTERM to dockerd and every lab container. A direct authenticated NTLM request
-through the project's `uv` environment and `mcurl` immediately before the HTTPS
-burst verifies that the lab is still alive without depending on the Windows
-runner's `curl.exe` feature set. It reports a WSL2 lab failure rather than
-attributing its 502 responses to Px.
+The job starts a detached long-lived `wsl.exe --exec sleep infinity` client
+before Docker and stops it only after log collection and scenario teardown.
+This prevents WSL2 from considering the distro idle while Windows-only Px,
+upload, and SSPI steps run; idle termination sends SIGTERM to dockerd and every
+lab container. Before the HTTPS burst, the job verifies that this process is
+still present and makes a direct authenticated NTLM request through the
+project's `uv` environment and `mcurl`. A failed request wakes Docker and
+retries for a bounded 30 seconds: Windows' localhost relay can accept TCP while
+the WSL daemon and Squid resume. The final failure prints `docker ps -a` before
+reporting a WSL2 lab failure instead of attributing a resulting 502 to Px.
 The job calls Windows `klist.exe` by its absolute `System32` path: the runner's
 JDK `bin` directory precedes `System32` on `PATH`, and the JDK's Java `klist`
 shadows the bare name, printing its usage instead of showing the ticket cache.

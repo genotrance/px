@@ -10,7 +10,7 @@ import time
 def pprint(*objs):
     "Catch exception if print not possible while running in the background"
     with contextlib.suppress(Exception):
-        print(*objs)
+        print(*objs, flush=True)
 
 
 def missing_module_message(module, error):

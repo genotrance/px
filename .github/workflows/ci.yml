@@ -397,13 +397,19 @@ jobs:
         env:
           PX_PASSWORD: GoodPass1!
         run: |
+          fail=0
           for auth in NEGOTIATE ANY; do
+            echo "::group::px --test=all --auth=$auth"
             config="$RUNNER_TEMP/px-scenario-test-$auth.ini"
             : > "$config"
-            uv run --locked python -m px --config="$config" --noproxy= \
+            rc=0
+            uv run --locked python -m px --config="$config" --noproxy= --verbose \
               --test=all:http://origin.corp.test:8080/echo \
-              --proxy=127.0.0.1:31288 --auth=$auth --username='CORP\pxgood'
+              --proxy=127.0.0.1:31288 --auth=$auth --username='CORP\pxgood' || rc=$?
+            echo "::endgroup::"
+            [ $rc -eq 0 ] || { echo "px --test=all --auth=$auth failed with exit code $rc"; fail=1; }
           done
+          exit $fail
 
       # --test=all only sends small bodies; this checks the exact bytes mcurl's
       # Expect:100-continue handling (docs/testing.md) is meant to protect once SSPI
@@ -513,7 +519,9 @@ jobs:
       - name: Collect Squid and Samba logs from WSL2
         if: failure()
         shell: wsl-bash {0}
-        run: bash tests/scenarios/env/scenario-env.sh logs > compose.log 2>&1 || true
+        run: |
+          bash tests/scenarios/env/scenario-env.sh logs > compose.log 2>&1 || true
+          docker exec px-scenario-client-1 sh -c 'cd /scenario-logs && tail -n +1 *' > squid-logs.txt 2>&1 || true
 
       - name: Upload scenario logs
         if: failure()
@@ -523,6 +531,7 @@ jobs:
           path: |
             scenario-artifacts
             compose.log
+            squid-logs.txt
           retention-days: 7
 
       - name: Tear down the scenario environment

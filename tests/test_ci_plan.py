@@ -9,13 +9,8 @@ import pytest
 
 yaml = pytest.importorskip("yaml")
 
-STEP = next(
-    s
-    for s in yaml.safe_load((Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text())["jobs"][
-        "plan"
-    ]["steps"]
-    if s.get("id") == "plan"
-)
+WORKFLOW = yaml.safe_load((Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text())
+STEP = next(s for s in WORKFLOW["jobs"]["plan"]["steps"] if s.get("id") == "plan")
 
 
 def plan(tmp_path, event, full_input=""):
@@ -49,3 +44,17 @@ def test_lanes(tmp_path, event, full_input, full):
     assert [len(json.loads(out[k])["include"]) for k in ("tests", "musl", "scenario")] == (
         [13, 4, 10] if full else [5, 1, 0]
     )
+
+
+def test_windows_scenario_keeps_wsl_lab_alive_for_the_https_burst():
+    steps = {step["name"]: step for step in WORKFLOW["jobs"]["scenario-windows"]["steps"] if "name" in step}
+    keep_alive = steps["Keep the WSL2 corporate proxy lab host alive"]
+    health_check = steps["Confirm the WSL2 corporate proxy lab is healthy before the HTTPS burst"]
+    stop_keep_alive = steps["Stop the WSL2 keep-alive process"]
+
+    assert keep_alive["shell"] == "pwsh"
+    assert "sleep infinity" in keep_alive["run"]
+    assert "proxy-ntlm" in health_check["run"]
+    assert "not a Px failure" in health_check["run"]
+    assert stop_keep_alive["if"] == "always()"
+    assert "Stop-Process" in stop_keep_alive["run"]

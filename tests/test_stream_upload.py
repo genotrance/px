@@ -913,6 +913,21 @@ def test_stalled_upload_does_not_delay_others_ntlm(ntlm_px):
 
 
 @needs_mcurl_streaming
+def test_stalled_upload_through_auth_none_proxy_completes(origin, px_port, tmp_path, loop_kind):
+    "--auth=NONE runs the easy interface where a paused upload is never resumed: the body must still arrive"
+    flags = f"--server={origin.addr} --auth=NONE --noproxy= --workers=1"
+    subp, cmd, buffer = start_px("StreamAuthNone", px_port, tmp_path, flags, loop_kind)
+    try:
+        response, took = timed(send_stalled, px_port, "http://auth-none.test/x", threading.Event())
+    finally:
+        print_buffer(buffer)
+        quit_px("StreamAuthNone", subp, cmd, strict=False)
+    assert response.status == 200, response.body
+    assert response.json() == {"sha256": body_sha256(BODY_SIZE), "length": BODY_SIZE}
+    assert took < STALL_SECONDS + 10
+
+
+@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_many_parallel_streamed_uploads_exact(direct_px, origin, chunked):
     port, _ = direct_px

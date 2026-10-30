@@ -205,7 +205,10 @@ mcurl runs transfer callbacks while holding its multi lock, and `remove()` and
 body read waiting for that loop. While a body read waits for a slow client,
 other transfers sharing the same mcurl instance wait as well (the read timeout
 is `REQUEST_TIMEOUT`); `--auth=NONE` uses the easy interface and is not
-affected.
+affected. The easy interface has no multi loop to apply a resume, so a paused
+upload there would never continue (the chained NTLM/Digest `test_proxy_auth_chain`
+cases timed out this way): `RequestBody` is put in blocking mode for easy
+transfers, which is safe because each owns its thread.
 
 ### spnego monkey-patching
 

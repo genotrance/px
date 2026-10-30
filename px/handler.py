@@ -1104,10 +1104,12 @@ class ConnectionHandler:
             body_reader = body if body is not None else RequestBody()
             response_writer = BridgeWriter(loop, self.transport)
             header_writer = HeaderBridgeWriter(loop, self.transport)
-            if hasattr(self.curl, "resume_upload"):
+            if hasattr(self.curl, "resume_upload") and not self.curl.is_easy:
                 body_reader.resume = self.curl.resume_upload
             else:
-                # pymcurl without pause/resume: block mcurl's thread instead (a stalled client delays others)
+                # The easy interface (--auth=NONE) has no loop to apply a resume, and pymcurl without
+                # pause/resume cannot pause: block mcurl's thread instead (an easy transfer owns its
+                # thread, so a stalled client delays nobody else)
                 body_reader.blocking = True
             self.curl.bridge(body_reader, response_writer, header_writer)
 

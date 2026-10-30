@@ -204,7 +204,8 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   plus small, multi-MB and chunked POST/PUT/PATCH uploads checked by length
   and SHA-256 at the origin. libcurl 8.23 blocks NTLM fallback inside SPNEGO,
   so the job exposes the lab AD DC's Kerberos and LDAP ports to Windows,
-  binds the realm to that DC, and addresses the proxy by the hostname in its
+  declares the realm to Windows with `ksetup` (not `klist add_bind`, which a
+  workgroup runner cannot use), and addresses the proxy by the hostname in its
   HTTP SPN. A native curl probe verifies SSPI ticket acquisition before Px
   runs (see [Testing](testing.md#multi-leg-spnego-ntlm-in-negotiate)). GitHub's Windows
   runners have no Linux-container backend, so the lab runs inside WSL2

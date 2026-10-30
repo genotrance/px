@@ -11,10 +11,21 @@ proxy lab runs in WSL2. NTLM uses the localhost-published proxy port. Negotiate
 uses Kerberos because libcurl 8.23 excludes NTLM from SPNEGO: the host file
 maps `squid-sso.corp.test` to the published proxy, while the WSL2 address maps
 `dc.corp.test` to the lab AD DC. Compose publishes TCP and UDP Kerberos and
-LDAP ports, and `klist add_bind` directs `CORP.TEST` discovery to that DC.
+LDAP ports. The job declares `CORP.TEST` with Windows `ksetup.exe` rather than `klist add_bind`:
+`add_bind` locates the realm's DC through the AD DC locator (DsGetDCName over
+RPC, LDAP and netlogon), which a workgroup runner cannot use against the WSL2
+Samba DC and fails with `DsGetDCName 0x6ba`. `ksetup /addkdc` names the KDC
+explicitly, so Windows treats `CORP.TEST` as a non-AD realm and skips the
+locator. The job also sets TCP support for the realm and maps
+`squid-sso.corp.test` and the `.corp.test` suffix to it, so the SPN for the proxy
+resolves to the lab realm. Microsoft documents that `ksetup /addkdc` takes effect
+after a restart; a hosted runner cannot be restarted mid-job, so if the Kerberos
+probe reports no credentials despite a successful `ksetup`, that is the first
+thing to check.
 The job calls Windows `klist.exe` by its absolute `System32` path: the runner's
 JDK `bin` directory precedes `System32` on `PATH`, and the JDK's Java `klist`
-shadows the bare name, printing its usage instead of binding the realm.
+shadows the bare name, printing its usage instead of showing the ticket cache.
+The same applies to `ksetup`, which the job also calls by absolute path.
 
 The job first runs native `curl.exe --proxy-negotiate` with the explicit
 `pxgood@CORP.TEST` test identity. Its verbose output and the following `klist`

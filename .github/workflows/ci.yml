@@ -378,10 +378,19 @@ jobs:
           if (-not $wslAddress) { throw "Could not determine the WSL2 address" }
           Add-Content -Path "$env:WINDIR\System32\drivers\etc\hosts" `
             -Value "`n127.0.0.1 squid-sso.corp.test`n$wslAddress dc.corp.test"
+          # A workgroup runner cannot locate the realm's DC (klist add_bind fails with
+          # DsGetDCName 0x6ba), so the realm is declared with an explicit KDC instead.
+          $ksetup = "$env:WINDIR\System32\ksetup.exe"
           $klist = "$env:WINDIR\System32\klist.exe"
-          & $klist add_bind CORP.TEST dc.corp.test
-          if ($LASTEXITCODE -ne 0) { throw "Could not bind CORP.TEST to the lab DC" }
-          & $klist query_bind
+          function Invoke-Ksetup {
+            & $ksetup @args
+            if ($LASTEXITCODE -ne 0) { throw "ksetup $($args -join ' ') failed: $LASTEXITCODE" }
+          }
+          Invoke-Ksetup /addkdc CORP.TEST dc.corp.test
+          Invoke-Ksetup /setrealmflags CORP.TEST tcpsupported
+          Invoke-Ksetup /addhosttorealmmap squid-sso.corp.test CORP.TEST
+          Invoke-Ksetup /addhosttorealmmap '.corp.test' CORP.TEST
+          Invoke-Ksetup /dumpstate
           $kdc = Test-NetConnection -ComputerName dc.corp.test -Port 88 -InformationLevel Detailed
           $kdc
           if (-not $kdc.TcpTestSucceeded) { throw "The lab KDC is not reachable from Windows" }

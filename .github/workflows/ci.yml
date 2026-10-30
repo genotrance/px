@@ -284,7 +284,7 @@ jobs:
 
       - name: Bring up the corporate proxy scenario environment
         env:
-          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
+          SCENARIO_INSTANCE: ${{ strategy.job-index }}
         run: tests/scenarios/env/scenario-env.sh up
 
       # The client container runs pytest and every Px it starts in the private
@@ -293,7 +293,7 @@ jobs:
       - name: Run the scenario suite
         timeout-minutes: 60
         env:
-          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
+          SCENARIO_INSTANCE: ${{ strategy.job-index }}
         run: |
           export UV_PYTHON=${{ matrix.python-version }}
           export PX_EVENT_LOOP=${{ matrix.event-loop }}
@@ -303,7 +303,7 @@ jobs:
       - name: Collect Squid, Samba and Px logs
         if: failure()
         env:
-          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
+          SCENARIO_INSTANCE: ${{ strategy.job-index }}
         run: |
           mkdir -p "${{ runner.temp }}/scenario-artifacts"
           tests/scenarios/env/scenario-env.sh logs > "${{ runner.temp }}/scenario-artifacts/compose.log" 2>&1 || true
@@ -320,7 +320,7 @@ jobs:
       - name: Tear down the scenario environment
         if: always()
         env:
-          SCENARIO_INSTANCE: ${{ strategy.job-index + 1 }}
+          SCENARIO_INSTANCE: ${{ strategy.job-index }}
         run: tests/scenarios/env/scenario-env.sh down
 
   # GitHub's windows-latest runners have no Linux-container backend, so the

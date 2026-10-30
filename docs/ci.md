@@ -22,6 +22,13 @@ resolves to the lab realm. Microsoft documents that `ksetup /addkdc` takes effec
 after a restart; a hosted runner cannot be restarted mid-job, so if the Kerberos
 probe reports no credentials despite a successful `ksetup`, that is the first
 thing to check.
+
+The job starts a long-lived `wsl.exe` client before Docker and stops it only
+after log collection and scenario teardown. WSL2 otherwise considers the distro
+idle while Windows-only Px, upload, and SSPI steps run; idle termination sends
+SIGTERM to dockerd and every lab container. A direct authenticated proxy request
+immediately before the HTTPS burst verifies that the lab is still alive and
+reports a WSL2 lab failure rather than attributing its 502 responses to Px.
 The job calls Windows `klist.exe` by its absolute `System32` path: the runner's
 JDK `bin` directory precedes `System32` on `PATH`, and the JDK's Java `klist`
 shadows the bare name, printing its usage instead of showing the ticket cache.

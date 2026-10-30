@@ -356,6 +356,17 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: 2
 
+      # Keep a client attached while subsequent steps run on Windows. Otherwise
+      # WSL can idle-terminate dockerd and the entire corporate-proxy lab.
+      - name: Keep the WSL2 corporate proxy lab host alive
+        shell: pwsh
+        run: |
+          $keepAlive = Start-Process -FilePath wsl.exe `
+            -ArgumentList '-d Ubuntu-24.04 -- sleep infinity' -PassThru -NoNewWindow
+          Start-Sleep -Seconds 1
+          if ($keepAlive.HasExited) { throw "WSL2 keep-alive process exited: $($keepAlive.ExitCode)" }
+          $keepAlive.Id | Set-Content -Path "$env:RUNNER_TEMP/px-scenario-wsl-keepalive.pid"
+
       - name: Install Docker in WSL2
         shell: wsl-bash {0}
         run: |
@@ -509,6 +520,19 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/px-negotiate.pid")" 2>/dev/null || true
           exit $fail
 
+      - name: Confirm the WSL2 corporate proxy lab is healthy before the HTTPS burst
+        shell: pwsh
+        run: |
+          & curl.exe --fail --silent --show-error --connect-timeout 3 --max-time 10 `
+            --proxy-ntlm --proxy-user 'CORP\pxgood:GoodPass1!' `
+            --proxy http://127.0.0.1:31282 http://origin.corp.test:8080/small
+          $probeExit = $LASTEXITCODE
+          if ($probeExit -ne 0) {
+            Write-Error "WSL2 corporate proxy lab is unavailable before the HTTPS burst; this is not a Px failure."
+            & wsl.exe -d Ubuntu-24.04 -- sh -lc 'docker ps -a || true'
+            throw "Corporate proxy lab health check failed: curl exit code $probeExit"
+          }
+
       - name: Run px and burst 20 HTTPS requests through it
         shell: bash
         env:
@@ -567,3 +591,13 @@ jobs:
         if: always()
         shell: wsl-bash {0}
         run: SCENARIO_HOST_PORTS=1 bash tests/scenarios/env/scenario-env.sh down
+
+      - name: Stop the WSL2 keep-alive process
+        if: always()
+        shell: pwsh
+        run: |
+          $pidPath = "$env:RUNNER_TEMP/px-scenario-wsl-keepalive.pid"
+          if (Test-Path $pidPath) {
+            Stop-Process -Id (Get-Content $pidPath) -Force -ErrorAction SilentlyContinue
+            Remove-Item $pidPath -Force
+          }

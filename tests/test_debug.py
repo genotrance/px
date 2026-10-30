@@ -21,6 +21,21 @@ class TestPprint:
         captured = capsys.readouterr()
         assert "a b c" in captured.out
 
+    def test_pprint_flushes_for_os_exit(self, monkeypatch):
+        # --test ends with os._exit, which discards unflushed piped output
+        flushed = []
+
+        class Recorder:
+            def write(self, _):
+                pass
+
+            def flush(self):
+                flushed.append(True)
+
+        monkeypatch.setattr(sys, "stdout", Recorder())
+        pprint("result")
+        assert flushed
+
     def test_pprint_swallows_exception(self, monkeypatch):
         # Replace stdout with something that raises on write
         class BadWriter:

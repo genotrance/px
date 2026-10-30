@@ -71,8 +71,11 @@ changing it.
 
 `test` requires pymcurl 8.23.0.3 or later and fails rather than skipping its
 streamed-upload coverage when the capability is missing. Set `MCURL_WHEELS` to
-a directory containing the devel wheel; CI obtains that directory through its
-mcurl wheel action.
+a directory containing the devel wheels; CI obtains that directory through its
+mcurl wheel action. The whole directory is copied into the client at the same
+absolute path, because the relocked `uv.lock` records the wheels by that path
+(and the directory holds one wheel per interpreter and platform), then pymcurl
+is reinstalled from it for the client's interpreter.
 
 `SCENARIO_INSTANCE` (an integer from 0 to 50, default 0) selects a private lab
 instance: instance N uses Compose project `px-scenario-N` and subnet
@@ -652,7 +655,7 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   bringing the lab up and down itself with `tests/scenarios/env/scenario-env.sh`
   and invoking pytest with its `test` subcommand). Every job gives the lab a
   unique instance, bind-mounts the checkout into the client, and copies the
-  CI mcurl devel wheel into it. A job that fails uploads `docker compose logs`
+  CI mcurl devel wheels into it at their host path. A job that fails uploads `docker compose logs`
   for every Squid and the Samba domain controller plus each Px `--log=4`
   output copied from the client; the lab is torn down whether the suite
   passed, failed, or the job was cancelled.
@@ -688,7 +691,12 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   that instead gets stuck on a repeated 407 (mirroring the Linux
   `negotiate_wrapper_auth` finding above) means SSPI is not reaching NTLM the
   way this job assumes, and the upload checks fail loudly rather than
-  silently passing on a non-multi-leg path.
+  silently passing on a non-multi-leg path. The `--test=all` step runs both
+  auth values with `--verbose` (so libcurl's header trace is in the job log)
+  even if the first fails, and a failed job uploads the Squid access and cache
+  logs (`squid-logs.txt`) next to `compose.log`. `px --test` flushes its
+  output before exiting, since it ends with `os._exit`, which previously
+  discarded everything it printed when stdout was a pipe.
 - **Domain-joined SSPI single sign-on is out of scope for GitHub runners.**
   `--auth=NTLM`/`--auth=NEGOTIATE` with no `--username`/`--password` relies on
   the OS caching a logged-on domain user's credentials (Windows SSPI, or a

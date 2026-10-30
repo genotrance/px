@@ -700,11 +700,14 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   from its SSPI Negotiate package, so the former `CORP\pxgood` request to
   `127.0.0.1` could neither fall back to NTLM nor obtain a Kerberos ticket:
   `InitializeSecurityContext` returned `SEC_E_NO_CREDENTIALS` before sending
-  a token. The job now publishes the AD DC's Kerberos and LDAP ports through
-  WSL2, binds `CORP.TEST` to that DC with `klist add_bind` (called by its
-  absolute `System32` path, since the JDK's Java `klist` shadows it on
-  `PATH`), and uses
-  `squid-sso.corp.test`, matching the lab keytab's
+  a token. The job now publishes the AD DC's Kerberos and LDAP ports through WSL2 and
+  declares `CORP.TEST` to Windows with `ksetup` (called by its absolute
+  `System32` path, since the JDK's Java `klist` shadows `PATH` names):
+  `/addkdc` names `dc.corp.test` as the KDC, `/setrealmflags` enables TCP, and
+  `/addhosttorealmmap` maps `squid-sso.corp.test` and `.corp.test` to the realm.
+  It does not use `klist add_bind`, which locates the DC through the AD DC
+  locator and fails on a workgroup runner with `DsGetDCName 0x6ba`. The job
+  then uses `squid-sso.corp.test`, matching the lab keytab's
   `HTTP/squid-sso.corp.test` SPN. A native `curl.exe --proxy-negotiate`
   probe must succeed and `klist` records the resulting ticket-cache state
   before Px is tested. For each auth value,

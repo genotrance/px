@@ -219,6 +219,14 @@ without requiring a credential file on disk. The import of `spnego` at module
 level (line 57) is intentionally after the monkey-patch and is suppressed via
 `E402` in ruff.
 
+`_get_credential` and the Digest/Basic auth checks run `get_client_password()`
+synchronously on the event loop thread (unlike `mcurl.do` and DNS lookups,
+which run via `asyncio.to_thread`), because pyspnego invokes the credential
+callback from inside its own synchronous `step()`. `get_client_password()`
+caches each username's result after the first successful lookup so a slow or
+contended keyring backend is only ever hit once per username, not once per
+handshake.
+
 ## Authentication
 
 Px can authenticate to the upstream proxy using:

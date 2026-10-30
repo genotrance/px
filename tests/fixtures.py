@@ -60,7 +60,7 @@ def px_upstream(px_port, tmp_path_factory):
     yield buffer
 
     # Quit Px
-    quit_px(name, subp, cmd)
+    quit_px(name, subp, cmd, buffer=buffer)
 
 
 @pytest.fixture(scope="session")
@@ -81,7 +81,7 @@ def px_chain(px_port, tmp_path_factory):
     yield buffer
 
     # Quit Px
-    quit_px(name, subp, cmd)
+    quit_px(name, subp, cmd, buffer=buffer)
 
 
 ##

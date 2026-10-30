@@ -56,8 +56,25 @@ spnego._ntlm._get_credential_file = _get_credential_file
 
 import spnego
 
+_client_password_cache: dict[str, str] = {}
+
 
 def get_client_password(username):
+    "Get client password from environment variables or keyring, cached per username"
+    if username in _client_password_cache:
+        return _client_password_cache[username]
+
+    password = _lookup_client_password(username)
+    if password is not None:
+        # NTLM/Digest validate credentials synchronously on the event loop thread
+        # (pyspnego's credential callback and the hash checks are not run via
+        # asyncio.to_thread like mcurl transfers are), so a slow keyring backend
+        # would otherwise stall every connection on every handshake.
+        _client_password_cache[username] = password
+    return password
+
+
+def _lookup_client_password(username):
     "Get client password from environment variables or keyring"
     password = None
     if username is None or len(username) == 0:

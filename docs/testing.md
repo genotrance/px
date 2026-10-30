@@ -10,7 +10,7 @@ Tests live in `tests/`.
 |------|-------|
 | `conftest.py` | Pytest configuration — path setup, plaintext keyring backend, event-loop selection, xdist auto-parallelism hook, scenario memory report, loopback `getfqdn()` shortcut, macOS CI startup probe |
 | `fixtures.py` | Shared test fixtures — port allocation, Px server instances (launched with `--verbose`), auth parametrisation |
-| `helpers.py` | Utility functions — subprocess management (`run_px` launches Px with `--verbose`), port checks, keyring setup |
+| `helpers.py` | Utility functions — subprocess management (`run_px` launches Px with `--verbose`, `quit_px` stops it and, given its captured log `buffer`, prints Px's own verbose output when `--quit` fails), port checks, keyring setup |
 | `test_benchmark.py` | Concurrency benchmarks — HTTP/CONNECT throughput, thread count, memory at various concurrency levels (marked `benchmark`, run via `make benchmark`) |
 | `test_event_loop.py` | Event loop integration — verifies the selected asyncio or uvloop/winloop loop and basic server operation |
 | `test_config.py` | Configuration utility tests — `get_logfile`, `get_config_dir`, `get_host_ips`, defaults, save, install |
@@ -966,6 +966,50 @@ Fixes:
 
 Expected after: macOS wheel environments in the minutes-or-less range like
 py310's 15s and Linux's ~1 minute, instead of 19m31s each.
+
+---
+
+## Windows `px_upstream` teardown: "Unable to --quit Px"
+
+`build.yml` dry run 41056925800 attempt 2 (`test-binary windows-amd64`,
+py310) hit `AssertionError: Failed: Unable to --quit Px: 3` tearing down the
+session-scoped `px_upstream` fixture (`--client-auth=ANY --workers=1
+--client-nosspi`), after `test_upload_through_ntlm_proxy_first_request`. The
+`--quit` retry logged a `socket.create_connection` timeout twice ("Px not
+responding"), a curl send failure ("error 55"), and once the request got
+through, the port was still accepting connections right after ("Px still
+running") — roughly 17 of the 22.95s teardown was spent unable to even open a
+TCP connection to Px's listening port, not failing a single fast RPC.
+
+`_handle_quit()` calls `os._exit()` as soon as it reaches `/PxQuit`, without
+waiting on any other thread, which rules out a leaked worker thread blocking
+quit directly. A `socket.create_connection` *timeout* (rather than an
+immediate refusal, which is what a dead process gives) on loopback means the
+process was alive but its single asyncio event loop was not running its
+accept loop for seconds at a time — consistent with something blocking that
+loop's one thread synchronously. The one synchronous, non-offloaded blocking
+call on the exact code path this test exercises is `get_client_password()`'s
+`keyring.get_password()`, invoked from pyspnego's NTLM credential callback
+(`_get_credential`, `px/handler.py`) directly inside `_do_client_auth()` —
+unlike `mcurl.do` and DNS lookups, which already run via `asyncio.to_thread`.
+`px_upstream` never passes `--client-username`, so every NTLM/Digest/Basic
+handshake against it re-reads the keyring rather than using `PX_CLIENT_PASSWORD`.
+
+Measured locally (Linux, `keyrings.alt.file.PlaintextKeyring`, the same
+backend CI's `PX_KEYRING_PLAINTEXT=1` selects), a single `keyring.get_password()`
+call takes ~0.27ms, far too fast to reproduce a multi-second stall by itself;
+reproducing the stall needs the Windows runner's shared-file keyring under the
+rest of the job's parallel load, which was not available here. `px/handler.py`
+now caches `get_client_password()`'s result per username after the first
+successful lookup (`tests/test_client_auth.py::test_client_password_lookup_is_cached_after_first_success`),
+removing this call from the hot path after the first handshake regardless of
+how slow it is. `quit_px()` (`tests/helpers.py`) also takes an optional
+`buffer` — `px_upstream` and `px_chain` now pass their Px's own log buffer, so
+a future `--quit` failure prints what Px itself was doing, instead of only the
+quit client's output. The `ConnectionResetError` in the fake origin server's
+teardown log is Windows resetting the Upstream process's open connections to
+it when the process is killed; it is a side effect of the stalled teardown,
+not a separate defect.
 
 ---
 

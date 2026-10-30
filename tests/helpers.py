@@ -140,12 +140,14 @@ def is_px_running(port, listen_ip="127.0.0.1", timeout=20):
     raise PxStartupError(listen_ip, port)
 
 
-def quit_px(name, subp, cmd, strict=True):
+def quit_px(name, subp, cmd, strict=True, buffer=None):
     """Stop a running Px instance.
 
     If strict=True (default), asserts that --quit and exit succeed — use in
     fixture teardown where quit must work.  If strict=False, falls back to
-    kill on failure — use in exception handlers / cleanup."""
+    kill on failure — use in exception handlers / cleanup.  If buffer is
+    given, Px's own verbose log prints when --quit fails, since that is
+    otherwise the only record of what Px was doing when it stopped responding."""
     quit_cmd = cmd + " --quit"
     print(f"{name} quit cmd: {quit_cmd}\n")
     # Retry --quit for slow CI environments (e.g. Windows)
@@ -155,6 +157,9 @@ def quit_px(name, subp, cmd, strict=True):
         if ret == 0:
             break
         time.sleep(2)
+    if ret != 0 and buffer is not None:
+        print(f"{name} Px log:")
+        print_buffer(buffer)
     if strict:
         assert ret == 0, f"Failed: Unable to --quit Px: {ret}"
     print(f"{name} Px --quit {'succeeded' if ret == 0 else 'failed'}")

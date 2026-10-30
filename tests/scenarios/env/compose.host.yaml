@@ -3,6 +3,11 @@
 services:
   dc:
     ports:
+      # Windows SSPI reaches the lab AD DC through WSL2's NAT address.
+      - "0.0.0.0:${SCENARIO_KERBEROS_PORT:-88}:88/tcp"
+      - "0.0.0.0:${SCENARIO_KERBEROS_PORT:-88}:88/udp"
+      - "0.0.0.0:${SCENARIO_LDAP_PORT:-389}:389/tcp"
+      - "0.0.0.0:${SCENARIO_LDAP_PORT:-389}:389/udp"
       - "127.0.0.1:${SCENARIO_SSO_PORT:-31282}:3128"
       - "127.0.0.1:${SCENARIO_SSO_CLOSE_PORT:-31287}:3129"
       - "127.0.0.1:${SCENARIO_SSO_WRAPPER_PORT:-31288}:3130"

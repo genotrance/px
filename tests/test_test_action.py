@@ -383,3 +383,37 @@ def test_test_auth_without_single_proxy_warns_and_keeps_listen(monkeypatch):
     assert curl.proxy_host == "127.0.0.2"
     assert curl.setopt_calls == []
     assert any("single explicit --proxy" in line for line in output)
+
+
+@pytest.mark.parametrize(
+    ("auth", "rewritten"), [("NEGOTIATE", True), ("ANY", True), ("ANYSAFE", True), ("NTLM", False), ("BASIC", False)]
+)
+def test_test_auth_rewrite_and_warning_only_for_negotiate(monkeypatch, auth, rewritten):
+    output = []
+    FakeCurl.results = [0]
+    FakeCurl.codes = [200]
+    FakeCurl.headers = []
+    FakeCurl.calls = 0
+    FakeCurl.instances = []
+    fake_libcurl = FakeLibcurl()
+
+    monkeypatch.setattr(main.config, "get_listen", lambda: "127.0.0.2")
+    monkeypatch.setattr(main.STATE, "config", FakeConfig())
+    monkeypatch.setattr(main.STATE, "auth", auth)
+    monkeypatch.setattr(
+        main.STATE, "wproxy", FakeWproxy(main.wproxy.MODE_CONFIG_PAC, ["http://example.test/proxy.pac"])
+    )
+    monkeypatch.setattr(main.socket, "create_connection", lambda *_args: None)
+    monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
+    monkeypatch.setattr(main.mcurl, "libcurl", fake_libcurl)
+    monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
+    monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main, "pprint", output.append)
+    monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+    monkeypatch.setattr(main.sys, "argv", ["px", "--test-auth"])
+
+    with pytest.raises(SystemExit):
+        main.test("http://example.test/")
+
+    assert FakeCurl.instances[-1].proxy_host == "127.0.0.2"
+    assert any("single explicit --proxy" in line for line in output) == rewritten

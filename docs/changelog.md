@@ -21,7 +21,7 @@
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
 - `px --test`/`--test-auth` now fail a request whose final response is `401`/`407` instead of reporting it as passed.
 - `--test-auth` with Negotiate and a single explicit `--proxy` now addresses Px by the upstream proxy's hostname, so the Kerberos SPN libcurl requests matches the upstream proxy instead of Px's own listen address.
-- Downstream NTLM/Digest/Basic client authentication no longer re-reads the password store on every handshake, avoiding event-loop stalls under a slow or contended keyring backend.
+- Downstream NTLM/Digest/Basic client authentication no longer re-reads the password store on every handshake, avoiding event-loop stalls under a slow or contended keyring backend. A rejected cached password is re-read from the store on the next attempt.
 
 ### Internal
 - Scenario lab installs all pymcurl devel wheels inside the client; `px --test` output is no longer lost when piped.

@@ -114,6 +114,42 @@ def test_client_password_lookup_failure_is_not_cached():
         handler._client_password_cache.clear()
 
 
+def test_client_password_cache_hit_skips_lookup():
+    handler._client_password_cache.clear()
+    handler._client_password_cache["carol"] = "cached"
+    try:
+        with unittest.mock.patch.object(handler.keyring, "get_password") as get_password:
+            assert handler.get_client_password("carol") == "cached"
+        get_password.assert_not_called()
+    finally:
+        handler._client_password_cache.clear()
+
+
+def test_failed_basic_auth_invalidates_cached_password_and_rereads():
+    handler._client_password_cache.clear()
+    connection, _responses = _connection()
+    credentials = base64.b64encode(b"dave:new").decode("ascii")
+    try:
+        with (
+            unittest.mock.patch.object(handler.STATE, "client_auth", ["BASIC"]),
+            unittest.mock.patch.object(handler.keyring, "get_password", side_effect=["old", "new"]) as get_password,
+        ):
+            assert handler.get_client_password("dave") == "old"
+            assert not connection._do_basic_auth(f"Basic {credentials}")
+            assert "dave" not in handler._client_password_cache
+            assert connection._do_basic_auth(f"Basic {credentials}")
+        assert get_password.call_count == 2
+        assert handler._client_password_cache["dave"] == "new"
+    finally:
+        handler._client_password_cache.clear()
+
+
+def test_invalidate_client_password_unknown_user_is_noop():
+    handler._client_password_cache.clear()
+    handler.invalidate_client_password("nobody")
+    assert handler._client_password_cache == {}
+
+
 def test_bad_basic_credentials_restart_with_proxy_challenge():
     connection, responses = _connection()
     credentials = base64.b64encode(b"user:wrong").decode("ascii")

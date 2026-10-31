@@ -295,6 +295,11 @@ When a client credential or authentication token is rejected, Px returns a
 `407 Proxy Authentication Required` response with fresh challenges so the client
 can retry or select another supported mechanism on the same connection.
 
+Px caches each client user's password after the first successful lookup in the
+keyring or `PX_CLIENT_PASSWORD`, so a slow keyring is not hit on every request. If
+authentication fails with a cached password, the entry is dropped and the next
+attempt re-reads the store, so a changed password takes effect without a restart.
+
 ## Examples
 
 Use `proxyserver.com:80` and allow requests from localhost only:

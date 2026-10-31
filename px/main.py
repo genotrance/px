@@ -348,7 +348,12 @@ def test(testurl):
         STATE.auth = "NONE"
         STATE.config.set("proxy", "auth", "NONE")
 
-        test_proxy_host, test_proxy_resolve, single_explicit_proxy = _negotiate_test_target(STATE.wproxy, listen, port)
+        negotiate = str(auth).upper() in ("NEGOTIATE", "ANY", "ANYSAFE")
+        single_explicit_proxy = True
+        if negotiate:
+            test_proxy_host, test_proxy_resolve, single_explicit_proxy = _negotiate_test_target(
+                STATE.wproxy, listen, port
+            )
         if not single_explicit_proxy:
             pprint(
                 "Negotiate --test-auth needs a single explicit --proxy to address Px by the "

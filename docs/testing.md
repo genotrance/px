@@ -1011,11 +1011,7 @@ Measured locally (Linux, `keyrings.alt.file.PlaintextKeyring`, the same
 backend CI's `PX_KEYRING_PLAINTEXT=1` selects), a single `keyring.get_password()`
 call takes ~0.27ms, far too fast to reproduce a multi-second stall by itself;
 reproducing the stall needs the Windows runner's shared-file keyring under the
-rest of the job's parallel load, which was not available here. `px/handler.py`
-now caches `get_client_password()`'s result per username after the first
-successful lookup (`tests/test_client_auth.py::test_client_password_lookup_is_cached_after_first_success`),
-removing this call from the hot path after the first handshake regardless of
-how slow it is. `quit_px()` (`tests/helpers.py`) also takes an optional
+rest of the job's parallel load, which was not available here. Caching of `get_client_password()` (see `docs/architecture.md`) keeps this call off the hot path after the first handshake. `quit_px()` (`tests/helpers.py`) also takes an optional
 `buffer` — `px_upstream` and `px_chain` now pass their Px's own log buffer, so
 a future `--quit` failure prints what Px itself was doing, instead of only the
 quit client's output. The `ConnectionResetError` in the fake origin server's

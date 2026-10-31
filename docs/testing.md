@@ -677,6 +677,31 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   it wakes Docker and retries for a bounded 30 seconds; a final failure records
   `docker ps -a` instead of reporting resulting 502 responses as a Px
   regression.
+- **A hung "Set up WSL2" step with no log output is a known, open GitHub
+  infra bug, not a Px or lab problem.** A healthy `scenario-windows` run
+  finishes in well under five minutes; one devel dry run (commit
+  `b842278`, job 124590198734) instead sat in "Set up WSL2" for the entire
+  45-minute job lifetime with every later step left pending and no log line
+  from that step. The job's annotation read "The hosted runner lost
+  communication with the server", matching
+  [actions/runner-images#14938](https://github.com/actions/runner-images/issues/14938):
+  the Actions runner's worker process itself can freeze while provisioning
+  WSL2, which stops it from streaming logs or honouring step-level
+  `timeout-minutes`, so nothing running inside the job can detect or log the
+  hang. As of this writing the issue is open and affects roughly 1-2% of
+  WSL2-provisioning Windows jobs across `windows-2022` and `windows-2025`
+  runner images, with no fix available. `scenario-windows` now sets an
+  explicit job `timeout-minutes` well under 45 minutes and a step
+  `timeout-minutes` on "Set up WSL2" itself, plus a diagnostic step that logs
+  the runner image version immediately before it. Job-level
+  `timeout-minutes` is still enforced by GitHub's orchestrator even when the
+  runner itself has stopped cooperating, so a frozen runner is torn down in
+  minutes instead of the full job timeout; the step timeout and the
+  preceding diagnostic step still help for an ordinary (non-frozen-runner)
+  hang, for example a stalled distribution or kernel download. If
+  `scenario-windows` times out with no log past "Set up WSL2" and no later
+  diagnostic output, re-run the job; this is the GitHub-side bug, not a
+  regression to chase down locally.
 - The same job also runs Px against the Negotiate-only proxy
   (`squid-sso.corp.test:31288`, resolved to the WSL2 localhost-forwarded
   proxy port; see

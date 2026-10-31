@@ -8,7 +8,7 @@ def test_scenario_env_installs_mcurl_candidate_wheel():
     for needle in (
         "MCURL_WHEELS",
         'cp "$wheels/." "client:$container_wheels/"',
-        "-e \"MCURL_WHEELS=$([[ -n $wheels ]] && printf '%s' \"$container_wheels\")\"",
+        '-e "MCURL_WHEELS=$([[ -n $wheels ]] && printf \'%s\' "$container_wheels")"',
         "--reinstall-package pymcurl",
         "--no-index",
         '"pymcurl==$version"',

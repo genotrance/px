@@ -480,7 +480,9 @@ matrix including `scenario-linux` and `scenario-windows`; both must pass. The
 run against the locked PyPI pymcurl like the other jobs. The
 mcurl release gate runs this suite on px devel too through the scenario
 client (Python 3.13, no
-`PX_EVENT_LOOP`, so both loops run in one job). The
+`PX_EVENT_LOOP`, so both loops run in one job), supplying its selected
+candidate wheel through `MCURL_WHEELS`: `scenario-env.sh` copies it into the
+client and reinstalls exactly that version after `uv sync`. The
 dry run does not publish, because the `release` job is `master`-only. The
 first release build for v0.13.0 failed in every wheels job because `build.sh`
 used `pip wheel --upgrade`, an option `pip wheel` does not have. Nothing was

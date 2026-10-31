@@ -28,21 +28,6 @@ from helpers import print_buffer, quit_px, run_px
 from px import handler
 
 HAS_NTLM = bool(mcurl.get_curl_vinfo().features & mcurl.libcurl.CURL_VERSION_NTLM)
-# TEMPORARY until pymcurl 8.23.0.3 is on PyPI (docs/build.md): streamed uploads through proxy
-# auth need mcurl's seek callback and Expect handling. CI sets PX_REQUIRE_MCURL_FIX=1 so these
-# tests always run there and fail instead of being skipped silently.
-MCURL_HAS_STREAMING = hasattr(mcurl, "REWIND_ERROR") and hasattr(mcurl.Curl, "resume_upload")
-REQUIRE_MCURL_FIX = os.environ.get("PX_REQUIRE_MCURL_FIX") == "1"
-needs_mcurl_streaming = pytest.mark.skipif(
-    not MCURL_HAS_STREAMING and not REQUIRE_MCURL_FIX, reason="needs pymcurl>=8.23.0.3 (streamed uploads)"
-)
-
-
-def test_mcurl_fix_present_when_required():
-    "PX_REQUIRE_MCURL_FIX=1 turns a missing mcurl capability into a failure instead of a skip"
-    if REQUIRE_MCURL_FIX:
-        assert MCURL_HAS_STREAMING, "pymcurl lacks REWIND_ERROR or Curl.resume_upload"
-
 
 needs_ntlm = pytest.mark.skipif(not HAS_NTLM, reason="libcurl was built without NTLM support")
 
@@ -637,8 +622,7 @@ def test_rewind_error_detection():
     detect = handler.ConnectionHandler._is_rewind_error
     assert detect("Send failed since rewinding of the data stream failed; ")
     assert not detect("Connection refused")
-    if MCURL_HAS_STREAMING:
-        assert detect(mcurl.REWIND_ERROR)
+    assert detect(mcurl.REWIND_ERROR)
 
 
 ###
@@ -647,7 +631,6 @@ def test_rewind_error_detection():
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH"])
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
-@needs_mcurl_streaming
 def test_body_reaches_origin_intact(direct_px, origin, method, chunked):
     port, _ = direct_px
     client = Client(port)
@@ -666,7 +649,6 @@ def test_body_reaches_origin_intact(direct_px, origin, method, chunked):
         assert "transfer-encoding" not in seen["headers"]
 
 
-@needs_mcurl_streaming
 def test_chunked_trailers_and_keep_alive(direct_px, origin):
     "Trailers are consumed and the connection stays usable for the next request"
     port, _ = direct_px
@@ -685,7 +667,6 @@ def test_chunked_trailers_and_keep_alive(direct_px, origin):
     assert "x-checksum" not in origin.requests[0]["headers"]
 
 
-@needs_mcurl_streaming
 def test_empty_post_and_zero_length_chunked(direct_px, origin):
     port, _ = direct_px
     client = Client(port)
@@ -698,7 +679,6 @@ def test_empty_post_and_zero_length_chunked(direct_px, origin):
     assert [r["length"] for r in origin.requests] == [0, 0]
 
 
-@needs_mcurl_streaming
 def test_expect_continue_does_not_deadlock(direct_px, origin):
     "px answers 100 Continue itself, so a client waiting for it sends the body"
     port, _ = direct_px
@@ -742,7 +722,6 @@ def test_hop_by_hop_headers_not_forwarded(direct_px, origin):
 CLIENT_CREDENTIALS = "Proxy-Authorization: Basic " + base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
 
 
-@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_client_auth_discards_body_and_keeps_connection(client_auth_px, origin, chunked):
     "Px's own 407 discards the unread body (without storing it) so the client can authenticate on the same connection"
@@ -758,7 +737,6 @@ def test_client_auth_discards_body_and_keeps_connection(client_auth_px, origin, 
     assert "proxy-authorization" not in origin.requests[0]["headers"]
 
 
-@needs_mcurl_streaming
 def test_client_auth_with_expect_closes_connection(client_auth_px, origin):
     "A 407 answering a held-back Expect closes the connection so a late body is never parsed as the next request"
     client = Client(client_auth_px, timeout=20)
@@ -780,7 +758,6 @@ def test_client_auth_with_expect_closes_connection(client_auth_px, origin):
     assert [r["sha256"] for r in origin.requests] == [body_sha256(BODY_SIZE)]
 
 
-@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_client_auth_late_body_is_not_parsed_as_request(client_auth_px, origin, chunked):
     "A body sent after its Expect timeout, even one shaped like an authenticated request, never reaches the origin"
@@ -801,7 +778,6 @@ def test_client_auth_late_body_is_not_parsed_as_request(client_auth_px, origin, 
     assert origin.requests == []
 
 
-@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_large_upload_bounded_memory(direct_px, origin, loop_kind, chunked):
     "A 100 MB body streams through px with RSS far below the body size"
@@ -837,7 +813,6 @@ def test_large_upload_bounded_memory(direct_px, origin, loop_kind, chunked):
 
 
 @needs_ntlm
-@needs_mcurl_streaming
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH"])
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_upload_through_ntlm_proxy_first_request(ntlm_px, method, chunked):
@@ -859,7 +834,6 @@ def test_upload_through_ntlm_proxy_first_request(ntlm_px, method, chunked):
 
 
 @needs_ntlm
-@needs_mcurl_streaming
 def test_upload_through_ntlm_proxy_with_client_expect(ntlm_px):
     port, _proxy = ntlm_px()
     client = Client(port, timeout=30)
@@ -872,7 +846,6 @@ def test_upload_through_ntlm_proxy_with_client_expect(ntlm_px):
 
 
 @needs_ntlm
-@needs_mcurl_streaming
 def test_proxy_ignoring_expect_reports_rewind_error(ntlm_px):
     "A proxy that ignores Expect with unknown auth gets a clear 503; the retry works as the method is cached"
     port, _proxy = ntlm_px(ignore_expect=True)
@@ -972,7 +945,6 @@ def check_stalled_does_not_delay(port, url, other_url):
     assert stalled["r"].json() == {"sha256": body_sha256(BODY_SIZE), "length": BODY_SIZE}
 
 
-@needs_mcurl_streaming
 def test_stalled_upload_does_not_delay_others_direct(direct_px, origin):
     port, _ = direct_px
     url = f"http://{origin.addr}/x"
@@ -980,14 +952,12 @@ def test_stalled_upload_does_not_delay_others_direct(direct_px, origin):
 
 
 @needs_ntlm
-@needs_mcurl_streaming
 def test_stalled_upload_does_not_delay_others_ntlm(ntlm_px):
     port, _proxy = ntlm_px()
     url = "http://ntlm-upload.test/x"
     check_stalled_does_not_delay(port, url, url)
 
 
-@needs_mcurl_streaming
 def test_stalled_uploads_on_reused_keep_alive_handle(direct_px, origin):
     """Two sequential paused uploads on one keep-alive connection reuse px's Curl handle (reset()).
 
@@ -1007,7 +977,6 @@ def test_stalled_uploads_on_reused_keep_alive_handle(direct_px, origin):
     assert [r.json() for r in (first, second, third)] == [expected] * 3
 
 
-@needs_mcurl_streaming
 def test_stalled_upload_through_auth_none_proxy_completes(origin, px_port, tmp_path, loop_kind):
     "--auth=NONE runs the easy interface where a paused upload is never resumed: the body must still arrive"
     flags = f"--server={origin.addr} --auth=NONE --noproxy= --workers=1"
@@ -1022,7 +991,6 @@ def test_stalled_upload_through_auth_none_proxy_completes(origin, px_port, tmp_p
     assert took < STALL_SECONDS + 10
 
 
-@needs_mcurl_streaming
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_many_parallel_streamed_uploads_exact(direct_px, origin, chunked):
     port, _ = direct_px

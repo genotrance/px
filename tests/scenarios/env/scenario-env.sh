@@ -85,20 +85,7 @@ compose_exec() {
 }
 
 test() {
-    # This suite includes the streamed-auth regression; fail rather than
-    # letting pytest skip it when a devel pymcurl wheel was not supplied.
-    local wheels="" require_mcurl_fix=1 started=0 status=0
-    if [[ -n ${MCURL_WHEELS:-} ]]; then
-        [[ -d $MCURL_WHEELS ]] || { echo "MCURL_WHEELS is not a directory: $MCURL_WHEELS" >&2; return 2; }
-        # The host's relocked uv.lock records these wheels by absolute path
-        # (a find-links registry), and the directory holds one wheel per
-        # interpreter and platform, so mirror the whole directory at the same
-        # path inside the client instead of picking a single wheel.
-        wheels=$(cd "$MCURL_WHEELS" && pwd)
-        [[ $wheels != / ]] || { echo "MCURL_WHEELS must not be /" >&2; return 2; }
-        compgen -G "$wheels/pymcurl-*.whl" >/dev/null || { echo "no pymcurl wheel in MCURL_WHEELS=$MCURL_WHEELS" >&2; return 2; }
-        require_mcurl_fix=1
-    fi
+    local started=0 status=0
 
     local -a pytest_args=("$@")
     if ((${#pytest_args[@]} == 0)); then
@@ -110,23 +97,14 @@ test() {
         print_env | tee "$ENV_FILE"
         started=1
     fi
-    if compose_exec sh -c 'rm -rf /tmp/px-venv "$1" && if [ -n "$1" ]; then mkdir -p "$1"; fi' sh "$wheels"; then
+    if compose_exec sh -c 'rm -rf /tmp/px-venv'; then
         :
     else
         status=$?
     fi
-    if ((status == 0)) && [[ -n $wheels ]]; then
-        if "${COMPOSE[@]}" cp "$wheels/." "client:$wheels/"; then
-            :
-        else
-            status=$?
-        fi
-    fi
     if ((status == 0)) && "${COMPOSE[@]}" exec -T \
         -e "UV_PYTHON=${UV_PYTHON:-}" \
-        -e "MCURL_WHEELS=$wheels" \
         -e "PX_EVENT_LOOP=${PX_EVENT_LOOP:-}" \
-        -e "PX_REQUIRE_MCURL_FIX=$require_mcurl_fix" \
         client sh -ceu '
             # Build from a fresh copy so setuptools never writes egg-info into
             # the read-only checkout mount, while still testing this invocation
@@ -137,17 +115,6 @@ test() {
             cd /tmp/px-source
             export UV_PROJECT_ENVIRONMENT=/tmp/px-venv
             uv sync --locked --group dev
-            if [ -n "$MCURL_WHEELS" ]; then
-                # Reinstall from the devel wheels even when the lock still
-                # pins PyPI; uv picks the wheel for this interpreter.
-                wheel=$(find "$MCURL_WHEELS" -maxdepth 1 -type f -name "pymcurl-*.whl" -print -quit)
-                version=$(basename "$wheel" | cut -d- -f2)
-                uv pip install --python "$UV_PROJECT_ENVIRONMENT/bin/python" --no-deps --no-index \
-                    --find-links "$MCURL_WHEELS" --reinstall-package pymcurl "pymcurl==$version"
-            fi
-            if [ "${PX_REQUIRE_MCURL_FIX:-}" = 1 ]; then
-                "$UV_PROJECT_ENVIRONMENT/bin/python" .github/actions/mcurl-devel/check.py
-            fi
             exec "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest "$@"
         ' scenario-pytest "${pytest_args[@]}"; then
         :

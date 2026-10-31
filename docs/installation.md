@@ -137,7 +137,7 @@ python -m pip install .
 Px can be run as a local Python script without installation:
 
 ```bash
-pip install h11 keyring keyrings.alt netaddr psutil "pymcurl>=8.23.0.2" pyspnego python-dotenv quickjs-ng
+pip install h11 keyring keyrings.alt netaddr psutil "pymcurl>=8.23.0.3" pyspnego python-dotenv quickjs-ng
 pip install uvloop  # Linux/macOS; selected automatically by a package install
 pip install winloop  # Windows; no Python 3.15 wheels yet
 

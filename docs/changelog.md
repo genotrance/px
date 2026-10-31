@@ -6,7 +6,7 @@
 
 ### Improvements
 - `--authretry` now defaults to `600` seconds so a blocked upstream proxy recovers without a restart; use `--authretry=0` for the old behaviour.
-- Requires pymcurl 8.23.0.3 or newer.
+- Requires pymcurl 8.23.0.3 or newer (fixes #268).
 - Release binaries and the Docker image now use CPython 3.14 (px#280).
 
 ### Bug fixes

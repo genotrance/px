@@ -19,8 +19,8 @@ Tests live in `tests/`.
 | `test_kerberos.py` | Kerberos ticket management — unit tests (mocked subprocess, Linux/macOS only) and Docker-based integration tests against local MIT and Heimdal KDCs (marked `integration`, run via `make test-kerberos`) |
 | `test_client_auth.py` | Downstream client authentication unit tests — failed NEGOTIATE/NTLM/Digest/Basic credentials restart with a fresh 407, cached password lookups, and the connection handling of a 407 answering a held-back `Expect: 100-continue` (closes unless a handshake is in progress, in which case the late body is released and discarded and never parsed as the next request) |
 | `test_auth_retry.py` | `--authretry` integration tests — Px against a fake upstream proxy that denies or allows authenticated requests, proving latching after 3 consecutive 407s, exactly one probe per interval under a 50-client concurrent burst, and recovery |
-| `test_stream_upload.py` | Streamed upload unit and subprocess tests: body formats, trailers, `Expect: 100-continue`, authentication retries, header stripping, integrity, memory bounds, stalled clients, connection reuse, and parallel uploads. Proxy retry tests require libcurl NTLM and pymcurl 8.23.0.3; `PX_REQUIRE_MCURL_FIX=1` makes a missing fix fail rather than skip. |
-| `test_ntlm_burst.py` | NTLM upstream regression tests — concurrent plain-HTTP handshakes and CONNECT tunnels through a fake proxy; the CONNECT burst drops its first Type 1 legs and verifies later tunnels are not latched as authentication failures on either event loop. The CONNECT cases need the px#268 fix in pymcurl 8.23.0.3 (`Curl.get_os_errno`) and fail on older mcurl. Until 8.23.0.3 is on PyPI and becomes the minimum, they are skipped when the installed mcurl lacks `Curl.get_os_errno`, unless `PX_REQUIRE_MCURL_FIX=1` is set: then they run and fail instead. CI sets it everywhere, so they cannot be skipped silently there (`docs/build.md`). The whole module is skipped when libcurl lacks NTLM support (the macOS pymcurl wheels); `PX_REQUIRE_MCURL_FIX=1` does not override that skip |
+| `test_stream_upload.py` | Streamed upload unit and subprocess tests: body formats, trailers, `Expect: 100-continue`, authentication retries, header stripping, integrity, memory bounds, stalled clients, connection reuse, and parallel uploads. Proxy retry tests require libcurl NTLM. |
+| `test_ntlm_burst.py` | NTLM upstream regression tests — concurrent plain-HTTP handshakes and CONNECT tunnels through a fake proxy; the CONNECT burst drops its first Type 1 legs and verifies later tunnels are not latched as authentication failures on either event loop. The CONNECT cases need the px#268 fix in pymcurl 8.23.0.3 (`Curl.get_os_errno`) and always run. The whole module is skipped when libcurl lacks NTLM support (the macOS pymcurl wheels) |
 | `test_network.py` | Network integration tests — `--quit`, `--listen`, `--hostonly`, `--gateway`, `--allow`, `--noproxy` |
 | `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
@@ -52,7 +52,7 @@ network-resident client with:
 ```bash
 tests/scenarios/env/scenario-env.sh up
 tests/scenarios/env/scenario-env.sh smoke
-MCURL_WHEELS=/path/to/mcurl-wheels tests/scenarios/env/scenario-env.sh test
+tests/scenarios/env/scenario-env.sh test
 tests/scenarios/env/scenario-env.sh down
 ```
 
@@ -70,13 +70,7 @@ removes the project containers, network, named volume, CA, and generated env
 file. Use `status`, `logs [service]`, or `env` to inspect the lab without
 changing it.
 
-`test` requires pymcurl 8.23.0.3 or later and fails rather than skipping its
-streamed-upload coverage when the capability is missing. Set `MCURL_WHEELS` to
-a directory containing the devel wheels; CI obtains that directory through its
-mcurl wheel action. The whole directory is copied into the client at the same
-absolute path, because the relocked `uv.lock` records the wheels by that path
-(and the directory holds one wheel per interpreter and platform), then pymcurl
-is reinstalled from it for the client's interpreter.
+`test` installs the locked dependencies (pymcurl 8.23.0.3 or later from PyPI) in the client and runs pytest, so the streamed-upload coverage always runs.
 
 `test_parallel_uploads` also guards against a DNS-resolution burst at an
 upstream proxy. The GitHub 2-vCPU failure reported libcurl's `Resolving timed
@@ -296,24 +290,16 @@ quick, while a requested lab cannot silently hide an infrastructure error.
 Select individual behaviours with pytest's normal `-k` option:
 
 ```bash
-# Build an mcurl devel wheel without modifying its checkout, then overlay it
-# only in the scenario client.
-MCURL_SRC=/path/to/mcurl
-MCURL_WORKDIR="${TMPDIR:-/tmp}/px-mcurl"
-mkdir -p "$MCURL_WORKDIR/src" "$MCURL_WORKDIR/wheels"
-git -C "$MCURL_SRC" archive devel | tar -x -C "$MCURL_WORKDIR/src"
-uv build --wheel "$MCURL_WORKDIR/src" --out-dir "$MCURL_WORKDIR/wheels"
-
 # Start a unique lab and run only the px#268 matrix on asyncio.
 SCENARIO_INSTANCE=1 tests/scenarios/env/scenario-env.sh up
-SCENARIO_INSTANCE=1 MCURL_WHEELS="$MCURL_WORKDIR/wheels" \
+SCENARIO_INSTANCE=1 \
   PX_EVENT_LOOP=asyncio tests/scenarios/env/scenario-env.sh test \
   tests/scenarios -m scenario -k px268 -v
 SCENARIO_INSTANCE=1 tests/scenarios/env/scenario-env.sh down
 
 # Reuse a lab started separately and run the full suite on its default loop.
 tests/scenarios/env/scenario-env.sh up
-MCURL_WHEELS="$MCURL_WORKDIR/wheels" tests/scenarios/env/scenario-env.sh test
+tests/scenarios/env/scenario-env.sh test
 tests/scenarios/env/scenario-env.sh down
 ```
 
@@ -328,7 +314,7 @@ connection-close variant retains a 16-connection limit for overload testing. Eve
 subprocess and network operation has a bounded timeout, and scenarios assert
 that Px remains alive without a traceback. The cut-handshake test is
 deliberately not an xfail: its HTTPS variants must fail on pymcurl 8.23.0.2
-and pass on mcurl devel (pymcurl 8.23.0.3), while the rest of the suite passes
+and pass on pymcurl 8.23.0.3 (the minimum), while the rest of the suite passes
 on both. Because the lab is deterministic, any other failure is a real
 regression.
 
@@ -653,8 +639,7 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   `ubuntu-latest` across Python 3.10–3.14 and both event loops (10 jobs, each
   bringing the lab up and down itself with `tests/scenarios/env/scenario-env.sh`
   and invoking pytest with its `test` subcommand). Every job gives the lab a
-  unique instance, bind-mounts the checkout into the client, and copies the
-  CI mcurl devel wheels into it at their host path. A job that fails uploads `docker compose logs`
+  unique instance, bind-mounts the checkout into the client. A job that fails uploads `docker compose logs`
   for every Squid and the Samba domain controller plus each Px `--log=4`
   output copied from the client; the lab is torn down whether the suite
   passed, failed, or the job was cancelled.

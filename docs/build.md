@@ -72,72 +72,16 @@ changes to transitive dependencies that do not have a minimum in
 
 ### Temporary: pymcurl 8.23.0.3 from mcurl devel builds
 
-Px 0.13.1 needs pymcurl 8.23.0.3, including mcurl commit `7e25b12`, the release that fixes px#268 (it
-adds `Curl.get_os_errno`) and streams `bridge()` request bodies through proxy
-authentication (it adds `mcurl.REWIND_ERROR`, a seek callback and the
-`Expect: 100-continue` probe and immediate auth-method cache that px's streamed uploads rely on). Until that version is on PyPI it exists only as
-artifacts of a dry-run `build.yml` run on genotrance/mcurl `devel`, so
-`pyproject.toml` deliberately keeps the minimum at `pymcurl>=8.23.0.2` and the
-committed `uv.lock` keeps pinning the PyPI 8.23.0.2. Raising the minimum first
-would make every locked install unsatisfiable: `uv sync --locked`, `uv run` and
-`pip install` resolve against PyPI, where no matching pymcurl exists, so local
-development and the integration gate would break. Locking the devel wheels
-instead would record local paths or artifact URLs that only exist on one
-machine or expire, so they are never committed either.
-
-CI and `build.yml` bridge the gap in one place, the
-`.github/actions/mcurl-devel` composite action:
-
-- It finds the latest successful `workflow_dispatch` run of mcurl's
-  `build.yml` on `devel`, downloads the `wheels-<os>-<arch>` artifact for the
-  runner (abi3 and free-threaded wheels, manylinux and musllinux on Linux) into
-  `$RUNNER_TEMP/mcurl-wheels`, and exports `PIP_FIND_LINKS`, `UV_FIND_LINKS`
-  and `MCURL_WHEELS` pointing at it.
-- `setup-python-env` calls it, then relocks only pymcurl
-  (`uv lock --upgrade-package pymcurl`) in the runner's checkout so every
-  existing `--locked` command keeps working, and runs
-  `.github/actions/mcurl-devel/check.py` to assert that the installed pymcurl
-  is at least 8.23.0.3 and has `Curl.get_os_errno`.
-- Container jobs (`ci.yml` musl tests, `build.yml` Linux wheels) call it
-  directly and mount the wheels at `/mcurl-wheels` with the find-links variable
-  set inside the container. The musl tests run the same check; the `build.yml`
-  `wheels` job checks that every collected pymcurl wheel is at least 8.23.0.3,
-  and those wheels are what the binary and artifact-test jobs install.
-- The action also exports `PX_REQUIRE_MCURL_FIX=1`; the musl and Linux
-  artifact-test containers set it explicitly and tox passes it through. With it
-  set, the interrupted-CONNECT test in `tests/test_ntlm_burst.py` runs (and
-  fails) even if an old pymcurl slipped in, instead of skipping silently as it
-  does on a plain 8.23.0.2 install (`docs/testing.md`).
-
-Locally nothing extra is needed: with the 8.23.0.2 minimum the committed lock
-installs as usual and the px#268 test is skipped. To test against the fix,
-download the artifact for your platform (for example `gh run download <run-id>
--R genotrance/mcurl -n wheels-ubuntu-latest-x86_64 -D /tmp/mcurl-wheels`), run
-`UV_FIND_LINKS=/tmp/mcurl-wheels uv lock --upgrade-package pymcurl` before
-`make install`, and do not commit the resulting `uv.lock`.
-
-Release order:
-
-1. Release mcurl 8.23.0.3 to PyPI.
-2. In px, raise the dependency to `pymcurl>=8.23.0.3` in `pyproject.toml`, run
-   `uv lock --upgrade-package pymcurl` and commit both. Remove the temporary
-   mechanism in the same change: delete `.github/actions/mcurl-devel/`, the
-   "Use pymcurl devel wheels" and "Relock pymcurl" steps and the `check.py`
-   call in `setup-python-env`, the mcurl-devel steps, `/mcurl-wheels` mounts,
-   find-links variables, checks and `PX_REQUIRE_MCURL_FIX` settings in
-   `.github/workflows/ci.yml` and `.github/workflows/build.yml`, the
-   `MCURL_WHEELS`/`PX_REQUIRE_MCURL_FIX` handling in `build.sh`, the
-   `PX_REQUIRE_MCURL_FIX` tox `passenv` lists in `pyproject.toml`, the
-   `skipif` checks in `tests/test_ntlm_burst.py` and
-   `tests/test_stream_upload.py`, the `MCURL_WHEELS` validation and wiring,
-   wheel overlay and `check.py` call in `tests/scenarios/env/scenario-env.sh`,
-   the `needs_mcurl_streaming` skipif in
-   `tests/scenarios/test_corporate_proxy.py`, the pymcurl compat fallbacks in
-   `px/handler.py` (the `hasattr(curl, "transfer_id")` check, the
-   `hasattr(self.curl, "resume_upload")` check, and the
-   `REWIND_ERROR`/libcurl-text fallback in `_is_rewind_error` — keep the
-   easy-interface blocking path itself), and this section.
-3. Release px 0.13.1.
+Px 0.13.1 needs pymcurl 8.23.0.3 or newer from PyPI. It fixes px#268
+(`Curl.get_os_errno`) and streams `bridge()` request bodies through proxy
+authentication (`mcurl.REWIND_ERROR`, a seek callback, and the
+`Expect: 100-continue` probe and immediate auth-method cache that px's streamed
+uploads rely on). `pyproject.toml` sets the minimum and the committed `uv.lock`
+pins the PyPI release, so CI, `build.sh` and the scenario client install
+pymcurl the same way as any other dependency; no devel wheels, relock step or
+`PX_REQUIRE_MCURL_FIX` switch exists any more. The #268 and streamed-upload
+tests always run and fail if pymcurl is too old. `bind_upload_resume()` in
+`px/handler.py` keeps its fallback for pymcurl without `transfer_id`.
 
 ## GitHub Actions
 
@@ -198,8 +142,7 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
   and Kerberos Squids, 100 MB, chunked, parallel, two workers). Every job
   exports `PX_EVENT_LOOP` (`auto` or
   `asyncio`, even `auto`) so those scenarios run on exactly the job's loop, and
-  `setup-python-env` supplies the pymcurl devel wheels and
-  `PX_REQUIRE_MCURL_FIX=1`, so a missing wheel fails them instead of skipping.
+  the streamed upload scenarios always run against the locked pymcurl.
   Each job's pytest step has a 60-minute timeout; the suite takes about
   11 minutes on one loop locally (about 21 for both loops; expect up to roughly twice that on GitHub runners). See
   [Testing](testing.md#ci-testing) and
@@ -534,9 +477,9 @@ corporate-proxy scenario suite by default), then the dry run
 `gh workflow run build.yml --ref devel`, which also runs `ci.yml`'s full
 matrix including `scenario-linux` and `scenario-windows`; both must pass. The
 `ci-full` job is how the dry run runs `tests/scenarios`, so the upload scenarios
-run against the same temporary pymcurl devel wheels as the other jobs. The
+run against the locked PyPI pymcurl like the other jobs. The
 mcurl release gate runs this suite on px devel too through the scenario
-client (Python 3.13, a devel wheel overlaid with `PX_REQUIRE_MCURL_FIX=1`, no
+client (Python 3.13, no
 `PX_EVENT_LOOP`, so both loops run in one job). The
 dry run does not publish, because the `release` job is `master`-only. The
 first release build for v0.13.0 failed in every wheels job because `build.sh`
@@ -560,8 +503,7 @@ same containers, `build.sh` functions and artifact hand-offs, plus a
    provides (`extract_archives`, then `test_binary` with tox).
 5. `scenario` brings up the Docker corporate-proxy lab and runs
    `tests/scenarios -m scenario` through its network-resident client, then
-   tears the lab down. Set `MCURL_SRC` to an mcurl checkout to build a
-   temporary devel wheel for the runner without modifying that checkout. It
+   tears the lab down. It
    skips with a message instead of failing when Docker is unavailable, and
    ignores `--fresh` (there is no tree copy to discard).
 

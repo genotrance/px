@@ -400,13 +400,9 @@ def bind_upload_resume(curl, body_reader):
     already-reused, running handle raises ValueError instead of guessing which transfer it meant;
     capturing curl.transfer_id here, after reset()/configuration and before the transfer starts,
     names the right transfer so a resume queued late for an earlier one is recognised as stale
-    (returns False) instead of raising or reaching this transfer. Older pymcurl that has
-    resume_upload but not transfer_id never raises: keep calling it with no argument.
+    (returns False) instead of raising or reaching this transfer.
     """
-    if hasattr(curl, "transfer_id"):
-        body_reader.resume = functools.partial(curl.resume_upload, curl.transfer_id)
-    else:
-        body_reader.resume = curl.resume_upload
+    body_reader.resume = functools.partial(curl.resume_upload, curl.transfer_id)
 
 
 ###
@@ -1192,11 +1188,11 @@ class ConnectionHandler:
         self.curl.set_useragent(STATE.useragent)
 
         if body_reader is not None:
-            if hasattr(self.curl, "resume_upload") and not self.curl.is_easy:
+            if not self.curl.is_easy:
                 bind_upload_resume(self.curl, body_reader)
             else:
-                # The easy interface (--auth=NONE) has no loop to apply a resume, and pymcurl without
-                # pause/resume cannot pause: block mcurl's thread instead (an easy transfer owns its
+                # The easy interface (--auth=NONE) has no loop to apply a resume: block mcurl's
+                # thread instead (an easy transfer owns its
                 # thread, so a stalled client delays nobody else)
                 body_reader.blocking = True
 
@@ -1277,9 +1273,8 @@ class ConnectionHandler:
 
     @staticmethod
     def _is_rewind_error(errstr):
-        "True if mcurl could not resend a streamed body (REWIND_ERROR, or libcurl's own text on older mcurl)"
-        rewind = getattr(mcurl, "REWIND_ERROR", None)
-        return bool(rewind and rewind in errstr) or "rewinding of the data stream failed" in errstr
+        "True if mcurl could not resend a streamed body."
+        return mcurl.REWIND_ERROR in errstr
 
     async def _get_destination(self, target):
         "Get destination - returns netloc for DIRECT or None for proxy"

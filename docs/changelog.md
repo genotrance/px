@@ -2,7 +2,7 @@
 
 ---
 
-## v0.13.1
+## v0.13.1 — 2026-10-31
 
 ### Improvements
 - `--authretry` now defaults to `600` seconds so a blocked upstream proxy recovers without a restart; use `--authretry=0` for the old behaviour.

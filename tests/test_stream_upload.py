@@ -549,18 +549,14 @@ def test_reader_without_body_is_complete():
 
 
 class FakeCurl:
-    """Mimics mcurl.Curl's resume_upload()/transfer_id contract (mcurl commit 3318186, pymcurl
-    8.23.0.3) without any real transfer: transfer_id is absent on a stand-in for older pymcurl."""
+    "Mimics pymcurl 8.23.0.3's Curl.resume_upload()/transfer_id contract without a real transfer."
 
-    def __init__(self, has_transfer_id=True):
-        if has_transfer_id:
-            self.transfer_id = 0
+    def __init__(self):
+        self.transfer_id = 0
         self.calls = []
 
     def resume_upload(self, transfer_id=None):
         self.calls.append(transfer_id)
-        if not hasattr(self, "transfer_id"):
-            return True
         if transfer_id is None and self.transfer_id != 0:
             raise ValueError("resume() of a reused Curl needs its transfer_id")  # noqa: TRY003
         return transfer_id is None or transfer_id == self.transfer_id
@@ -580,14 +576,6 @@ def test_bind_upload_resume_scopes_to_current_transfer():
 
     assert stale_resume() is False  # discarded, not raised, and does not touch transfer 1
     assert curl.calls[-1] == 0
-
-
-def test_bind_upload_resume_without_transfer_id_uses_plain_call():
-    "pymcurl with resume_upload but no transfer_id (pre-8.23.0.3): fall back to the no-argument call"
-    curl = FakeCurl(has_transfer_id=False)
-    body = handler.RequestBody()
-    handler.bind_upload_resume(curl, body)
-    assert body.resume() is True and curl.calls == [None]
 
 
 def test_upstream_headers_strip_hop_by_hop():
@@ -620,7 +608,6 @@ def test_upstream_headers_strip_hop_by_hop():
 
 def test_rewind_error_detection():
     detect = handler.ConnectionHandler._is_rewind_error
-    assert detect("Send failed since rewinding of the data stream failed; ")
     assert not detect("Connection refused")
     assert detect(mcurl.REWIND_ERROR)
 

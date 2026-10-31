@@ -698,7 +698,9 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   runner itself has stopped cooperating, so a frozen runner is torn down in
   minutes instead of the full job timeout; the step timeout and the
   preceding diagnostic step still help for an ordinary (non-frozen-runner)
-  hang, for example a stalled distribution or kernel download. If
+  hang, for example a stalled distribution or kernel download.
+  `tests/test_ci_plan.py` keeps both timeouts and the diagnostic step in
+  place. If
   `scenario-windows` times out with no log past "Set up WSL2" and no later
   diagnostic output, re-run the job; this is the GitHub-side bug, not a
   regression to chase down locally.

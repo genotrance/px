@@ -509,7 +509,10 @@ The `[tool.tox]` configuration in `pyproject.toml` defines py310–py314 and a
 `binary` environment. Each Python environment installs the release wheel and
 runs the default selection; the `binary` environment runs the same suite
 against the compiled binary named by `PXBIN`. Linux runs `pytest -n auto`, and
-the native macOS and Windows runs use `-n 2`. tox and tox-uv are not dev
+the native macOS and Windows runs use `-n 2`. Each xdist worker reserves a
+block of three Px ports from 3148–3947 (`find_free_port_block` in
+`tests/helpers.py`), wide enough for two parallel tox environments with one
+worker per core on large hosts. tox and tox-uv are not dev
 dependencies: the `test-binary` job in `build.yml` installs them, and
 `make test-glibc` or `make test-musl` (`build_local` in `build.sh`) run the same
 matrix locally in the build containers. See [Build](build.md#github-actions).

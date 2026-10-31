@@ -91,9 +91,18 @@ def find_free_port(start=4000):
     return None
 
 
-def find_free_port_block(start=3148, count=3):
+PORT_BLOCK_BASE = 3148
+# Wide enough for parallel tox environments each running `pytest -n auto` on
+# many-core hosts, and below the 4000+ ports other tests search from
+PORT_BLOCK_SPAN = 800
+
+
+def find_free_port_block(start=PORT_BLOCK_BASE, count=3):
     """Find the first port from start where count consecutive ports are free."""
-    for port in range(start, start + 200, count):
+    blocks = PORT_BLOCK_SPAN // count
+    first = (start - PORT_BLOCK_BASE) // count
+    for index in range(blocks):
+        port = PORT_BLOCK_BASE + ((first + index) % blocks) * count
         if not all(is_port_free(port + i) for i in range(count)):
             continue
 

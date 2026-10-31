@@ -482,7 +482,7 @@ build_local() {
 # (tests/scenarios/env/scenario-env.sh). Run before dispatching build.yml.
 # Usage: ./build.sh release_check [--fresh] [glibc|musl|scenario|all]
 # Environment: RELEASE_CHECK_DIR (work dir, default px-release-check under
-#   $ORC_SCRATCH_DIR or /tmp), UV_PYTHON (host sdist build, default 3.13),
+#   $ORC_SCRATCH_DIR or /tmp), UV_PYTHON (host sdist build, default 3.14),
 #   TEST_IMAGE_GLIBC (glibc test container, default ubuntu).
 # The working tree (tracked and untracked, not ignored) is copied per job, so
 # the checkout is never touched. Finished stages are skipped on re-runs while
@@ -602,7 +602,7 @@ release_check() {
     done
     RC_TARGETS="${RC_TARGETS:-glibc musl scenario}"
     RC_ROOT="${RELEASE_CHECK_DIR:-${ORC_SCRATCH_DIR:-/tmp}/px-release-check}"
-    export UV_PYTHON="${UV_PYTHON:-3.13}"
+    export UV_PYTHON="${UV_PYTHON:-3.14}"
     cd "$(dirname "$0")"
 
     target_config glibc && _imgs="$WHEELS_IMAGE $BINARY_IMAGE"

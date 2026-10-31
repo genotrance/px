@@ -37,6 +37,7 @@ def _get_credential(store, domain, username):
         domainuser = f"{domain}\\{username}"
 
     password = get_client_password(domainuser)
+    _ntlm_lookups.append(domainuser)
     if password is not None:
         lmhash = lmowfv1(password)
         nthash = ntowfv1(password)
@@ -58,6 +59,7 @@ spnego._ntlm._get_credential_file = _get_credential_file
 import spnego
 
 _client_password_cache: dict[str, str] = {}
+_ntlm_lookups: list[str] = []
 
 
 def get_client_password(username):
@@ -73,6 +75,11 @@ def get_client_password(username):
         # would otherwise stall every connection on every handshake.
         _client_password_cache[username] = password
     return password
+
+
+def invalidate_client_password(username):
+    "Drop a cached client password so the next lookup re-reads the keyring or environment"
+    _client_password_cache.pop(username, None)
 
 
 def _lookup_client_password(username):
@@ -979,10 +986,13 @@ class ConnectionHandler:
                 options = spnego.NegotiateOptions.use_sspi
             self.client_ctxt = spnego.auth.server(protocol=challenge_authtype.lower(), options=options)
             self.client_ctxt_scheme = authtype
+        _ntlm_lookups.clear()
         try:
             outok = self.client_ctxt.step(credentials)
         except (spnego.exceptions.InvalidTokenError, spnego.exceptions.SpnegoError, ValueError) as exc:
             dprint("Authentication failed: " + str(exc))
+            for user in _ntlm_lookups:
+                invalidate_client_password(user)
             self._fail_client_auth()
             return False
         if outok is not None:
@@ -1033,6 +1043,7 @@ class ConnectionHandler:
 
         if response != params["response"]:
             dprint("Authentication failed: Bad response")
+            invalidate_client_password(client_username)
             self._fail_client_auth()
             return False
         else:
@@ -1051,6 +1062,7 @@ class ConnectionHandler:
         client_password = get_client_password(username)
         if client_password is None or client_password != password:
             dprint("Authentication failed")
+            invalidate_client_password(username)
             self._fail_client_auth()
             return False
 

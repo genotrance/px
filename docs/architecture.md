@@ -254,7 +254,10 @@ which run via `asyncio.to_thread`), because pyspnego invokes the credential
 callback from inside its own synchronous `step()`. `get_client_password()`
 caches each username's result after the first successful lookup so a slow or
 contended keyring backend is only ever hit once per username, not once per
-handshake.
+handshake. When downstream authentication fails with a cached password (Basic
+mismatch, bad Digest response or an NTLM/Negotiate step failure),
+`invalidate_client_password()` drops that user's entry so the next attempt
+re-reads the keyring or `PX_CLIENT_PASSWORD`.
 
 ## Authentication
 

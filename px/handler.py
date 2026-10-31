@@ -227,7 +227,8 @@ class RequestBody:
     client error, timeout or disconnect. A client "Expect: 100-continue" is
     answered with "100 Continue" the first time the body is needed, so the
     client sends the body only once the upstream wants it; held_back is True
-    until then.
+    until then. A client may also send a held-back body late, so a held-back
+    request is never left unread on a connection that stays open.
     """
 
     def __init__(self, h11_conn=None, stream=None, loop=None, transport=None, expect_continue=False):
@@ -288,6 +289,12 @@ class RequestBody:
         if self._expect_continue:
             self._expect_continue = False
             self._loop.call_soon_threadsafe(self._write_continue)
+
+    def release(self):
+        "On the event loop: answer the client's Expect now so it sends the body, which the caller then discards"
+        if self._expect_continue:
+            self._expect_continue = False
+            self._write_continue()
 
     def _fetch_done(self, data):
         "On the event loop: feed what the client sent to h11, then wake the paused upload"
@@ -641,6 +648,8 @@ class ConnectionHandler:
     across keep-alive requests on the same TCP connection.
     """
 
+    _request_body = None
+
     def __init__(self, reader, writer):
         self.reader = reader
         self.writer = writer
@@ -690,6 +699,7 @@ class ConnectionHandler:
                 self._close_after_response = False
                 self._drain_body = False
                 self._tunnel_established = False
+                self._request_body = body
                 await self._handle_request(method, target, headers, body, request_version)
 
                 # CONNECT tunnels consume the connection (only when actually established)
@@ -703,20 +713,14 @@ class ConnectionHandler:
                 # (or discarded after a reply that did not need it) before the next
                 # request can be read from this connection; otherwise close it
                 if body is not None:
+                    if self._drain_body:
+                        await body.drain()
+                    if not body.finish():
+                        break
+                    # Save any data h11 buffered beyond this request (pipelined)
                     trailing = h11_conn.trailing_data
-                    if self._drain_body and body.held_back and not trailing[0]:
-                        # The 407 was sent as the final response to the client's Expect, so the
-                        # client holds the body back and there is nothing to discard
-                        pass
-                    else:
-                        if self._drain_body:
-                            await body.drain()
-                        if not body.finish():
-                            break
-                        # Save any data h11 buffered beyond this request (pipelined)
-                        trailing = h11_conn.trailing_data
-                        if trailing[0]:
-                            self._recv_buf = bytes(trailing[0])
+                    if trailing[0]:
+                        self._recv_buf = bytes(trailing[0])
 
                 # Check keep-alive
                 if self._close_after_response or not self._should_keep_alive(request_version, headers):
@@ -828,12 +832,25 @@ class ConnectionHandler:
         self._close_after_response = True
 
     def _send_auth_response(self, auth_headers):
-        "Send a 407 Proxy Authentication Required response (keep-alive for auth handshake)"
+        """Send a 407 Proxy Authentication Required response (keep-alive for auth handshake)
+
+        A client waiting for 100 Continue holds its body back, but may send it after its own
+        timeout, and those bytes must never be parsed as the next request. Mid-handshake
+        NTLM/Negotiate legs keep the connection (the server context lives on it), so the client
+        is told to send the body now and Px discards it; every other 407 closes the connection.
+        """
         body = format_error_body(407, "Proxy authentication required")
         headers = list(auth_headers)
         headers.append(("Content-Type", "text/html;charset=utf-8"))
         headers.append(("Content-Length", str(len(body))))
-        headers.append(("Proxy-Connection", "Keep-Alive"))
+        held_back = self._request_body is not None and self._request_body.held_back
+        if held_back and self.client_ctxt is None:
+            headers.append(("Connection", "close"))
+            self._close_after_response = True
+        else:
+            if held_back:
+                self._request_body.release()
+            headers.append(("Proxy-Connection", "Keep-Alive"))
         self._send_response(407, headers, body)
 
     ###

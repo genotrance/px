@@ -27,7 +27,6 @@ import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
-import mcurl
 import psutil
 import pytest
 
@@ -621,14 +620,6 @@ def test_pac_proxy_and_direct_with_python_client(scenario_env, tmp_path):
 # real Squid proxies to the origin's /echo endpoint, which hashes the body as
 # it arrives, and assert status 200 plus the exact length and SHA-256.
 
-# TEMPORARY until pymcurl 8.23.0.3 is on PyPI (docs/build.md): streamed uploads through proxy auth need
-# its seek callback and Expect handling. CI sets PX_REQUIRE_MCURL_FIX=1 so these tests always run there
-# and fail instead of being skipped silently.
-needs_mcurl_streaming = pytest.mark.skipif(
-    not (hasattr(mcurl, "REWIND_ERROR") and hasattr(mcurl.Curl, "resume_upload"))
-    and os.environ.get("PX_REQUIRE_MCURL_FIX") != "1",
-    reason="needs pymcurl>=8.23.0.3 (streamed uploads)",
-)
 ECHO_URL = "http://origin.corp.test:8080/echo"
 BLOCK = 65536
 SMALL_SIZE = 3 * BLOCK + 12345
@@ -887,7 +878,6 @@ def _run_parallel(port: int, specs: list[tuple[str, int, bool]], *, gate_timeout
 @by_loop
 @by_method
 @by_body
-@needs_mcurl_streaming
 def test_upload_first_request(scenario_env, kerberos_cache, tmp_path, scheme, event_loop, method, chunked):
     """The first request of a fresh Px is an upload that must authenticate mid-body."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop) as px:
@@ -907,7 +897,6 @@ BIG_FIRST_REQUEST = [
 
 @pytest.mark.parametrize(("scheme", "method"), BIG_FIRST_REQUEST)
 @by_loop
-@needs_mcurl_streaming
 def test_upload_first_request_100mb(scenario_env, kerberos_cache, memory_report, tmp_path, scheme, method, event_loop):
     """A 100 MB first request streams through the handshake with Px's memory far below the body size."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop) as px:
@@ -925,7 +914,6 @@ def test_upload_first_request_100mb(scenario_env, kerberos_cache, memory_report,
     ids=lambda scheme: scheme.name,
 )
 @by_loop
-@needs_mcurl_streaming
 def test_upload_chunked_first_request_100mb(scenario_env, kerberos_cache, memory_report, tmp_path, scheme, event_loop):
     """A 100 MB chunked first request (unknown length, nothing to rewind) also streams in bounded memory."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop) as px:
@@ -960,7 +948,6 @@ def warm_px(request, scenario_env, kerberos_cache, tmp_path_factory):
 @by_loop
 @by_method
 @by_body
-@needs_mcurl_streaming
 def test_upload_back_to_back_immediately(scenario_env, kerberos_cache, tmp_path, scheme, event_loop, method, chunked):
     """First and subsequent uploads have no settling time for every connection and worker arrangement."""
     specs = [(method, SMALL_SIZE, chunked), (method, SMALL_SIZE + 1, chunked)]
@@ -1002,7 +989,6 @@ def test_upload_back_to_back_immediately(scenario_env, kerberos_cache, tmp_path,
 
 @by_method
 @by_body
-@needs_mcurl_streaming
 def test_upload_later_requests(warm_px, method, chunked):
     """Uploads after the first, on the same client connection and on new ones, all arrive exactly."""
     _, px = warm_px
@@ -1014,7 +1000,6 @@ def test_upload_later_requests(warm_px, method, chunked):
     px.assert_healthy()
 
 
-@needs_mcurl_streaming
 def test_upload_later_requests_100mb(warm_px, memory_report):
     """A 100 MB upload on an authenticated Px, then a small request on the same client connection."""
     scheme, px = warm_px
@@ -1036,7 +1021,6 @@ def test_upload_later_requests_100mb(warm_px, memory_report):
 @by_scheme
 @by_loop
 @by_method
-@needs_mcurl_streaming
 def test_upload_two_workers_first_requests(scenario_env, kerberos_cache, tmp_path, scheme, event_loop, method):
     """Concurrent first uploads spread over two fresh worker processes all arrive exactly."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop, workers=2) as px:
@@ -1048,7 +1032,6 @@ def test_upload_two_workers_first_requests(scenario_env, kerberos_cache, tmp_pat
 
 @pytest.mark.parametrize("scheme", LOAD_SCHEMES, ids=lambda scheme: scheme.name)
 @by_loop
-@needs_mcurl_streaming
 def test_upload_two_workers_100mb(scenario_env, kerberos_cache, memory_report, tmp_path, scheme, event_loop):
     """Two 100 MB uploads (Content-Length and chunked) at once through two fresh workers."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop, workers=2) as px:
@@ -1070,7 +1053,6 @@ def test_upload_two_workers_100mb(scenario_env, kerberos_cache, memory_report, t
 @pytest.mark.parametrize("scheme", LOAD_SCHEMES, ids=lambda scheme: scheme.name)
 @pytest.mark.parametrize("workers", [1, 2])
 @by_loop
-@needs_mcurl_streaming
 def test_parallel_uploads(scenario_env, kerberos_cache, memory_report, tmp_path, scheme, workers, event_loop):
     """60 simultaneous mixed POST/PUT/PATCH uploads, half chunked, each arrives exactly with bounded memory."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop, workers=workers) as px:
@@ -1101,7 +1083,6 @@ TEST_ALL_SCHEMES = [
 
 @pytest.mark.parametrize("scheme", TEST_ALL_SCHEMES, ids=lambda scheme: scheme.name)
 @by_loop
-@needs_mcurl_streaming
 def test_px_test_all_methods_echo(scenario_env, kerberos_cache, tmp_path, scheme, event_loop):
     """`px --test=all:URL` sends GET, POST, PUT, DELETE and PATCH through the proxy and each must pass."""
     if scheme.proxy_key not in scenario_env:
@@ -1148,7 +1129,6 @@ def test_px_test_all_methods_echo(scenario_env, kerberos_cache, tmp_path, scheme
     ids=lambda scheme: scheme.name,
 )
 @by_loop
-@needs_mcurl_streaming
 def test_upload_client_expect_continue(scenario_env, kerberos_cache, tmp_path, scheme, event_loop):
     """A client that waits for 100 Continue gets it and its upload still arrives exactly."""
     with scheme.px(tmp_path, scenario_env, kerberos_cache, event_loop=event_loop) as px:

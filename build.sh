@@ -482,7 +482,6 @@ build_local() {
 # (tests/scenarios/env/scenario-env.sh). Run before dispatching build.yml.
 # Usage: ./build.sh release_check [--fresh] [glibc|musl|scenario|all]
 # Environment: RELEASE_CHECK_DIR (work dir, default /tmp/px-release-check),
-#   MCURL_SRC (mcurl checkout used to build a temporary scenario wheel),
 #   UV_PYTHON (host sdist build, default 3.14), TEST_IMAGE_GLIBC (glibc test
 #   container, default ubuntu).
 # The working tree (tracked and untracked, not ignored) is copied per job, so
@@ -571,16 +570,6 @@ rc_scenario() {
     if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
         echo "Docker is not available; skipping the scenario stage" >&2
         return 0
-    fi
-    # pymcurl's required streaming-upload fix is still unreleased. Archive the
-    # devel checkout rather than installing from or modifying it, then overlay
-    # its wheel only in the network-resident scenario runner.
-    if [ -n "${MCURL_SRC:-}" ] && [ -d "$MCURL_SRC/.git" ]; then
-        _mcurl_root=$(mktemp -d "$RC_ROOT/mcurl-devel.XXXXXX")
-        _mcurl_wheels=$(mktemp -d "$RC_ROOT/mcurl-wheels.XXXXXX")
-        git -C "$MCURL_SRC" archive devel | tar -x -C "$_mcurl_root"
-        uv build --wheel "$_mcurl_root" --out-dir "$_mcurl_wheels"
-        export MCURL_WHEELS="$_mcurl_wheels" PX_REQUIRE_MCURL_FIX=1
     fi
     export SCENARIO_INSTANCE="${SCENARIO_INSTANCE:-$(( $$ % 50 + 1 ))}"
     tests/scenarios/env/scenario-env.sh up

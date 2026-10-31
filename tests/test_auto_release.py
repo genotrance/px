@@ -16,7 +16,7 @@ def test_bump_patch():
 
 
 def test_replace_requirement():
-    text = 'dependencies = ["pymcurl>=8.23.0.2", "quickjs-ng>=0.17.0.1"]'
+    text = 'dependencies = ["pymcurl>=8.23.0.3", "quickjs-ng>=0.17.0.1"]'
     assert "pymcurl>=8.23.0.3" in px_tools.replace_requirement(text, "pymcurl", "8.23.0.3")
 
 

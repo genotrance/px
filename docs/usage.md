@@ -400,7 +400,10 @@ Px depends on the following Python packages:
     covered by the automated Linux scenario suite.
 - A client's `Expect: 100-continue` is answered by Px itself (`100 Continue` is
   sent once the upstream wants the body, so an early error or client-authentication
-  `407` replaces it) and is not forwarded. Hop-by-hop
+  `407` replaces it) and is not forwarded. A client-authentication `407` to a
+  request still waiting for `100 Continue` closes the connection (the client
+  reconnects to authenticate), except mid-handshake NTLM/Negotiate legs, where
+  Px asks for the body, discards it and keeps the connection. Hop-by-hop
   headers (`Connection` and the headers it names, `Proxy-Connection`,
   `Keep-Alive`, `TE`, `Trailer`, `Upgrade`) are not forwarded either, and
   `Proxy-Authorization` from the client is dropped when Px authenticates to the

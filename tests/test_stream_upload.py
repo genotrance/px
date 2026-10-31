@@ -7,6 +7,7 @@ HTTP origins and an NTLM proxy with unknown auth, on both event loops.
 
 import asyncio
 import base64
+import contextlib
 import copy
 import hashlib
 import json
@@ -716,19 +717,46 @@ def test_client_auth_discards_body_and_keeps_connection(client_auth_px, origin, 
 
 
 @needs_mcurl_streaming
-def test_client_auth_with_expect_keeps_connection(client_auth_px, origin):
-    "A 407 answers a client's Expect as the final response; it holds the body back and the connection stays usable"
+def test_client_auth_with_expect_closes_connection(client_auth_px, origin):
+    "A 407 answering a held-back Expect closes the connection so a late body is never parsed as the next request"
     client = Client(client_auth_px, timeout=20)
     url = f"http://{origin.addr}/up"
     try:
         head = f"POST {url} HTTP/1.1\r\nHost: x\r\nContent-Length: {BODY_SIZE}\r\nExpect: 100-continue\r\n\r\n"
         client.sock.sendall(head.encode())
-        assert client.read_response().status == 407
+        denied = client.read_response()
+        assert denied.status == 407 and denied.headers["connection"] == "close"
+        assert client.rfile.read() == b""
+    finally:
+        client.close()
+    client = Client(client_auth_px, timeout=20)
+    try:
         allowed = client.send("POST", url, BODY_SIZE, headers=[CLIENT_CREDENTIALS])
     finally:
         client.close()
     assert allowed.status == 200
     assert [r["sha256"] for r in origin.requests] == [body_sha256(BODY_SIZE)]
+
+
+@needs_mcurl_streaming
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_client_auth_late_body_is_not_parsed_as_request(client_auth_px, origin, chunked):
+    "A body sent after its Expect timeout, even one shaped like an authenticated request, never reaches the origin"
+    smuggled = f"GET http://{origin.addr}/smuggled HTTP/1.1\r\nHost: x\r\n{CLIENT_CREDENTIALS}\r\n\r\n".encode()
+    framing = "Transfer-Encoding: chunked" if chunked else f"Content-Length: {len(smuggled)}"
+    body = f"{len(smuggled):x}\r\n".encode() + smuggled + b"\r\n0\r\n\r\n" if chunked else smuggled
+    client = Client(client_auth_px, timeout=20)
+    try:
+        head = f"POST http://{origin.addr}/up HTTP/1.1\r\nHost: x\r\n{framing}\r\nExpect: 100-continue\r\n\r\n"
+        client.sock.sendall(head.encode())
+        assert client.read_response().status == 407
+        with contextlib.suppress(OSError):
+            client.sock.sendall(body)
+        with contextlib.suppress(ConnectionError):
+            assert client.rfile.read() == b""
+    finally:
+        client.close()
+    assert origin.requests == []
 
 
 @needs_mcurl_streaming

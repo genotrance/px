@@ -149,7 +149,11 @@ for each request to avoid state conflicts.
    closes the connection if not (upstream answered early, a read failed, the
    client went away). After Px's own client-authentication 407 a body the
    client already sends is discarded without storing it so NTLM/Negotiate
-   handshakes keep their connection.
+   handshakes keep their connection. A 407 sent while the client still holds
+   its body back (`Expect: 100-continue`) either closes the connection or, for
+   a mid-handshake NTLM/Negotiate leg, first releases the body (see below),
+   because a client may send a held-back body late and those bytes must never
+   be parsed as the next request.
 
 ### Request body data flow
 
@@ -195,9 +199,20 @@ A client `Expect: 100-continue` sent to Px is not forwarded. Px sends
 upstream is ready for it), so a client waiting for the interim response never
 deadlocks. Px suppresses an upstream `100 Continue`, so the client receives
 exactly one interim response per request. A final response sent before that point (error, early upstream
-status) replaces it and the connection is closed instead of reused, except
-Px's own client-authentication 407: the client then holds the body back, so
-the connection stays open for the next handshake leg.
+status) replaces it and the connection is closed instead of reused.
+
+Px's own client-authentication 407 is the exception, handled in
+`_send_auth_response()`. A client is allowed to send a held-back body after its
+own `Expect` timeout, and Px cannot tell such a body from the next request, so
+a 407 sent while the body is held back never leaves the connection open with
+an unread body. If no connection-oriented context is in progress (first
+challenge, failed Basic/Digest/NTLM/Negotiate credentials) the 407 carries
+`Connection: close`; the client reconnects and authenticates on the new
+connection. If the 407 is a mid-handshake NTLM/Negotiate challenge, the
+server context lives on this connection and cannot be dropped, so Px first
+sends `100 Continue` (`RequestBody.release()`), which makes the client send the
+body, then sends the 407 and discards the body with the usual drain before the
+next leg is read.
 
 mcurl runs transfer callbacks while holding its multi lock, and `remove()` and
 `stop()` take that lock too. The handler therefore calls them through

@@ -15,6 +15,7 @@
 - A slow or stalled uploading client no longer delays other requests handled by the same worker; requires a pymcurl with upload pause/resume.
 - A client `Connection: close` (and other hop-by-hop headers) is no longer forwarded upstream, which broke NTLM through proxies that honour it.
 - NTLM/Negotiate upstream proxies are no longer blocked after interrupted CONNECT handshakes; requires pymcurl 8.23.0.3 (px#268).
+- A request body sent late after a client-authentication `407` to `Expect: 100-continue` is no longer parsed as the next request.
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
 - `px --test`/`--test-auth` now fail a request whose final response is `401`/`407` instead of reporting it as passed.
 - `--test-auth` with Negotiate and a single explicit `--proxy` now addresses Px by the upstream proxy's hostname, so the Kerberos SPN libcurl requests matches the upstream proxy instead of Px's own listen address.

@@ -204,7 +204,7 @@ class _WproxyBase:
 
         return netloc, path
 
-    def _get_resolver(self):
+    def get_resolver(self):
         "Create the resolver for Windows Internet Options configurations lazily"
         if self._resolver is None:
             self._resolver = Resolver()
@@ -219,7 +219,7 @@ class _WproxyBase:
         """
 
         if self.noproxy.size:
-            ip = self._get_resolver().lookup(netloc[0], socket.AF_UNSPEC)
+            ip = self.get_resolver().lookup(netloc[0], socket.AF_UNSPEC)
             if ip is None:
                 # Couldn't resolve, let parent proxy try, px#18
                 dprint("Couldn't resolve host")
@@ -281,7 +281,7 @@ class _WproxyBase:
 
         if self.noproxy.size and self.mode != MODE_NONE:
             netloc, _path = self.get_netloc(url)
-            if not self._get_resolver().has_immediate_result(netloc[0], socket.AF_UNSPEC):
+            if not self.get_resolver().has_immediate_result(netloc[0], socket.AF_UNSPEC):
                 return await asyncio.to_thread(self.find_proxy_for_url, url)
 
         return self.find_proxy_for_url(url)

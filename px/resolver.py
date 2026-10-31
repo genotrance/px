@@ -25,7 +25,7 @@ class _PendingLookup:
     "Result shared by callers waiting on the same system lookup"
 
     done: threading.Event
-    value: str | None = None
+    value: tuple[str, ...] | None = None
 
 
 def my_ip_address():
@@ -69,7 +69,7 @@ class Resolver:
         self.clock = clock
 
         self._lock = threading.Lock()
-        self._cache = {}  # (host, family) -> (expiry, ip_or_None)
+        self._cache = {}  # (host, family) -> (expiry, addresses_or_None)
         self._inflight: dict[tuple[str, int], _PendingLookup] = {}
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="px-resolver")
 
@@ -108,7 +108,7 @@ class Resolver:
         return True, value
 
     def has_immediate_result(self, host, family=socket.AF_INET):
-        "Return whether lookup() can return without submitting or waiting for DNS"
+        "Return whether lookup() or lookup_all() can return without waiting for DNS"
         if self._literal(host, family) is not None:
             return True
 
@@ -120,32 +120,32 @@ class Resolver:
         "Blocking lookup, run on the executor and cached for waiting callers"
         try:
             addrinfo = socket.getaddrinfo(host, None, family)
-            ip = addrinfo[0][4][0]
+            addresses = tuple(dict.fromkeys(info[4][0] for info in addrinfo)) or None
         except (OSError, UnicodeError):
-            ip = None
+            addresses = None
 
-        ttl = self.positive_ttl if ip is not None else self.negative_ttl
+        ttl = self.positive_ttl if addresses is not None else self.negative_ttl
         key = (host, family)
         with self._lock:
-            self._cache[key] = (self.clock() + ttl, ip)
+            self._cache[key] = (self.clock() + ttl, addresses)
             if self._inflight.get(key) is pending:
                 del self._inflight[key]
-            pending.value = ip
+            pending.value = addresses
             pending.done.set()
 
-        return ip
+        return addresses
 
-    def lookup(self, host, family=socket.AF_INET, timeout=LOOKUP_TIMEOUT):
-        "Resolve host to an IP string, or None on failure or timeout"
+    def lookup_all(self, host, family=socket.AF_INET, timeout=LOOKUP_TIMEOUT):
+        "Resolve host to every IP address, or None on failure or timeout"
         literal = self._literal(host, family)
         if literal is not None:
-            return literal
+            return [literal]
 
         key = (host, family)
         with self._lock:
             hit, value = self._cached(key)
             if hit:
-                return value
+                return list(value) if value is not None else None
 
             pending = self._inflight.get(key)
             if pending is None:
@@ -154,8 +154,13 @@ class Resolver:
                 self._executor.submit(self._resolve, host, family, pending)
 
         if pending.done.wait(timeout):
-            return pending.value
+            return list(pending.value) if pending.value is not None else None
 
         # Straggler keeps running in the background and will populate the
         # cache for the next call.
         return None
+
+    def lookup(self, host, family=socket.AF_INET, timeout=LOOKUP_TIMEOUT):
+        "Resolve host to its first IP address, or None on failure or timeout"
+        addresses = self.lookup_all(host, family, timeout)
+        return addresses[0] if addresses else None

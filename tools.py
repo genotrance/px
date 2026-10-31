@@ -8,6 +8,7 @@ import pathlib
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -332,6 +333,118 @@ def check_portable(root):
         print("ERROR: the binary depends on libraries that only exist on the build host")
         sys.exit(1)
     print("No Homebrew or /usr/local library references")
+
+
+REQUIRED_MCURL = {"Curl": ("resume_upload", "transfer_id", "get_os_errno"), "": ("REWIND_ERROR",)}
+
+
+def missing_mcurl_apis(module):
+    return [
+        f"{cls + '.' if cls else ''}{name}"
+        for cls, names in REQUIRED_MCURL.items()
+        for name in names
+        if not hasattr(getattr(module, cls) if cls else module, name)
+    ]
+
+
+def check_mcurl():
+    if mcurl is None:
+        print("ERROR: pymcurl is not installed")
+        sys.exit(1)
+    import importlib.metadata
+
+    version = importlib.metadata.version("pymcurl")
+    print(f"pymcurl {version} ({getattr(mcurl, '__file__', '?')})")
+    missing = missing_mcurl_apis(mcurl)
+    if missing:
+        print(f"ERROR: pymcurl {version} lacks required APIs: {', '.join(missing)}")
+        print("The installed pymcurl is not the released artifact px requires (pymcurl>=8.23.0.3 from PyPI)")
+        sys.exit(1)
+
+
+def smoke_request(pxbin):
+    # Serve one GET and one streamed POST through the built binary; the POST
+    # exercises the upload resume path that needs the pymcurl APIs
+    import http.client
+    import http.server
+    import tempfile
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def respond(self, body):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self.respond(b"px-smoke-get")
+
+        def do_POST(self):
+            self.respond(b"px-smoke-post:" + self.rfile.read(int(self.headers["Content-Length"])))
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    ok = False
+    with tempfile.TemporaryDirectory() as tmp:
+        ini = os.path.join(tmp, "px.ini")
+        open(ini, "a").close()
+        log = open(os.path.join(tmp, "px.log"), "w+")  # noqa: SIM115
+        proc = subprocess.Popen(
+            [pxbin, f"--port={port}", "--listen=127.0.0.1", "--noproxy=", f"--config={ini}", "--verbose"],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            cwd=tmp,
+        )
+        try:
+            # Talk to px directly with an absolute URI: urllib would skip the proxy for no_proxy hosts
+            url = f"http://127.0.0.1:{server.server_address[1]}/"
+
+            def fetch(method, body=None):
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                try:
+                    conn.request(method, url, body=body)
+                    resp = conn.getresponse()
+                    return resp.read() if resp.status == 200 else f"HTTP {resp.status}"
+                finally:
+                    conn.close()
+
+            for _ in range(40):
+                try:
+                    got = fetch("GET")
+                    break
+                except Exception as exc:
+                    got = exc
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.5)
+            post = b""
+            if got == b"px-smoke-get":
+                post = fetch("POST", b"x" * 100000)
+            ok = got == b"px-smoke-get" and post == b"px-smoke-post:" + b"x" * 100000
+            if not ok:
+                print(f"ERROR: smoke request through {pxbin} failed: {got!r} {post[:30]!r}")
+        except Exception as exc:
+            print(f"ERROR: smoke request through {pxbin} failed: {exc!r}")
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            if not ok:
+                log.seek(0)
+                print(log.read()[-3000:])
+            log.close()
+            server.shutdown()
+    if not ok:
+        sys.exit(1)
 
 
 def check_ssl():
@@ -938,6 +1051,12 @@ def main():
     if "--check-ssl" in sys.argv:
         check_ssl()
 
+    if "--check-mcurl" in sys.argv:
+        check_mcurl()
+
+    if "--smoke-request" in sys.argv:
+        smoke_request(sys.argv[sys.argv.index("--smoke-request") + 1])
+
     if "--check-portable" in sys.argv:
         check_portable(sys.argv[sys.argv.index("--check-portable") + 1])
 
@@ -972,6 +1091,8 @@ def main():
         print(f"""
 Build:
 --check-ssl	Fail unless ssl and spnego import and do not link Homebrew or /usr/local libraries (macOS)
+--check-mcurl	Fail unless the installed pymcurl has the APIs px requires
+--smoke-request BIN	Fail unless the px binary BIN serves a GET and a streamed POST
 --check-portable DIR	Fail if a Mach-O file under DIR links /opt/homebrew or /usr/local
 --wheel		Build wheels for pypi.org
 --nuitka	Build px distribution using Nuitka

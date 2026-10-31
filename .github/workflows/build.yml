@@ -159,9 +159,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/uv/${{ matrix.name }}
-          key: release-uv-${{ matrix.name }}-${{ hashFiles('uv.lock', 'build.sh') }}
-          restore-keys: |
-            release-uv-${{ matrix.name }}-
+          key: release-uv-${{ matrix.name }}-${{ hashFiles('uv.lock', 'build.sh', 'pyproject.toml') }}
 
       - name: Set up the environment
         if: runner.os != 'Linux'

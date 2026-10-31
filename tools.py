@@ -370,6 +370,8 @@ def smoke_request(pxbin):
     import tempfile
     import threading
 
+    pxbin = os.path.abspath(pxbin)
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def respond(self, body):
             self.send_response(200)

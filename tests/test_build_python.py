@@ -454,13 +454,14 @@ def test_smoke_request_fails_for_a_binary_that_cannot_serve(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="needs a shell launcher")
-def test_smoke_request_passes_through_a_working_px(tmp_path):
+def test_smoke_request_passes_through_a_working_px(tmp_path, monkeypatch):
     pytest.importorskip("mcurl")
     fake = tmp_path / "px"
     fake.write_text(f'#!/bin/sh\nexec {sys.executable} -m px "$@"\n')
     fake.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
 
-    tools.smoke_request(str(fake))
+    tools.smoke_request(fake.name)
 
 
 def test_workflows_use_only_released_dependencies():

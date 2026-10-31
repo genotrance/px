@@ -177,6 +177,20 @@ meanwhile, and no body size limit exists. It works the same on plain asyncio,
 uvloop and winloop because the event loop is reached only through
 `call_soon_threadsafe()`.
 
+Px reuses one `Curl` across a keep-alive connection's requests (`Curl.reset()`
+in `_handle_request()`), so `resume_upload()` must name the transfer it means
+to resume: since pymcurl 8.23.0.3 (mcurl commit 3318186) `Curl.transfer_id`
+identifies the handle's current transfer and changes on `reset()`, and calling
+`resume_upload()` without it on an already-reused, running handle raises
+`ValueError` instead of guessing. `bind_upload_resume()` reads
+`self.curl.transfer_id` right after `reset()`/configuration and binds
+`body_reader.resume` to `functools.partial(self.curl.resume_upload,
+transfer_id)`, so a resume that only runs once the same handle has moved on to
+a later transfer is recognised as stale by mcurl and discarded (`False`) rather
+than reaching the wrong transfer or raising. Against older pymcurl that has
+`resume_upload` but no `transfer_id`, it binds the plain no-argument call
+instead, which is what that version expects.
+
 Locking: a `threading.Lock` in `RequestBody` guards the h11 state and the
 pending chunk shared by mcurl's thread (`read()`) and the event loop
 (`_fetch_done()`). At most one event-loop read is in flight (`_fetching`), so

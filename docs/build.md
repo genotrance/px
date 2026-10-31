@@ -364,7 +364,17 @@ resolve the newest release from PyPI.
   Linux jobs restore and save separate `actions/cache` entries for Nuitka's
   compiler cache and uv downloads. The cache keys include the Nuitka version,
   target platform and relevant source or lock-file hashes; prefix restores let
-  Nuitka invalidate changed inputs itself. Both cache directories are mounted
+  Nuitka invalidate changed inputs itself. The uv cache key (lock file,
+  `build.sh`, `pyproject.toml`) has no prefix fallback: dry run 41219248908
+  restored an older `release-uv-<name>-` entry through that fallback and the
+  binary jobs bundled a stale pymcurl labelled 8.23.0.3 (no
+  `Curl.resume_upload`), so every request failed in test-binary. The
+  restore log showed `Cache hit for restore-key`, and uv installed pymcurl
+  without downloading it. `build_binary` also installs pymcurl through
+  `install_released_pymcurl` (`uv pip install --no-cache
+  --reinstall-package pymcurl` of the `pyproject.toml` minimum from PyPI,
+  ignoring the wheels directory) so no cache can supply a same-version
+  wheel. Both cache directories are mounted
   into the glibc and Alpine containers, so they survive ephemeral runners
   without mixing architectures or compiler environments.
   Every job bundles the newest CPython 3.14 patch available to its own build
@@ -425,6 +435,14 @@ resolve the newest release from PyPI.
   (`smoke_binary`) on the clean test runner before any tox environment, so a
   missing library fails in seconds instead of as about 20 minutes of auth
   timeouts per tox environment.
+  Early binary validation: before Nuitka runs, the Linux and macOS jobs run
+  `tools.py --check-mcurl`, which fails unless the installed pymcurl has
+  `Curl.resume_upload`, `Curl.transfer_id`, `Curl.get_os_errno` and
+  `mcurl.REWIND_ERROR` (px stays strict and has no fallbacks for them). After
+  the build, Linux jobs run `tools.py --smoke-request` against the bundled
+  binary, which serves a GET and a streamed POST (the upload resume path)
+  through it, so a binary that cannot serve requests never reaches the
+  artifact upload. `release_check` runs the same `build_binary`.
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python
@@ -543,6 +561,8 @@ stays concise. Functions include:
 - `extract_archives` — unpacks binary and wheel archives for the test-binary job.
 - `smoke_binary` — launches `px --help` on an artifact, failing if `ssl` or
   `spnego` cannot load; on macOS it also runs `tools.py --check-portable`.
+- `install_released_pymcurl` — installs the minimum-or-newer pymcurl from
+  PyPI with no cache, used by every non-Windows `build_binary`.
   `build_binary` and `test_binary` both call it.
 - `test_binary` — runs `smoke_binary`, then the tox matrix against the built
   artifacts.

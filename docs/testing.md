@@ -26,7 +26,7 @@ Tests live in `tests/`.
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
 | `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
 | `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
-| `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split |
+| `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split, the uv cache without a restore fallback, fresh PyPI pymcurl install, `tools.py --check-mcurl` API guard and `--smoke-request` against a real px, and no cross-project or unreleased dependency in workflows |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
 | `test_scenario_env.py` | Guards the `MCURL_WHEELS` candidate-wheel wiring in `scenario-env.sh` used by mcurl's release gate |

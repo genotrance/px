@@ -1,5 +1,9 @@
 import importlib.util
+import os
+import re
 import subprocess
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -369,3 +373,97 @@ def test_main_docker_plan_cli_requires_a_version(monkeypatch, capsys):
 
     assert exc_info.value.code == 1
     assert "--docker-plan requires a version" in capsys.readouterr().err
+
+
+def _binary_job():
+    yaml = pytest.importorskip("yaml")
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "build.yml").read_text())
+    return workflow["jobs"]["binary"]["steps"]
+
+
+def test_uv_cache_has_no_broad_restore_fallback():
+    uv = next(s for s in _binary_job() if s.get("name") == "Restore uv download cache")
+    nuitka = next(s for s in _binary_job() if s.get("name") == "Restore Nuitka cache")
+
+    assert "restore-keys" not in uv["with"]
+    assert "pyproject.toml" in uv["with"]["key"]
+    assert "restore-keys" in nuitka["with"]
+
+
+def test_binary_builds_install_pymcurl_only_from_a_fresh_pypi_download():
+    script = (ROOT / "build.sh").read_text()
+    helper = script[script.index("install_released_pymcurl() {") :].split("}", 1)[0]
+    body = script[script.index("build_binary() {") : script.index("# --- Archive extraction")]
+
+    assert "--no-cache" in helper and "--reinstall-package pymcurl" in helper
+    assert '-f "$WHEELS"' not in helper and "pymcurl>=$PYMCURL_MIN" in helper
+    assert not re.search(r"uv pip install [^\n]*pymcurl[^\n]*-f", body[: body.index("        windows)")])
+    assert body.count("install_released_pymcurl") == 3
+    assert body.count("tools.py --check-mcurl") == 2
+    for case in ("linux-musl)", "linux-glibc)"):
+        part = body[body.index(case) :]
+        assert part.index("--check-mcurl") < part.index("--nuitka")
+    assert body.index("smoke_binary") < body.index("--smoke-request")
+
+
+def test_pymcurl_minimum_is_read_from_pyproject():
+    out = subprocess.run(
+        ["bash", "-c", ". ./build.sh && echo $PYMCURL_MIN"],  # noqa: S607
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    assert out and out in (ROOT / "pyproject.toml").read_text()
+
+
+def test_check_mcurl_requires_every_api(monkeypatch, capsys):
+    full = types.SimpleNamespace(
+        Curl=types.SimpleNamespace(resume_upload=1, transfer_id=2, get_os_errno=3), REWIND_ERROR="x", __version__="1"
+    )
+    monkeypatch.setattr(tools, "mcurl", full)
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "8.23.0.3")
+    tools.check_mcurl()
+
+    for cls, name in (
+        ("Curl", "resume_upload"),
+        ("Curl", "transfer_id"),
+        ("Curl", "get_os_errno"),
+        (None, "REWIND_ERROR"),
+    ):
+        broken = types.SimpleNamespace(Curl=types.SimpleNamespace(**vars(full.Curl)), REWIND_ERROR="x", __version__="1")
+        delattr(broken.Curl if cls else broken, name)
+        monkeypatch.setattr(tools, "mcurl", broken)
+        with pytest.raises(SystemExit):
+            tools.check_mcurl()
+        assert name in capsys.readouterr().out
+
+    monkeypatch.setattr(tools, "mcurl", None)
+    with pytest.raises(SystemExit):
+        tools.check_mcurl()
+
+
+def test_smoke_request_fails_for_a_binary_that_cannot_serve(tmp_path):
+    fake = tmp_path / "px"
+    fake.write_text("#!/bin/sh\nexit 1\n")
+    fake.chmod(0o755)
+
+    with pytest.raises(SystemExit):
+        tools.smoke_request(str(fake))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs a shell launcher")
+def test_smoke_request_passes_through_a_working_px(tmp_path):
+    pytest.importorskip("mcurl")
+    fake = tmp_path / "px"
+    fake.write_text(f'#!/bin/sh\nexec {sys.executable} -m px "$@"\n')
+    fake.chmod(0o755)
+
+    tools.smoke_request(str(fake))
+
+
+def test_workflows_use_only_released_dependencies():
+    for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
+        text = wf.read_text()
+        assert not re.search(r"genotrance/mcurl|MCURL_WHEELS|\.whl@|git\+https", text), wf.name

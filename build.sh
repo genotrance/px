@@ -28,6 +28,8 @@ PY_MINOR="${PY_MINOR:-3.14}"
 # manylinux2014 GCC 10 environment. Keep every binary target on the newest
 # version validated there until upstream fixes that regression.
 NUITKA_VERSION="4.1.3"
+# Minimum pymcurl release, read from pyproject.toml so the two never drift
+PYMCURL_MIN=$(sed -n 's/.*"pymcurl>=\([0-9.]*\)".*/\1/p' pyproject.toml 2>/dev/null | head -1)
 
 get_version() {
     grep '^version' pyproject.toml | head -1 | cut -d'"' -f2
@@ -213,6 +215,12 @@ setup_manylinux() {
     fi
 }
 
+# Install pymcurl from the PyPI release only: never from the wheels directory
+# or the uv cache, where a stale wheel with the same version label can hide
+install_released_pymcurl() {
+    uv pip install --no-cache --reinstall-package pymcurl "pymcurl>=$PYMCURL_MIN"
+}
+
 build_binary() {
     NAME="$1"
     WHEELS="px.dist-${NAME}-wheels/px.dist"
@@ -225,9 +233,11 @@ build_binary() {
             "$PY" -m venv .venv
             . .venv/bin/activate
             uv pip install 'patchelf==0.17.2.4'
-            uv pip install "nuitka==$NUITKA_VERSION" auditwheel pymcurl -f "$WHEELS"
+            install_released_pymcurl
+            uv pip install "nuitka==$NUITKA_VERSION" auditwheel
             uv pip install px-proxy --no-index -f "$WHEELS"
             log_quickjs_version python
+            python tools.py --check-mcurl
             python tools.py --nuitka
             python tools.py --depspkg
             ;;
@@ -238,9 +248,11 @@ build_binary() {
             select_python
             "$PY" -m venv .venv
             . .venv/bin/activate
-            uv pip install "nuitka==$NUITKA_VERSION" auditwheel pymcurl -f "$WHEELS"
+            install_released_pymcurl
+            uv pip install "nuitka==$NUITKA_VERSION" auditwheel
             uv pip install px-proxy --no-index -f "$WHEELS"
             log_quickjs_version python
+            python tools.py --check-mcurl
             python tools.py --nuitka
             python tools.py --depspkg
             ;;
@@ -251,7 +263,8 @@ build_binary() {
             rm -rf .venv
             "$PY" -m venv .venv
             . .venv/bin/activate
-            uv pip install "nuitka==$NUITKA_VERSION" pymcurl -f "$WHEELS"
+            install_released_pymcurl
+            uv pip install "nuitka==$NUITKA_VERSION"
             uv pip install px-proxy --no-index -f "$WHEELS"
             log_quickjs_version python
             python tools.py --check-ssl
@@ -270,7 +283,13 @@ build_binary() {
     esac
 
     # Keep local release checks aligned with the CI smoke step.
-    smoke_binary "$NAME"
+    smoke_binary "$NAME" || return 1
+
+    # Serve real requests through the binary so one that cannot is never
+    # published (Linux: the venv python of this job runs the client side)
+    case "$OS" in
+        linux-*) python tools.py --smoke-request "px.dist-${NAME}/px.dist/px" || return 1 ;;
+    esac
 }
 
 # --- Archive extraction ---

@@ -19,7 +19,7 @@ Tests live in `tests/`.
 | `test_kerberos.py` | Kerberos ticket management — unit tests (mocked subprocess, Linux/macOS only) and Docker-based integration tests against local MIT and Heimdal KDCs (marked `integration`, run via `make test-kerberos`) |
 | `test_client_auth.py` | Downstream client authentication unit tests — failed NEGOTIATE/NTLM/Digest/Basic credentials restart with a fresh 407, cached password lookups, and the connection handling of a 407 answering a held-back `Expect: 100-continue` (closes unless a handshake is in progress, in which case the late body is released and discarded and never parsed as the next request) |
 | `test_auth_retry.py` | `--authretry` integration tests — Px against a fake upstream proxy that denies or allows authenticated requests, proving latching after 3 consecutive 407s, exactly one probe per interval under a 50-client concurrent burst, and recovery |
-| `test_stream_upload.py` | Streamed request bodies: `RequestBody` unit tests (Content-Length, chunked with trailers, client disconnect, `Expect` answered once, no seek) on each available event loop, plus hop-by-hop stripping and rewind-error detection; px subprocess tests on both event loops where POST/PUT/PATCH bodies (Content-Length and chunked) reach a fake origin with matching SHA-256, keep-alive after streamed and trailer-carrying bodies, a client-authentication `407` to a held-back `Expect` closing the connection and a late Content-Length or chunked body shaped like a request never reaching the origin, client `Expect: 100-continue` without deadlock, forwarded-header checks and a 100 MB upload whose px RSS growth stays below a fixed ceiling far under the body size. Stalled-uploader tests on both event loops (one client sends headers and part of a body, then stalls for 5 s; concurrent GETs and uploads through the same px worker, direct and via the fake NTLM proxy, must finish within 2 s each while the stalled one is still waiting, and then the stalled body arrives intact) a stalled upload through `--auth=NONE` (easy interface, where a paused upload is never resumed) that must still arrive intact, three sequential stalled uploads on one keep-alive connection (px reuses one `Curl` across them via `reset()`, each resume must reach its own transfer) and 60 parallel streamed uploads, Content-Length and chunked, each arriving with the exact SHA-256; the `RequestBody` unit tests read through the pause/`resume` protocol, plus unit tests of `handler.bind_upload_resume()` against a fake `Curl` that cover binding to the current `Curl.transfer_id`, falling back to the plain no-argument call when `transfer_id` is absent (pymcurl before 8.23.0.3), and a resume captured before the handle was reused for a later transfer becoming a no-op instead of reaching that later transfer or raising. These need pymcurl with `Curl.resume_upload`. Uploads through a fake NTLM proxy with unknown auth (first request succeeds, probe 407 before the body, client Expect, a proxy that ignores Expect gives a 503 naming the cause and the retry works, client `Connection: close` does not break NTLM) need NTLM in libcurl and pymcurl 8.23.0.3; they are skipped without `mcurl.REWIND_ERROR` unless `PX_REQUIRE_MCURL_FIX=1` is set (CI sets it) |
+| `test_stream_upload.py` | Streamed upload unit and subprocess tests: body formats, trailers, `Expect: 100-continue`, authentication retries, header stripping, integrity, memory bounds, stalled clients, connection reuse, and parallel uploads. Proxy retry tests require libcurl NTLM and pymcurl 8.23.0.3; `PX_REQUIRE_MCURL_FIX=1` makes a missing fix fail rather than skip. |
 | `test_ntlm_burst.py` | NTLM upstream regression tests — concurrent plain-HTTP handshakes and CONNECT tunnels through a fake proxy; the CONNECT burst drops its first Type 1 legs and verifies later tunnels are not latched as authentication failures on either event loop. The CONNECT cases need the px#268 fix in pymcurl 8.23.0.3 (`Curl.get_os_errno`) and fail on older mcurl. Until 8.23.0.3 is on PyPI and becomes the minimum, they are skipped when the installed mcurl lacks `Curl.get_os_errno`, unless `PX_REQUIRE_MCURL_FIX=1` is set: then they run and fail instead. CI sets it everywhere, so they cannot be skipped silently there (`docs/build.md`). The whole module is skipped when libcurl lacks NTLM support (the macOS pymcurl wheels); `PX_REQUIRE_MCURL_FIX=1` does not override that skip |
 | `test_network.py` | Network integration tests — `--quit`, `--listen`, `--hostonly`, `--gateway`, `--allow`, `--noproxy` |
 | `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
@@ -272,31 +272,11 @@ one named by `PX_EVENT_LOOP`, which CI sets so every job covers one loop):
   `Expect: 100-continue` receives exactly one `100 Continue` and its upload
   arrives intact, including known and unknown NTLM.
 
-Memory is measured with psutil: `RssSampler` sums the RSS of the Px process and
-all its worker processes every 20 ms, after waiting for startup allocations
-(such as the second worker's imports) to settle, and the 100 MB tests assert
-that growth stays under 40 MiB (80 MiB for two simultaneous 100 MB uploads) and
-the parallel test under 128 MiB (a quarter of the 480 MiB sent). The run summary prints a table of every
-measurement (`memory_report` fixture and summary hook in `tests/conftest.py`); Px streams one chunk per upload in
-flight, so a 100 MB upload grows RSS by 1-2 MiB. Buffering Px would grow by the
-body size.
-
-Measured on the lab (CPython 3.13, mcurl devel): a 100 MB upload grows Px's RSS
-by 0-3 MiB (the process sits at 48-54 MiB), two simultaneous 100 MB uploads
-through two workers by 2-4 MiB, and 60 parallel 8 MiB uploads by 55-85 MiB
-(about 1.3 MiB per upload in flight, the same as with 3 MiB bodies, so it
-scales with concurrency, not with bytes). Px 19daa5e with pymcurl 8.23.0.2 grew
-by about 200 MiB for every 100 MB upload, twice the body size, because it
-buffered the body.
-
-The same scenarios fail on that older Px (19daa5e with pymcurl 8.23.0.2, run
-with `PX_REQUIRE_MCURL_FIX=1` so they are not skipped): 344 of 376 fail with
-a 503 (curl error 65, "necessary data rewind was impossible"), an upload that
-hangs until the client gives up, or a chunked or rewound upload that reaches
-the origin with 0 bytes and still answers 200. The 32 that pass are Content-Length POST and
-PUT with `--auth=NTLM` or `--auth=NEGOTIATE`, where libcurl already knows the
-method and never sends a body before the handshake; they guard the streaming
-path against regressions rather than reproduce the failure.
+Memory is measured with psutil: `RssSampler` sums the RSS of Px and its worker
+processes every 20 ms after startup allocations settle. The 100 MB tests and
+parallel upload test enforce fixed RSS-growth limits, and the
+`memory_report` fixture prints each measurement. This verifies that memory
+scales with uploads in flight rather than request-body size.
 
 Lab details that these tests depend on: the origin answers `/echo` for GET,
 POST, PUT, PATCH and DELETE; the SSO Squid's second port (3129) disables
@@ -316,22 +296,24 @@ quick, while a requested lab cannot silently hide an infrastructure error.
 Select individual behaviours with pytest's normal `-k` option:
 
 ```bash
-# Build the mcurl devel wheel without modifying its checkout, then overlay it
+# Build an mcurl devel wheel without modifying its checkout, then overlay it
 # only in the scenario client.
-mkdir -p "$ORC_SCRATCH_DIR/mcurl-src" "$ORC_SCRATCH_DIR/mcurl-wheels"
-git -C /home/gt/code/mcurl archive devel | tar -x -C "$ORC_SCRATCH_DIR/mcurl-src"
-uv build --wheel "$ORC_SCRATCH_DIR/mcurl-src" --out-dir "$ORC_SCRATCH_DIR/mcurl-wheels"
+MCURL_SRC=/path/to/mcurl
+MCURL_WORKDIR="${TMPDIR:-/tmp}/px-mcurl"
+mkdir -p "$MCURL_WORKDIR/src" "$MCURL_WORKDIR/wheels"
+git -C "$MCURL_SRC" archive devel | tar -x -C "$MCURL_WORKDIR/src"
+uv build --wheel "$MCURL_WORKDIR/src" --out-dir "$MCURL_WORKDIR/wheels"
 
 # Start a unique lab and run only the px#268 matrix on asyncio.
 SCENARIO_INSTANCE=1 tests/scenarios/env/scenario-env.sh up
-SCENARIO_INSTANCE=1 MCURL_WHEELS="$ORC_SCRATCH_DIR/mcurl-wheels" \
+SCENARIO_INSTANCE=1 MCURL_WHEELS="$MCURL_WORKDIR/wheels" \
   PX_EVENT_LOOP=asyncio tests/scenarios/env/scenario-env.sh test \
   tests/scenarios -m scenario -k px268 -v
 SCENARIO_INSTANCE=1 tests/scenarios/env/scenario-env.sh down
 
 # Reuse a lab started separately and run the full suite on its default loop.
 tests/scenarios/env/scenario-env.sh up
-MCURL_WHEELS="$ORC_SCRATCH_DIR/mcurl-wheels" tests/scenarios/env/scenario-env.sh test
+MCURL_WHEELS="$MCURL_WORKDIR/wheels" tests/scenarios/env/scenario-env.sh test
 tests/scenarios/env/scenario-env.sh down
 ```
 
@@ -546,9 +528,9 @@ px. Check these before debugging a test:
   current directory and every parent directory. A `.env` in `$HOME` that sets
   `PX_NOPROXY` or `PX_THREADS` changes proxy routing and threading under the
   tests, and it breaks the auth-chain tests in particular. Run the suite from a
-  git worktree under `/tmp` or `$ORC_SCRATCH_DIR`, or make sure no `PX_` variables
+  git worktree under `/tmp`, or make sure no `PX_` variables
   are set in any parent `.env` and in the shell environment.
-- **Pin Python 3.14 when it matters.** CI and ORC verification run on 3.14
+- **Pin Python 3.14 when it matters.** CI runs on 3.14
   (`UV_PYTHON=3.14`). `uv` may otherwise pick a newer interpreter such as 3.15,
   which px does not support yet.
 - **Stop leftover px processes between runs.** A failed test can leave px
@@ -634,11 +616,9 @@ Why the split:
 - **macOS.** GitHub's macOS runners are expensive, slow and few, so macOS jobs
   queue behind each other. Both macOS jobs are full-only. `px/config.py` has
   darwin-only paths, so macOS regressions are caught by the weekly or release
-  run. The earlier 19-minute macOS jobs were traced to an interpreter DNS stall,
-  fixed by uv-managed CPython (see
-  [macOS-specific reasoning](#macos-specific-reasoning)). Those jobs have not
-  been re-measured, so macOS stays out of the fast set. If a minimal macOS job
-  takes a few minutes, add it to the `TESTS_FAST` matrix in the
+  run. macOS jobs use uv-managed CPython and a startup probe to avoid
+  interpreter DNS stalls. If a minimal macOS job takes a few minutes, add it
+  to the `TESTS_FAST` matrix in the
   `plan` step of `ci.yml` and update this list.
 - **Python versions.** px's Python code is the same on 3.10–3.14, so differences
   come from the interpreter and native wheels. Stable-ABI (abi3) wheels, such as
@@ -803,9 +783,8 @@ locally before pushing.
 macOS GitHub Actions runners are scarce and the chain and upstream proxy tests
 spawn multiple Px processes with real network authentication flows, so macOS
 uses a reduced test matrix controlled by the `PX_CI_MINIMAL` environment
-variable. The reduction is not what made macOS jobs take about 19 minutes;
-that was an interpreter-specific name-lookup stall, described under
-"macOS-specific reasoning" below.
+variable. macOS jobs use uv-managed CPython and loopback lookup safeguards to
+avoid runner-specific name-resolution stalls.
 
 When `PX_CI_MINIMAL=1` is set:
 
@@ -884,140 +863,13 @@ Everything else in the suite — including `test_network.py`'s process-spawning
 tests — runs in roughly a second or two per test once the avoidable waits
 below are fixed, so it stays in the fast selection.
 
-### Avoidable waits fixed
+## Platform-specific test reliability
 
-Profiling the suite with `pytest --durations=0` found tests that were slow
-only because of waits the test itself didn't need:
-
-- `test_pac.py`'s `dnsResolve` tests (`test_dns_resolve`,
-  `test_dns_resolve_bad_host`, `test_unresolvable_host_is_not_resolvable_or_in_net`)
-  performed real DNS lookups (including a deliberately-unresolvable
-  `*.invalid` name). `px.resolver.Resolver.lookup()` bounds a failed lookup to
-  `LOOKUP_TIMEOUT` (3s), so a slow or absent resolver — plausible on macOS
-  GitHub Actions runners, which route DNS through `mDNSResponder` and can be
-  slow to fail unqualified or unusual names — made each of these tests pay
-  up to 3 extra seconds for no benefit: the test only checks that `Pac`
-  plumbs failures through as `null`, which `tests/test_resolver.py` already
-  proves against a mocked resolver. They now monkeypatch
-  `resolver.socket.getaddrinfo` the same way, so they're instant and
-  deterministic on every platform instead of depending on real DNS behaviour
-  (including which family "localhost" resolves to first, which also differs
-  on macOS).
-- `test_network.py::TestAllow::test_allow_specific_subnet` starts Px with
-  `--gateway --allow=10.0.*.*` and tore it down with the normal `--quit`
-  flow. `--quit`'s target interface comes from `get_listen()` in
-  `px/config.py`, which picks the first local IP that matches `--allow` — but
-  no real test host has an IP in `10.0.0.0/8`, so that match never succeeds
-  and `--quit` was *guaranteed* to fail every run. The test tolerates that
-  (`quit_px(..., strict=False)`), but tolerating it still meant paying for 3
-  doomed `--quit` attempts (with 2s backoff) and then a 10s wait before
-  falling back to killing the process — about 17s of pure waiting for an
-  outcome that was never in doubt. The test only needs the process gone, so
-  teardown now terminates it directly instead of routing through a `--quit`
-  that can't work for this `--allow` value.
-- `test_network.py::TestQuit::test_quit_stops_px` also had a fixed `time.sleep(1)`
-  "to let Px finish starting" before issuing `--quit`, even though the
-  existing 3-attempt retry loop (with a 2s backoff) already tolerates an
-  early `--quit` failing. It also waited a fixed `time.sleep(0.5)` for the
-  port to free up after the process exited. Both are now a bounded poll
-  (removed, and a `is_port_free()` poll up to 5s) instead of a fixed delay.
-
-### macOS-specific reasoning
-
-Run 40139662524 (build.yml dispatch on devel at a72ce5d) gave real
-`--durations` data for the macOS jobs, all on `macos-26-arm64`:
-
-| Job | Before |
-|---|---|
-| ci-full `test macos-latest py3.10` / `py3.14` | 19m34s each (1175.79s of pytest) |
-| `test-binary mac-arm64` py311, py312, py313, py314 | 19m31s each (1171.25s, 1170.93s, 1170.61s, 1171.24s of pytest) |
-| `test-binary mac-arm64` py310 | 15.04s of pytest (20.71s tox) |
-
-The same selection takes about 13s on Linux and took 15s for py310. In the
-slow runs the unit tests finished in seconds, then every test that starts px
-(or imports it and calls `parse_config()`) took 35.3-35.5s, and tests that
-start and quit px took 72s (two stalls): `test_proxy`, `test_proxy_auth`,
-`test_multiprocessing_workers*`, the `test_config.py::TestEventLoopSelection`
-cases and all six `test_auth_retry.py` tests. A first-use `setup` of 35.0s on
-the stdlib test servers (`http.server`'s fake upstream and pytest-httpbin)
-pointed at a name lookup: those servers call `socket.getfqdn()` on the address
-they bind.
-
-The cause is the macOS 15+ runner image (`macos-latest` is `macos-26`), not
-px or the test selection: since macOS 15 a process without the Local Network
-permission pauses for about 35s on reverse lookups such as
-`socket.getfqdn("127.0.0.1")` (actions/runner-images#10924,
-actions/setup-python#1223). Pythons from setup-python and the image's
-Homebrew/toolcache installs are affected; uv-managed (python-build-standalone)
-CPython is not. That is also why only py310 was fast in `test-binary`: no
-system Python 3.10 exists on the image, so tox-uv downloaded a uv-managed one,
-while py311-py314 used the system interpreters. In ci-full, py3.10 comes from
-setup-python and was slow like py3.14.
-
-Fixes:
-
-- macOS test jobs use uv-managed CPython (`managed-python` input of
-  `.github/actions/setup-python-env`, which also sets
-  `UV_PYTHON_PREFERENCE=only-managed` for tox-uv; `build.sh` `test_binary`
-  exports the same on macOS). `tests/test_build_python.py` checks that the
-  workflows keep passing the input.
-- `tests/conftest.py` makes `socket.getfqdn()` return loopback names
-  unchanged, so the fake upstream and pytest-httpbin no longer reverse-resolve
-  the address they bind on any interpreter. This removes only a lookup the
-  tests never needed.
-- A session-start probe (`helpers.probe_startup`) runs only on macOS CI. It
-  times `socket.gethostbyaddr('127.0.0.1')`, `urllib.request.getproxies()` and
-  px's `parse_config()` in fresh interpreters, prints the timings in the
-  pytest header (`px startup probe: ...`) and exits with a message if any
-  takes over 10s. A regression of the interpreter choice now fails in under a
-  minute instead of after 19 minutes of 35s waits, and the header shows which
-  step stalls. The exact lookup inside a px start that waits was not
-  identified without a macOS host; the probe's `parse_config` step and
-  `tests/test_startup.py::test_px_start_and_quit_are_bounded` (px listens and
-  quits within 15s) are the diagnostics for it.
-
-Expected after: macOS wheel environments in the minutes-or-less range like
-py310's 15s and Linux's ~1 minute, instead of 19m31s each.
-
----
-
-## Windows `px_upstream` teardown: "Unable to --quit Px"
-
-`build.yml` dry run 41056925800 attempt 2 (`test-binary windows-amd64`,
-py310) hit `AssertionError: Failed: Unable to --quit Px: 3` tearing down the
-session-scoped `px_upstream` fixture (`--client-auth=ANY --workers=1
---client-nosspi`), after `test_upload_through_ntlm_proxy_first_request`. The
-`--quit` retry logged a `socket.create_connection` timeout twice ("Px not
-responding"), a curl send failure ("error 55"), and once the request got
-through, the port was still accepting connections right after ("Px still
-running") — roughly 17 of the 22.95s teardown was spent unable to even open a
-TCP connection to Px's listening port, not failing a single fast RPC.
-
-`_handle_quit()` calls `os._exit()` as soon as it reaches `/PxQuit`, without
-waiting on any other thread, which rules out a leaked worker thread blocking
-quit directly. A `socket.create_connection` *timeout* (rather than an
-immediate refusal, which is what a dead process gives) on loopback means the
-process was alive but its single asyncio event loop was not running its
-accept loop for seconds at a time — consistent with something blocking that
-loop's one thread synchronously. The one synchronous, non-offloaded blocking
-call on the exact code path this test exercises is `get_client_password()`'s
-`keyring.get_password()`, invoked from pyspnego's NTLM credential callback
-(`_get_credential`, `px/handler.py`) directly inside `_do_client_auth()` —
-unlike `mcurl.do` and DNS lookups, which already run via `asyncio.to_thread`.
-`px_upstream` never passes `--client-username`, so every NTLM/Digest/Basic
-handshake against it re-reads the keyring rather than using `PX_CLIENT_PASSWORD`.
-
-Measured locally (Linux, `keyrings.alt.file.PlaintextKeyring`, the same
-backend CI's `PX_KEYRING_PLAINTEXT=1` selects), a single `keyring.get_password()`
-call takes ~0.27ms, far too fast to reproduce a multi-second stall by itself;
-reproducing the stall needs the Windows runner's shared-file keyring under the
-rest of the job's parallel load, which was not available here. Caching of `get_client_password()` (see `docs/architecture.md`) keeps this call off the hot path after the first handshake. `quit_px()` (`tests/helpers.py`) also takes an optional
-`buffer` — `px_upstream` and `px_chain` now pass their Px's own log buffer, so
-a future `--quit` failure prints what Px itself was doing, instead of only the
-quit client's output. The `ConnectionResetError` in the fake origin server's
-teardown log is Windows resetting the Upstream process's open connections to
-it when the process is killed; it is a side effect of the stalled teardown,
-not a separate defect.
+Tests avoid external DNS and fixed startup delays so results are deterministic.
+macOS CI uses uv-managed CPython, leaves loopback names unchanged in
+`getfqdn()`, and runs a startup probe to detect slow runner configuration.
+On Windows, client-password lookups are cached after the initial authentication
+attempt; Px log buffers are included when fixture shutdown fails.
 
 ---
 

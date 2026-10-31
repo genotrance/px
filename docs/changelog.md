@@ -6,30 +6,28 @@
 
 ### Improvements
 - `--authretry` now defaults to `600` seconds so a blocked upstream proxy recovers without a restart; use `--authretry=0` for the old behaviour.
-- Release binaries now bundle CPython 3.14 (px#280).
+- Requires pymcurl 8.23.0.3 or newer.
+- Release binaries and the Docker image now use CPython 3.14 (px#280).
 
 ### Bug fixes
-- `px --test` paces httpbin body-echo checks and reports an unavailable rate-limited target separately from a Px failure (#268).
+- `px --test` paces body-echo checks and reports rate-limited targets separately from Px failures.
 - Parallel uploads no longer fail when many new connections resolve the same upstream proxy concurrently.
 - Upstream proxy DNS seeding now expires normally and retains IPv4/IPv6 failover addresses.
 - Clients using `Expect: 100-continue` now receive one `100 Continue` per upload instead of a duplicate relayed from the upstream proxy.
-- Plain-HTTP POST/PUT/PATCH uploads (Content-Length and chunked) now stream through NTLM/Negotiate proxies on the first request instead of failing with 503; request bodies are no longer buffered in memory; requires pymcurl 8.23.0.3.
-- A slow or stalled uploading client no longer delays other requests handled by the same worker; requires a pymcurl with upload pause/resume.
+- Plain-HTTP uploads through authenticated proxies no longer fail or buffer request bodies (#199).
+- A slow or stalled upload no longer delays other requests handled by the same worker.
 - A client `Connection: close` (and other hop-by-hop headers) is no longer forwarded upstream, which broke NTLM through proxies that honour it.
-- NTLM/Negotiate upstream proxies are no longer blocked after interrupted CONNECT handshakes; requires pymcurl 8.23.0.3 (px#268).
+- NTLM/Negotiate upstream proxies no longer block after interrupted CONNECT handshakes (px#268).
 - A request body sent late after a client-authentication `407` to `Expect: 100-continue` is no longer parsed as the next request.
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
-- `px --test`/`--test-auth` now fail a request whose final response is `401`/`407` instead of reporting it as passed.
-- `--test-auth` with Negotiate and a single explicit `--proxy` now addresses Px by the upstream proxy's hostname, so the Kerberos SPN libcurl requests matches the upstream proxy instead of Px's own listen address.
-- Downstream NTLM/Digest/Basic client authentication no longer re-reads the password store on every handshake, avoiding event-loop stalls under a slow or contended keyring backend. A rejected cached password is re-read from the store on the next attempt.
+- `px --test`/`--test-auth` now fail requests ending with `401`/`407` (px#282).
+- `--test-auth` with Negotiate and one explicit proxy now uses the upstream proxy hostname.
+- Downstream NTLM/Digest/Basic authentication no longer stalls on repeated password lookups.
+- `px --test` output is retained when piped.
 
 ### Internal
-- Scenario lab installs all pymcurl devel wheels inside the client; `px --test` output is no longer lost when piped.
-- Corporate-proxy scenarios now run pytest inside the private Docker lab network.
-- Real-proxy corporate scenario suite (Docker lab) added to CI and `./build.sh release_check`.
-- Docker lab scenarios for plain-HTTP POST/PUT/PATCH uploads through NTLM, Kerberos and Basic proxies (keep-alive and connection-close), including 100 MB, chunked, 60 parallel and `--workers=2` cases with Px memory asserted.
-- Release workflow simplified: `build.yml` always builds and publishes; `auto-release.yml` dispatches it after fast-forwarding `master`.
-- Docker lab gains a Negotiate-only Squid port for multi-leg SPNEGO (NTLM-in-Negotiate); `scenario-windows` now also drives it over real SSPI with upload checks, and `scenario-linux` adds a `gss-ntlmssp` reproduction documenting a Squid-side limitation.
+- The corporate-proxy Docker scenario suite runs in CI and `./build.sh release_check`.
+- Release publishing is split between `build.yml` (GitHub release/PyPI) and `publish.yml` (Docker/winget).
 
 ## v0.13.0 — 2026-10-24
 

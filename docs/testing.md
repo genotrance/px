@@ -29,6 +29,7 @@ Tests live in `tests/`.
 | `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
+| `test_scenario_env.py` | Guards the `MCURL_WHEELS` candidate-wheel wiring in `scenario-env.sh` used by mcurl's release gate |
 | `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of probe reporting, final-status (401/407) failure, paced httpbin body echoes, bounded 429 retries and separate rate-limit exits, and Negotiate SPN addressing (`_negotiate_test_target`) |
 | `test_resolver.py` | Resolver and upstream-proxy DNS seeding tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IPv4/IPv6 literals and results, temporary libcurl entries, DNS-free `myIpAddress` discovery |
 | `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
@@ -52,7 +53,7 @@ network-resident client with:
 ```bash
 tests/scenarios/env/scenario-env.sh up
 tests/scenarios/env/scenario-env.sh smoke
-tests/scenarios/env/scenario-env.sh test
+MCURL_WHEELS=/path/to/candidate-wheels tests/scenarios/env/scenario-env.sh test
 tests/scenarios/env/scenario-env.sh down
 ```
 
@@ -70,7 +71,15 @@ removes the project containers, network, named volume, CA, and generated env
 file. Use `status`, `logs [service]`, or `env` to inspect the lab without
 changing it.
 
-`test` installs the locked dependencies (pymcurl 8.23.0.3 or later from PyPI) in the client and runs pytest, so the streamed-upload coverage always runs.
+`test` installs the locked dependencies (pymcurl from PyPI) in the client and runs pytest, so the streamed-upload coverage always runs.
+
+`MCURL_WHEELS` is the downstream release-candidate interface used by mcurl's
+`build.yml` release gate, which supplies one selected candidate wheel. When set
+to a directory containing `pymcurl-*.whl`, the directory is copied into the
+client at the same path and, after `uv sync`, exactly that wheel's version is
+reinstalled with `--no-index`, so the gate tests the candidate and not PyPI.
+It fails if the directory or wheel is missing. Unset, nothing changes.
+`tests/test_scenario_env.py` guards this wiring.
 
 `test_parallel_uploads` also guards against a DNS-resolution burst at an
 upstream proxy. The GitHub 2-vCPU failure reported libcurl's `Resolving timed

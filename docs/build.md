@@ -129,7 +129,14 @@ Release order:
    `MCURL_WHEELS`/`PX_REQUIRE_MCURL_FIX` handling in `build.sh`, the
    `PX_REQUIRE_MCURL_FIX` tox `passenv` lists in `pyproject.toml`, the
    `skipif` checks in `tests/test_ntlm_burst.py` and
-   `tests/test_stream_upload.py`, and this section.
+   `tests/test_stream_upload.py`, the `MCURL_WHEELS` validation and wiring,
+   wheel overlay and `check.py` call in `tests/scenarios/env/scenario-env.sh`,
+   the `needs_mcurl_streaming` skipif in
+   `tests/scenarios/test_corporate_proxy.py`, the pymcurl compat fallbacks in
+   `px/handler.py` (the `hasattr(curl, "transfer_id")` check, the
+   `hasattr(self.curl, "resume_upload")` check, and the
+   `REWIND_ERROR`/libcurl-text fallback in `_is_rewind_error` — keep the
+   easy-interface blocking path itself), and this section.
 3. Release px 0.13.1.
 
 ## GitHub Actions

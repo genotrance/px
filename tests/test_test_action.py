@@ -85,7 +85,17 @@ class FakeWproxy:
 
 
 class FakeLibcurl:
+    # Mirrors libcurl's real CURLAUTH_* bitmask values so mcurl.getauth()'s
+    # NO/SAFENO/ONLY prefix arithmetic behaves the same under test as in production.
     CURLOPT_RESOLVE = "CURLOPT_RESOLVE"
+    CURLAUTH_NONE = 0
+    CURLAUTH_BASIC = 1
+    CURLAUTH_DIGEST = 2
+    CURLAUTH_NEGOTIATE = 4
+    CURLAUTH_NTLM = 8
+    CURLAUTH_ANY = 4294967023
+    CURLAUTH_ANYSAFE = 4294967022
+    CURLAUTH_ONLY = 2147483648
 
     def __init__(self):
         self.appended = []
@@ -386,7 +396,22 @@ def test_test_auth_without_single_proxy_warns_and_keeps_listen(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("auth", "rewritten"), [("NEGOTIATE", True), ("ANY", True), ("ANYSAFE", True), ("NTLM", False), ("BASIC", False)]
+    ("auth", "rewritten"),
+    [
+        ("NEGOTIATE", True),
+        ("ANY", True),
+        ("ANYSAFE", True),
+        ("ONLYNEGOTIATE", True),
+        ("NONTLM", True),
+        ("SAFENONTLM", True),
+        ("NTLM", False),
+        ("BASIC", False),
+        ("DIGEST", False),
+        ("NONE", False),
+        ("NONEGOTIATE", False),
+        ("SAFENONEGOTIATE", False),
+        ("ONLYNTLM", False),
+    ],
 )
 def test_test_auth_rewrite_and_warning_only_for_negotiate(monkeypatch, auth, rewritten):
     output = []

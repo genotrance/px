@@ -541,6 +541,23 @@ dependencies and compiles Nuitka binaries, so it needs network access and
 takes a while. The aarch64, macOS and Windows jobs are not covered and still
 rely on the real workflow.
 
+Every container that mounts a tree (`build_local` and `release_check`) runs as
+the host user (`--user "$(id -u):$(id -g)"`), never root, with `HOME` and the
+uv, pip, XDG, Nuitka and ccache caches under `/tmp` inside the container, so
+no root-owned file ever lands in a checkout or `RELEASE_CHECK_DIR` where it
+could not be deleted. Steps that need root (`install_alpine_deps`,
+`install_upx`, `setup_manylinux`, `install_test_deps`) run once in a derived
+image made by `docker_image_with` (a `docker commit` of a root container with
+nothing writable mounted, cached per `build.sh` content under the tag
+`px-build:*`; remove stale ones with `docker rmi`) and never write to the mount; they skip themselves when not root,
+while the GitHub Actions containers still run as root and execute them as
+before. The `test-binary` container keeps `--privileged` (as `build.yml`), which
+without root grants no capabilities but disables the seccomp profile.
+`check_no_root_files` runs after every container stage and, for
+`release_check`, over `RELEASE_CHECK_DIR` and the checkout at the end, failing
+with the list of offending files (skipped when the host user is root). Delete
+root-owned leftovers from older runs once, by hand, if it reports any.
+
 ## `build.sh`
 
 Shell function library sourced by the `build.yml` workflow. It consolidates
@@ -568,8 +585,11 @@ stays concise. Functions include:
   artifacts.
 - `build_local` — end-to-end local build and test using Docker containers.
   Accepts `musl` or `glibc` as argument. Builds the sdist, wheels, binary, and
-  runs the full tox test suite in the appropriate container images. Invoked via
-  `make test-musl` or `make test-glibc`.
+  runs the full tox test suite in the appropriate container images, as the
+  host user (see above). Invoked via `make test-musl` or `make test-glibc`.
+- `docker_run_user`, `docker_image_with`, `check_no_root_files` — run a
+  container as the host user, build the derived image with the root-only
+  steps, and fail on root-owned files in a mounted tree.
 
 ## `tools.py`
 

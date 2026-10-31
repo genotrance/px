@@ -22,6 +22,7 @@ class ImmediateThread:
 class FakeCurl:
     results: ClassVar[list[int]] = []
     codes: ClassVar[list[int]] = []
+    headers: ClassVar[list[str]] = []
     calls: ClassVar[int] = 0
     instances: ClassVar[list["FakeCurl"]] = []
 
@@ -31,6 +32,7 @@ class FakeCurl:
         self.data = ""
         self.ret = self.results.pop(0)
         self.code = type(self).codes.pop(0) if type(self).codes else 200
+        self.headers = type(self).headers.pop(0) if type(self).headers else ""
         self.proxy_host = None
         self.proxy_port = None
         self.setopt_calls = []
@@ -66,7 +68,7 @@ class FakeCurl:
         return self.url + self.data
 
     def get_headers(self):
-        return ""
+        return self.headers
 
     def get_response_code(self):
         return self.code
@@ -117,6 +119,7 @@ def test_all_test_reports_each_result(monkeypatch, results, exit_code, passed):
     output = []
     FakeCurl.results = results
     FakeCurl.codes = []
+    FakeCurl.headers = []
     FakeCurl.calls = 0
     FakeCurl.instances = []
 
@@ -126,6 +129,7 @@ def test_all_test_reports_each_result(monkeypatch, results, exit_code, passed):
     monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
     monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
     monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main, "_TEST_BODY_ECHO_INTERVAL", 0)
     monkeypatch.setattr(main, "pprint", output.append)
     monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
 
@@ -137,6 +141,7 @@ def test_all_test_reports_each_result(monkeypatch, results, exit_code, passed):
     assert output.count("Passed") == passed
     if exit_code == config.ERROR_TEST:
         assert "Failed with error 1\ntest failure" in output
+        assert output[-1] == "Summary: 4 passed, 1 failed, 0 rate limited by test target"
 
 
 @pytest.mark.parametrize(
@@ -147,6 +152,7 @@ def test_all_test_fails_on_auth_status(monkeypatch, codes, exit_code, passed):
     output = []
     FakeCurl.results = [0] * len(codes)
     FakeCurl.codes = list(codes)
+    FakeCurl.headers = []
     FakeCurl.calls = 0
     FakeCurl.instances = []
 
@@ -156,6 +162,7 @@ def test_all_test_fails_on_auth_status(monkeypatch, codes, exit_code, passed):
     monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
     monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
     monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main, "_TEST_BODY_ECHO_INTERVAL", 0)
     monkeypatch.setattr(main, "pprint", output.append)
     monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
 
@@ -173,6 +180,7 @@ def test_single_url_test_fails_on_407(monkeypatch):
     output = []
     FakeCurl.results = [0]
     FakeCurl.codes = [407]
+    FakeCurl.headers = []
     FakeCurl.calls = 0
     FakeCurl.instances = []
 
@@ -191,6 +199,93 @@ def test_single_url_test_fails_on_407(monkeypatch):
     assert exc_info.value.code == config.ERROR_TEST
     assert "Passed" not in output
     assert any("status 407" in line for line in output)
+
+
+def test_all_test_paces_body_echoes(monkeypatch):
+    output = []
+    sleeps = []
+    FakeCurl.results = [0] * 5
+    FakeCurl.codes = []
+    FakeCurl.headers = []
+    FakeCurl.calls = 0
+    FakeCurl.instances = []
+
+    monkeypatch.setattr(main.config, "get_listen", lambda: "127.0.0.1")
+    monkeypatch.setattr(main.STATE, "config", FakeConfig())
+    monkeypatch.setattr(main.socket, "create_connection", lambda *_args: None)
+    monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
+    monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
+    monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(main.time, "sleep", sleeps.append)
+    monkeypatch.setattr(main, "pprint", output.append)
+    monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main.test("all:http://example.test/")
+
+    assert exc_info.value.code == config.ERROR_SUCCESS
+    assert [curl.method for curl in FakeCurl.instances] == ["GET", "DELETE", "POST", "PUT", "PATCH"]
+    assert sleeps == [main._TEST_BODY_ECHO_INTERVAL, main._TEST_BODY_ECHO_INTERVAL]
+    assert output[-1] == "Summary: 5 passed, 0 failed, 0 rate limited by test target"
+
+
+def test_test_retries_rate_limited_target_then_passes(monkeypatch):
+    output = []
+    sleeps = []
+    FakeCurl.results = [0, 0]
+    FakeCurl.codes = [429, 200]
+    FakeCurl.headers = ["Retry-After: 1\r\n", ""]
+    FakeCurl.calls = 0
+    FakeCurl.instances = []
+
+    monkeypatch.setattr(main.config, "get_listen", lambda: "127.0.0.1")
+    monkeypatch.setattr(main.STATE, "config", FakeConfig())
+    monkeypatch.setattr(main.socket, "create_connection", lambda *_args: None)
+    monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
+    monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
+    monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main.time, "sleep", sleeps.append)
+    monkeypatch.setattr(main, "pprint", output.append)
+    monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main.test("http://example.test/")
+
+    assert exc_info.value.code == config.ERROR_SUCCESS
+    assert FakeCurl.calls == 2
+    assert sleeps == [1.0]
+    assert "Rate limited by test target; retrying in 1 seconds" in output
+    assert output[-1] == "Passed"
+
+
+def test_test_reports_persistent_rate_limit_separately(monkeypatch):
+    output = []
+    sleeps = []
+    FakeCurl.results = [0] * 7
+    FakeCurl.codes = [200, 200, 429, 429, 429, 200, 200]
+    FakeCurl.headers = [""] * 7
+    FakeCurl.calls = 0
+    FakeCurl.instances = []
+
+    monkeypatch.setattr(main.config, "get_listen", lambda: "127.0.0.1")
+    monkeypatch.setattr(main.STATE, "config", FakeConfig())
+    monkeypatch.setattr(main.socket, "create_connection", lambda *_args: None)
+    monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
+    monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
+    monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main, "_TEST_BODY_ECHO_INTERVAL", 0)
+    monkeypatch.setattr(main.time, "sleep", sleeps.append)
+    monkeypatch.setattr(main, "pprint", output.append)
+    monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main.test("all:http://example.test/")
+
+    assert exc_info.value.code == config.ERROR_TEST_RATE_LIMIT
+    assert FakeCurl.calls == 7
+    assert sleeps == [0.5, 1.0]
+    assert output[-1] == "Summary: 4 passed, 0 failed, 1 rate limited by test target"
 
 
 ##
@@ -226,6 +321,7 @@ def test_test_auth_negotiate_single_proxy_uses_upstream_host_and_resolve(monkeyp
     output = []
     FakeCurl.results = [0]
     FakeCurl.codes = [200]
+    FakeCurl.headers = []
     FakeCurl.calls = 0
     FakeCurl.instances = []
     fake_libcurl = FakeLibcurl()
@@ -261,6 +357,7 @@ def test_test_auth_without_single_proxy_warns_and_keeps_listen(monkeypatch):
     output = []
     FakeCurl.results = [0]
     FakeCurl.codes = [200]
+    FakeCurl.headers = []
     FakeCurl.calls = 0
     FakeCurl.instances = []
 

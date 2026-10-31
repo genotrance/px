@@ -77,10 +77,17 @@ restore automatic winloop or uvloop selection.
 
 `px --test` exercises GET, POST, PUT, DELETE, and PATCH requests against both
 HTTP and HTTPS httpbin endpoints, and prints the request, response headers,
-response length, and `Passed` for every successful check. A request whose
-final response is `401` or `407`, or whose body does not match what was
-expected, fails the check instead of being reported as a pass. Px completes
-every request before returning a non-zero exit code if any fail. Use
+response length, and `Passed` for every successful check. GET and DELETE checks
+run concurrently; POST, PUT, and PATCH checks are paced to stay below
+httpbin's body-echo rate limit. A `429` is retried with a bounded backoff,
+honouring `Retry-After` when supplied. A target still returning `429` is
+reported as `rate limited by test target`, separately from Px failures.
+
+A request whose final response is `401` or `407`, or whose body does not match
+what was expected, fails the check instead of being reported as a pass. Px
+completes every request and prints a passed/failed/rate-limited summary. It
+exits `4` when any check is a real Px failure, `8` when one or more checks are
+rate-limited but none fail, and `0` only when every check passes. Use
 `--test=URL` to print the same result for one configured endpoint instead.
 
 `--test-auth` has the test client present the configured `--auth` credentials

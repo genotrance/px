@@ -30,7 +30,8 @@ PxErrors = int
     ERROR_PORTINUSE,  # 5
     ERROR_INSTALL,  # 6
     ERROR_UNKNOWN,  # 7
-) = range(8)
+    ERROR_TEST_RATE_LIMIT,  # 8
+) = range(9)
 
 try:
     import mcurl

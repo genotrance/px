@@ -9,6 +9,7 @@
 - Release binaries now bundle CPython 3.14 (px#280).
 
 ### Bug fixes
+- `px --test` paces httpbin body-echo checks and reports an unavailable rate-limited target separately from a Px failure (#268).
 - Parallel uploads no longer fail when many new connections resolve the same upstream proxy concurrently.
 - Upstream proxy DNS seeding now expires normally and retains IPv4/IPv6 failover addresses.
 - Clients using `Expect: 100-continue` now receive one `100 Continue` per upload instead of a duplicate relayed from the upstream proxy.

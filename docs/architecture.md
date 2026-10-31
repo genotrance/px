@@ -79,7 +79,7 @@ socket sharing or duplication between processes.
 
 | File | Responsibility |
 |------|----------------|
-| `px/main.py` | Entry point, multiprocessing, async server setup, `--test` logic |
+| `px/main.py` | Entry point, multiprocessing, async server setup, `--test` logic (including paced/retried httpbin body echoes and separate rate-limit results) |
 | `px/handler.py` | `ConnectionHandler` — h11 HTTP parsing, request handling, client auth, curl integration, CONNECT tunnel relay, spnego monkey-patching |
 | `px/config.py` | `State` singleton, CLI/env/INI/dotenv parsing, proxy reload, `quit`/`restart` actions |
 | `px/wproxy.py` | `Wproxy` — proxy discovery from config, environment, Windows Internet Options, PAC |

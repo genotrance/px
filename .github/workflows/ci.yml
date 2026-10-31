@@ -335,6 +335,19 @@ jobs:
     if: needs.plan.outputs.full == 'true'
     runs-on: windows-latest
     name: scenario windows NTLM and SSPI Negotiate
+    # A healthy run finishes in under 5 minutes. actions/runner-images#14938
+    # is an open, unfixed GitHub infra bug where the runner's worker process
+    # itself freezes while provisioning WSL2: it stops streaming logs and
+    # stops honouring step-level timeout-minutes, so nothing running inside
+    # the job can detect or log the hang. Without any job timeout, GitHub's
+    # own heartbeat-loss detection is the only thing that eventually kills
+    # such a job, as "The hosted runner lost communication with the server"
+    # after about 45 minutes with no earlier signal at all. A job-level
+    # timeout-minutes is still enforced by GitHub's orchestrator even when
+    # the runner itself has stopped cooperating, so this explicit, much
+    # shorter deadline tears a frozen runner down in minutes instead of
+    # exhausting the whole job lifetime.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -343,7 +356,22 @@ jobs:
         with:
           python-version: "3.14"
 
+      # Printed before WSL2 setup (the step most likely to freeze the runner)
+      # so this diagnostic context survives in the job log even if that step
+      # produces none: see actions/runner-images#14938.
+      - name: Log the runner image before WSL2 setup
+        shell: pwsh
+        run: |
+          Write-Host "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion"
+          systeminfo | Select-String "^OS Version"
+
       - name: Set up WSL2
+        # Defense in depth against ordinary hangs (for example a stalled
+        # distribution or kernel download): this fires only while the runner
+        # is still responsive. It does not fire during the
+        # actions/runner-images#14938 runner freeze; the job timeout above is
+        # the backstop for that case.
+        timeout-minutes: 5
         uses: Vampire/setup-wsl@v5
         with:
           distribution: Ubuntu-24.04

@@ -406,6 +406,7 @@ def test_binary_builds_install_pymcurl_only_from_a_fresh_pypi_download():
     assert body.index("smoke_binary") < body.index("--smoke-request")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="build.sh is a POSIX shell script")
 def test_pymcurl_minimum_is_read_from_pyproject():
     out = subprocess.run(
         ["bash", "-c", ". ./build.sh && echo $PYMCURL_MIN"],  # noqa: S607
@@ -451,6 +452,11 @@ def test_smoke_request_fails_for_a_binary_that_cannot_serve(tmp_path):
 
     with pytest.raises(SystemExit):
         tools.smoke_request(str(fake))
+
+
+def test_smoke_request_fails_for_a_binary_that_cannot_start(tmp_path):
+    with pytest.raises(SystemExit):
+        tools.smoke_request(str(tmp_path / "missing-px"))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="needs a shell launcher")

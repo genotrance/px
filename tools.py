@@ -398,13 +398,14 @@ def smoke_request(pxbin):
         ini = os.path.join(tmp, "px.ini")
         open(ini, "a").close()
         log = open(os.path.join(tmp, "px.log"), "w+")  # noqa: SIM115
-        proc = subprocess.Popen(
-            [pxbin, f"--port={port}", "--listen=127.0.0.1", "--noproxy=", f"--config={ini}", "--verbose"],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            cwd=tmp,
-        )
+        proc = None
         try:
+            proc = subprocess.Popen(
+                [pxbin, f"--port={port}", "--listen=127.0.0.1", "--noproxy=", f"--config={ini}", "--verbose"],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                cwd=tmp,
+            )
             # Talk to px directly with an absolute URI: urllib would skip the proxy for no_proxy hosts
             url = f"http://127.0.0.1:{server.server_address[1]}/"
 
@@ -435,11 +436,13 @@ def smoke_request(pxbin):
         except Exception as exc:
             print(f"ERROR: smoke request through {pxbin} failed: {exc!r}")
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
             if not ok:
                 log.seek(0)
                 print(log.read()[-3000:])

@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import functools
 import os
 import socket
 import sys
@@ -382,6 +383,23 @@ class RequestBody:
             else:
                 self._receive(await self._recv())
         return self.complete
+
+
+def bind_upload_resume(curl, body_reader):
+    """Bind body_reader.resume to curl's thread-safe upload resume, scoped to curl's current transfer.
+
+    curl.reset() reuses one Curl across keep-alive requests. Since pymcurl 8.23.0.3 (mcurl commit
+    3318186), resume_upload() takes the transfer's transfer_id and a call without it on an
+    already-reused, running handle raises ValueError instead of guessing which transfer it meant;
+    capturing curl.transfer_id here, after reset()/configuration and before the transfer starts,
+    names the right transfer so a resume queued late for an earlier one is recognised as stale
+    (returns False) instead of raising or reaching this transfer. Older pymcurl that has
+    resume_upload but not transfer_id never raises: keep calling it with no argument.
+    """
+    if hasattr(curl, "transfer_id"):
+        body_reader.resume = functools.partial(curl.resume_upload, curl.transfer_id)
+    else:
+        body_reader.resume = curl.resume_upload
 
 
 ###
@@ -1135,18 +1153,12 @@ class ConnectionHandler:
         curl_headers = self._upstream_headers(headers, strip_proxy_headers, strip_proxy_auth)
 
         # Plain HTTP: bridge request body and response
+        body_reader = None
         if not self.curl.is_connect:
             loop = asyncio.get_event_loop()
             body_reader = body if body is not None else RequestBody()
             response_writer = BridgeWriter(loop, self.transport)
             header_writer = HeaderBridgeWriter(loop, self.transport)
-            if hasattr(self.curl, "resume_upload") and not self.curl.is_easy:
-                body_reader.resume = self.curl.resume_upload
-            else:
-                # The easy interface (--auth=NONE) has no loop to apply a resume, and pymcurl without
-                # pause/resume cannot pause: block mcurl's thread instead (an easy transfer owns its
-                # thread, so a stalled client delays nobody else)
-                body_reader.blocking = True
             self.curl.bridge(body_reader, response_writer, header_writer)
 
             # Support NTLM auth from http client in auth=NONE mode with upstream proxy
@@ -1166,6 +1178,15 @@ class ConnectionHandler:
 
         # Set user agent if configured
         self.curl.set_useragent(STATE.useragent)
+
+        if body_reader is not None:
+            if hasattr(self.curl, "resume_upload") and not self.curl.is_easy:
+                bind_upload_resume(self.curl, body_reader)
+            else:
+                # The easy interface (--auth=NONE) has no loop to apply a resume, and pymcurl without
+                # pause/resume cannot pause: block mcurl's thread instead (an easy transfer owns its
+                # thread, so a stalled client delays nobody else)
+                body_reader.blocking = True
 
         # Execute via thread pool (mcurl.do is blocking)
         try:

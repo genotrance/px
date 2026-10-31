@@ -563,6 +563,48 @@ def test_reader_without_body_is_complete():
     assert handler.RequestBody().read() == b""
 
 
+class FakeCurl:
+    """Mimics mcurl.Curl's resume_upload()/transfer_id contract (mcurl commit 3318186, pymcurl
+    8.23.0.3) without any real transfer: transfer_id is absent on a stand-in for older pymcurl."""
+
+    def __init__(self, has_transfer_id=True):
+        if has_transfer_id:
+            self.transfer_id = 0
+        self.calls = []
+
+    def resume_upload(self, transfer_id=None):
+        self.calls.append(transfer_id)
+        if not hasattr(self, "transfer_id"):
+            return True
+        if transfer_id is None and self.transfer_id != 0:
+            raise ValueError("resume() of a reused Curl needs its transfer_id")  # noqa: TRY003
+        return transfer_id is None or transfer_id == self.transfer_id
+
+
+def test_bind_upload_resume_scopes_to_current_transfer():
+    "A resume bound before curl is reused for a later transfer is stale and becomes a no-op, not an error"
+    curl = FakeCurl()
+    body = handler.RequestBody()
+    handler.bind_upload_resume(curl, body)
+    assert body.resume() is True and curl.calls == [0]
+
+    stale_resume = body.resume  # captured the transfer_id of the handle's first transfer (0)
+    curl.transfer_id = 1  # curl.reset() reused the handle for a second transfer
+    handler.bind_upload_resume(curl, body)
+    assert body.resume() is True and curl.calls[-1] == 1
+
+    assert stale_resume() is False  # discarded, not raised, and does not touch transfer 1
+    assert curl.calls[-1] == 0
+
+
+def test_bind_upload_resume_without_transfer_id_uses_plain_call():
+    "pymcurl with resume_upload but no transfer_id (pre-8.23.0.3): fall back to the no-argument call"
+    curl = FakeCurl(has_transfer_id=False)
+    body = handler.RequestBody()
+    handler.bind_upload_resume(curl, body)
+    assert body.resume() is True and curl.calls == [None]
+
+
 def test_upstream_headers_strip_hop_by_hop():
     headers = {
         "host": "origin.test",
@@ -875,16 +917,21 @@ FAST_LATENCY = 2.0
 PARALLEL_UPLOADS = 60
 
 
+def send_stalled_on(client, url, stall, size=BODY_SIZE, first=1000):
+    "Send headers and the first bytes of a body on an existing (possibly keep-alive) client, stall, then finish"
+    client.sock.sendall(f"POST {url} HTTP/1.1\r\nHost: stall.test\r\nContent-Length: {size}\r\n\r\n".encode())
+    data = b"".join(body_blocks(size))
+    client.sock.sendall(data[:first])
+    stall.wait(STALL_SECONDS)
+    client.sock.sendall(data[first:])
+    return client.read_response()
+
+
 def send_stalled(port, url, stall, size=BODY_SIZE, first=1000):
     "Send headers and the first bytes of a body, stall, then finish; returns the response"
     client = Client(port, timeout=60)
     try:
-        client.sock.sendall(f"POST {url} HTTP/1.1\r\nHost: stall.test\r\nContent-Length: {size}\r\n\r\n".encode())
-        data = b"".join(body_blocks(size))
-        client.sock.sendall(data[:first])
-        stall.wait(STALL_SECONDS)
-        client.sock.sendall(data[first:])
-        return client.read_response()
+        return send_stalled_on(client, url, stall, size, first)
     finally:
         client.close()
 
@@ -938,6 +985,26 @@ def test_stalled_upload_does_not_delay_others_ntlm(ntlm_px):
     port, _proxy = ntlm_px()
     url = "http://ntlm-upload.test/x"
     check_stalled_does_not_delay(port, url, url)
+
+
+@needs_mcurl_streaming
+def test_stalled_uploads_on_reused_keep_alive_handle(direct_px, origin):
+    """Two sequential paused uploads on one keep-alive connection reuse px's Curl handle (reset()).
+
+    Resuming the second upload must use the reused handle's own transfer, never the first
+    transfer's now-stale one (mcurl commit 3318186, pymcurl 8.23.0.3's Curl.transfer_id)."""
+    port, _ = direct_px
+    url = f"http://{origin.addr}/x"
+    client = Client(port, timeout=30)
+    try:
+        first = send_stalled_on(client, url, threading.Event())
+        second = send_stalled_on(client, url, threading.Event())
+        third = send_stalled_on(client, url, threading.Event())
+    finally:
+        client.close()
+    expected = {"sha256": body_sha256(BODY_SIZE), "length": BODY_SIZE}
+    assert [r.status for r in (first, second, third)] == [200, 200, 200]
+    assert [r.json() for r in (first, second, third)] == [expected] * 3
 
 
 @needs_mcurl_streaming

@@ -3,8 +3,10 @@
 import asyncio
 import concurrent.futures
 import contextlib
+import email.utils
 import multiprocessing
 import os
+import re
 import signal
 import socket
 import sys
@@ -278,6 +280,25 @@ def run_pool():
 # HTTP status codes that mean the request never got an authenticated
 # response - a --test run must not report these as success.
 _TEST_AUTH_FAILURE_CODES = (401, 407)
+_TEST_RATE_LIMIT_CODE = 429
+_TEST_RATE_LIMIT_RETRIES = 2
+_TEST_RATE_LIMIT_MAX_WAIT = 5.0
+_TEST_BODY_ECHO_INTERVAL = 0.6
+
+
+def _retry_after(headers):
+    """Return a target's requested rate-limit delay, if its header is valid."""
+    match = re.search(r"(?im)^retry-after:\s*([^\r\n]+)", headers)
+    if match is None:
+        return None
+    value = match.group(1).strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            return max(0.0, email.utils.parsedate_to_datetime(value).timestamp() - time.time())
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
 
 
 def _negotiate_test_target(wp, listen, port):
@@ -352,35 +373,57 @@ def test(testurl):
 
     def query(url, method="GET", data=None, do_quit=True, check=False, insecure=False):
         success = False
+        rate_limited = False
         if do_quit:
             waitforpx()
 
         pprint(f"\nTesting {method} {url}")
-        resolve_list = None
-        try:
-            ec = mcurl.Curl(url, method)
-            ec.set_proxy(test_proxy_host, port)
-            if test_proxy_resolve is not None:
-                resolve_list = mcurl.libcurl.curl_slist_append(mcurl.ffi.NULL, mcurl.py2cstr(test_proxy_resolve))
-                ec.setopt(mcurl.libcurl.CURLOPT_RESOLVE, resolve_list)
-            handler.set_curl_auth(ec, auth)
-            if url.startswith("https"):
-                ec.set_insecure(insecure)
-            ec.set_debug(STATE.debug is not None)
-            if data is not None:
-                ec.buffer(data.encode("utf-8"))
-                ec.set_headers({"Content-Length": len(data)})
-            else:
-                ec.buffer()
-            ec.set_useragent("mcurl v" + __version__)
-            ret = ec.perform()
-            if ret != 0:
-                pprint(f"Failed with error {ret}\n{ec.errstr}")
-            else:
-                success = True
+        attempt = 0
+        total_wait = 0.0
+        while True:
+            resolve_list = None
+            try:
+                ec = mcurl.Curl(url, method)
+                ec.set_proxy(test_proxy_host, port)
+                if test_proxy_resolve is not None:
+                    resolve_list = mcurl.libcurl.curl_slist_append(mcurl.ffi.NULL, mcurl.py2cstr(test_proxy_resolve))
+                    ec.setopt(mcurl.libcurl.CURLOPT_RESOLVE, resolve_list)
+                handler.set_curl_auth(ec, auth)
+                if url.startswith("https"):
+                    ec.set_insecure(insecure)
+                ec.set_debug(STATE.debug is not None)
+                if data is not None:
+                    ec.buffer(data.encode("utf-8"))
+                    ec.set_headers({"Content-Length": len(data)})
+                else:
+                    ec.buffer()
+                ec.set_useragent("mcurl v" + __version__)
+                ret = ec.perform()
+                if ret != 0:
+                    pprint(f"Failed with error {ret}\n{ec.errstr}")
+                    break
+
                 ret_data = ec.get_data()
-                pprint(f"\n{ec.get_headers()}Response length: {len(ret_data)}")
+                headers = ec.get_headers()
+                pprint(f"\n{headers}Response length: {len(ret_data)}")
                 code = ec.get_response_code()
+                if code == _TEST_RATE_LIMIT_CODE:
+                    remaining_wait = _TEST_RATE_LIMIT_MAX_WAIT - total_wait
+                    if attempt < _TEST_RATE_LIMIT_RETRIES and remaining_wait > 0:
+                        requested_wait = _retry_after(headers)
+                        backoff = 0.5 * (2**attempt)
+                        delay = min(requested_wait if requested_wait is not None else backoff, remaining_wait)
+                        pprint(f"Rate limited by test target; retrying in {delay:g} seconds")
+                        if delay:
+                            time.sleep(delay)
+                        total_wait += delay
+                        attempt += 1
+                        continue
+                    pprint("Rate limited by test target (HTTP 429)")
+                    rate_limited = True
+                    break
+
+                success = True
                 if code in _TEST_AUTH_FAILURE_CODES:
                     pprint(f"Failed: final response status {code} - request was not authenticated")
                     success = False
@@ -392,17 +435,21 @@ def test(testurl):
                     if data is not None and data not in ret_data:
                         pprint("Failed: response does not match " + f"{data}:\n{ret_data}")
                         success = False
-        except Exception as exc:
-            pprint(f"Failed with exception: {exc}")
-        finally:
-            if resolve_list is not None:
-                mcurl.libcurl.curl_slist_free_all(resolve_list)
+                break
+            except Exception as exc:
+                pprint(f"Failed with exception: {exc}")
+                break
+            finally:
+                if resolve_list is not None:
+                    mcurl.libcurl.curl_slist_free_all(resolve_list)
 
         if success:
             pprint("Passed")
         if do_quit:
-            os._exit(config.ERROR_SUCCESS if success else config.ERROR_TEST)
-        return success
+            if success:
+                os._exit(config.ERROR_SUCCESS)
+            os._exit(config.ERROR_TEST_RATE_LIMIT if rate_limited else config.ERROR_TEST)
+        return success, rate_limited
 
     def queryall(testurl):
         import uuid
@@ -429,19 +476,19 @@ def test(testurl):
                     url += "/"
                 urls.append(url)
 
-        # Run all method queries concurrently for speed
+        # GET and DELETE are safe to overlap. Pace body echoes because httpbin
+        # limits them to about two requests per second for each client IP.
         threads = []
         results = []
 
         def run_query(*args, **kwargs):
             results.append(query(*args, **kwargs))
 
-        for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+        for method in ["GET", "DELETE"]:
             for url in urls:
-                data = str(uuid.uuid4()) if method in ["POST", "PUT", "PATCH"] else None
                 t = threading.Thread(
                     target=run_query,
-                    args=(url + method.lower(), method, data),
+                    args=(url + method.lower(), method),
                     kwargs={"do_quit": False, "check": True, "insecure": insecure},
                 )
                 t.start()
@@ -449,7 +496,34 @@ def test(testurl):
         for t in threads:
             t.join()
 
-        os._exit(config.ERROR_SUCCESS if all(results) else config.ERROR_TEST)
+        last_body_start = None
+        for method in ["POST", "PUT", "PATCH"]:
+            for url in urls:
+                if last_body_start is not None:
+                    delay = _TEST_BODY_ECHO_INTERVAL - (time.monotonic() - last_body_start)
+                    if delay > 0:
+                        time.sleep(delay)
+                last_body_start = time.monotonic()
+                results.append(
+                    query(
+                        url + method.lower(),
+                        method,
+                        str(uuid.uuid4()),
+                        do_quit=False,
+                        check=True,
+                        insecure=insecure,
+                    )
+                )
+
+        passed = sum(success for success, _rate_limited in results)
+        rate_limited = sum(rate_limited for _success, rate_limited in results)
+        failed = len(results) - passed - rate_limited
+        pprint(f"Summary: {passed} passed, {failed} failed, {rate_limited} rate limited by test target")
+        if failed:
+            os._exit(config.ERROR_TEST)
+        if rate_limited:
+            os._exit(config.ERROR_TEST_RATE_LIMIT)
+        os._exit(config.ERROR_SUCCESS)
 
     # Run testurl query in a thread
     if testurl in ["all", "1"] or testurl.startswith("all:"):

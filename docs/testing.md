@@ -29,7 +29,7 @@ Tests live in `tests/`.
 | `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
-| `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of the probe and its reporting, final-status (401/407) failure, and Negotiate SPN addressing (`_negotiate_test_target`) |
+| `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of probe reporting, final-status (401/407) failure, paced httpbin body echoes, bounded 429 retries and separate rate-limit exits, and Negotiate SPN addressing (`_negotiate_test_target`) |
 | `test_resolver.py` | Resolver and upstream-proxy DNS seeding tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IPv4/IPv6 literals and results, temporary libcurl entries, DNS-free `myIpAddress` discovery |
 | `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 

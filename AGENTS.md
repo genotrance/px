@@ -12,6 +12,10 @@
 - Monitor jobs after pushing until they complete and confirm they pass.
 - Do not wait for all jobs to finish before starting fixes — use `gh run view --log-failed` to fetch failure logs as soon as a job fails, diagnose immediately, and push fixes as soon as you have a clear picture of all failing cases.
 
+## Docker
+
+- Containers that mount a checkout or worktree run as the host user (`--user "$(id -u):$(id -g)"`, HOME and tool caches under `/tmp` in the container), never root, so no root-owned files are left behind. Root-only steps (package installs) run in a derived image (`docker commit` of a root container with nothing writable mounted), not on the mount. `build.sh` fails if a mounted tree contains root-owned files.
+
 ## Documentation
 
 Px has both **user-facing** and **developer-facing** documentation. Both must be kept current.

@@ -93,14 +93,21 @@ build_wheels() {
 
 # --- Binary building ---
 
+# The system package steps below need root. CI containers run as root; the
+# local Docker runs use the host user and a derived image (docker_image_with)
+# that already ran these steps, so the functions skip when not root.
+is_root() { [ "$(id -u)" = 0 ]; }
+
 # Install upx per platform
 install_upx() {
     OS=$(get_os)
     case "$OS" in
         linux-musl)
+            is_root || return 0
             apk add --no-cache upx 2>/dev/null || true
             ;;
         linux-glibc)
+            is_root || return 0
             # Nuitka detects ccache automatically. Its cache is mounted by
             # build.yml, avoiding another full C compilation on later runs.
             yum install -y upx ccache 2>/dev/null || dnf install -y upx ccache 2>/dev/null || true
@@ -116,6 +123,7 @@ install_upx() {
 
 # Install system build dependencies for Alpine
 install_alpine_deps() {
+    is_root || return 0
     apk add --no-cache curl gcc musl-dev libffi-dev ccache upx
 }
 
@@ -210,6 +218,7 @@ smoke_binary() {
 
 # Set up manylinux static libs
 setup_manylinux() {
+    is_root || return 0
     if [ -f "/opt/_internal/static-libs-for-embedding-only.tar.xz" ]; then
         (cd /opt/_internal && tar xf static-libs-for-embedding-only.tar.xz)
     fi
@@ -322,6 +331,21 @@ extract_archives() {
 
 # --- Test binary ---
 
+# Install curl in the test container if missing (needs root, see is_root)
+install_test_deps() {
+    command -v curl > /dev/null 2>&1 && return 0
+    is_root || {
+        echo "ERROR: curl is missing and this is not root; preinstall it in the image" >&2
+        return 1
+    }
+    if command -v apk > /dev/null; then
+        apk add --no-cache curl
+    else
+        apt-get update -qq
+        apt-get install -y -qq curl > /dev/null
+    fi
+}
+
 test_binary() {
     NAME="$1"
     OS=$(get_os)
@@ -347,14 +371,7 @@ test_binary() {
 
     if [ "$OS" = "linux-musl" ] || [ "$OS" = "linux-glibc" ]; then
         # Inside container — install curl if needed (before ensure_uv)
-        if ! command -v curl > /dev/null 2>&1; then
-            if command -v apk > /dev/null; then
-                apk add --no-cache curl
-            else
-                apt-get update -qq
-                apt-get install -y -qq curl > /dev/null
-            fi
-        fi
+        install_test_deps || return 1
 
         ensure_uv
 
@@ -417,6 +434,7 @@ target_config() {
             WHEELS_IMAGE="quay.io/pypa/musllinux_1_2_x86_64"
             BINARY_IMAGE="alpine:3.21"
             BINARY_SHELL="/bin/sh"
+            BINARY_SETUP="install_alpine_deps"
             TEST_IMAGE="$WHEELS_IMAGE"
             TEST_SHELL="/bin/bash"
             ;;
@@ -425,11 +443,65 @@ target_config() {
             WHEELS_IMAGE="quay.io/pypa/manylinux2014_x86_64"
             BINARY_IMAGE="$WHEELS_IMAGE"
             BINARY_SHELL="/bin/bash"
+            BINARY_SETUP="install_upx setup_manylinux"
             TEST_IMAGE="${TEST_IMAGE_GLIBC:-ubuntu}"
             TEST_SHELL="/bin/bash"
             ;;
         *) return 1 ;;
     esac
+}
+
+# Containers that mount a checkout run as the host user, never root, so no
+# root-owned file is ever written to the mount. Root-only steps (system
+# packages) run at image build time, not on the mount.
+
+# docker_image_with <image> <shell> <function>...: print the tag of <image> with
+# the given build.sh root setup functions already run (a derived image made by
+# docker commit of a root container that mounts nothing writable; cached per
+# build.sh content); print <image> itself when there are none
+docker_image_with() {
+    _dimg="$1" _dsh="$2"
+    shift 2
+    [ $# -gt 0 ] || { echo "$_dimg"; return 0; }
+    _dtag="px-build:$(printf '%s-%s-%s' "$_dimg" "$*" "$(sha256sum build.sh | cut -c1-12)" | tr 'A-Z /:' 'a-z---' | tr -cd 'a-z0-9._-')"
+    if ! docker image inspect "$_dtag" > /dev/null 2>&1; then
+        _dname="px-build-$$"
+        _dfns="$(printf ' && %s' "$@")"
+        docker run --name "$_dname" -v "$(pwd)/build.sh":/tmp/build.sh:ro "$_dimg" "$_dsh" -c ". /tmp/build.sh$_dfns" >&2 &&
+            docker commit "$_dname" "$_dtag" > /dev/null || { docker rm -f "$_dname" > /dev/null 2>&1; return 1; }
+        docker rm "$_dname" > /dev/null
+    fi
+    echo "$_dtag"
+}
+
+# docker_run_user <dir> <image> <shell> <setup> <script> [docker args...]: run a
+# script in a container with <dir> at /px as the host user. <setup> is a quoted
+# list of root-only build.sh functions run in a derived image first. HOME and
+# the tool caches live in /tmp inside the container.
+docker_run_user() {
+    _ddir="$1" _dimage="$2" _dsh="$3" _dsetup="$4" _dscript="$5"
+    shift 5
+    # shellcheck disable=SC2086
+    _drun="$(docker_image_with "$_dimage" "$_dsh" $_dsetup)" || return 1
+    _dh=/tmp/home
+    docker run --rm "$@" --user "$(id -u):$(id -g)" -v "$_ddir":/px -w /px \
+        -e HOME=$_dh -e USER="$(id -un)" -e LOGNAME="$(id -un)" \
+        -e XDG_CACHE_HOME=$_dh/.cache -e XDG_DATA_HOME=$_dh/.local/share \
+        -e UV_CACHE_DIR=$_dh/.cache/uv -e PIP_CACHE_DIR=$_dh/.cache/pip \
+        -e UV_PYTHON_INSTALL_DIR=$_dh/.local/share/uv/python \
+        -e NUITKA_CACHE_DIR=$_dh/.cache/Nuitka -e CCACHE_DIR=$_dh/.ccache \
+        "$_drun" "$_dsh" -c "mkdir -p $_dh && $_dscript"
+}
+
+# check_no_root_files <dir>...: fail if a mounted tree holds root-owned files
+# (a container wrote to the mount as root). Skipped when the host user is root.
+check_no_root_files() {
+    [ "$(id -u)" != 0 ] || return 0
+    _dfound="$(find "$@" -user root 2>/dev/null | head -20)"
+    [ -z "$_dfound" ] || {
+        printf 'ERROR: root-owned files in a mounted tree (containers must run as the host user):\n%s\n' "$_dfound" >&2
+        return 1
+    }
 }
 
 # Build wheels, binary, and run tests locally using Docker containers
@@ -442,18 +514,6 @@ build_local() {
     }
 
     WHEELS_DIR="px.dist-${NAME}-wheels/px.dist"
-    HOSTUID="$(id -u)"
-    HOSTGID="$(id -g)"
-    CHOWN="chown -R $HOSTUID:$HOSTGID"
-
-    # Clean up root-owned leftovers from previous Docker runs that would
-    # block the host-side tools.py --wheel (its rmtree loops forever on
-    # permission errors)
-    for d in build px_proxy.egg-info .venv; do
-        if [ -d "$d" ] && [ "$(stat -c '%u' "$d")" != "$HOSTUID" ]; then
-            sudo rm -rf "$d"
-        fi
-    done
 
     echo "=== Building sdist ==="
     # Release builds intentionally resolve the latest quickjs-ng.
@@ -462,11 +522,9 @@ build_local() {
     uv run --locked python tools.py --wheel || return 1
 
     echo "=== Building wheels in $WHEELS_IMAGE ==="
-    docker run --rm -v "$(pwd)":/px -w /px \
-        "$WHEELS_IMAGE" /bin/bash -c "
-            . /px/build.sh && build_wheels
-            RC=\$?; $CHOWN wheels/ 2>/dev/null || true; exit \$RC
-        " || return 1
+    docker_run_user "$(pwd)" "$WHEELS_IMAGE" /bin/bash "" \
+        ". /px/build.sh && build_wheels" || return 1
+    check_no_root_files "$(pwd)" || return 1
 
     # Move wheels into expected location for build_binary
     rm -rf "px.dist-${NAME}-wheels"
@@ -474,21 +532,17 @@ build_local() {
     cp wheels/*.whl "$WHEELS_DIR/"
 
     echo "=== Building binary in $BINARY_IMAGE ==="
-    docker run --rm -v "$(pwd)":/px -w /px \
-        "$BINARY_IMAGE" $BINARY_SHELL -c "
-            rm -rf .venv && . /px/build.sh && build_binary $NAME
-            RC=\$?; $CHOWN px.dist-* wheel/ build/ .venv px_proxy.egg-info 2>/dev/null || true; exit \$RC
-        " || return 1
+    docker_run_user "$(pwd)" "$BINARY_IMAGE" "$BINARY_SHELL" "$BINARY_SETUP" \
+        "rm -rf .venv && . /px/build.sh && build_binary $NAME" || return 1
+    check_no_root_files "$(pwd)" || return 1
 
     echo "=== Extracting archives ==="
     extract_archives "$NAME"
 
     echo "=== Testing binary in $TEST_IMAGE ==="
-    docker run --rm --privileged -v "$(pwd)":/px -w /px \
-        "$TEST_IMAGE" $TEST_SHELL -c "
-            rm -rf .venv && . /px/build.sh && test_binary $NAME
-            RC=\$?; $CHOWN .venv 2>/dev/null || true; exit \$RC
-        "
+    docker_run_user "$(pwd)" "$TEST_IMAGE" "$TEST_SHELL" install_test_deps \
+        "rm -rf .venv && . /px/build.sh && test_binary $NAME" --privileged || return 1
+    check_no_root_files "$(pwd)" || return 1
 
     echo "=== All done ==="
 }
@@ -542,14 +596,14 @@ rc_stage() {
     touch "$_dir/.done-$_name"
 }
 
-# rc_run_in <dir> <image> <shell> <script> [docker args...]: run a build.sh
-# function in a container with the tree at /px, then give the files back to
-# the host user so the work directory stays removable
+# rc_run_in <dir> <image> <shell> <setup> <script> [docker args...]: run a
+# build.sh function in a container as the host user with the tree at /px, then
+# fail if the container left root-owned files in the tree
 rc_run_in() {
-    _dir="$1" _image="$2" _shell="$3" _script="$4"
-    shift 4
-    docker run --rm "$@" -v "$_dir":/px -w /px "$_image" "$_shell" -c \
-        "$_script; RC=\$?; chown -R $(id -u):$(id -g) /px 2>/dev/null || true; exit \$RC"
+    _rc=0
+    docker_run_user "$@" || _rc=$?
+    check_no_root_files "$1" || return 1
+    return "$_rc"
 }
 
 rc_sdist() {
@@ -563,7 +617,7 @@ rc_target() {
     target_config "$1"
     rc_log "$NAME: wheels in $WHEELS_IMAGE"
     rc_prepare "$RC_ROOT/$1/wheels"
-    rc_stage "$RC_ROOT/$1/wheels" wheels rc_run_in "$RC_ROOT/$1/wheels" "$WHEELS_IMAGE" /bin/bash \
+    rc_stage "$RC_ROOT/$1/wheels" wheels rc_run_in "$RC_ROOT/$1/wheels" "$WHEELS_IMAGE" /bin/bash "" \
         ". /px/build.sh && build_wheels"
 
     rc_log "$NAME: binary in $BINARY_IMAGE"
@@ -573,14 +627,16 @@ rc_target() {
     mkdir -p "$_b/px.dist-$NAME-wheels/px.dist" "$_b/wheel"
     cp "$RC_ROOT/$1"/wheels/wheels/*.whl "$_b/px.dist-$NAME-wheels/px.dist/"
     cp "$RC_ROOT"/sdist/wheel/* "$_b/wheel/"
-    rc_stage "$_b" binary rc_run_in "$_b" "$BINARY_IMAGE" "$BINARY_SHELL" ". /px/build.sh && build_binary $NAME"
+    rc_stage "$_b" binary rc_run_in "$_b" "$BINARY_IMAGE" "$BINARY_SHELL" "$BINARY_SETUP" \
+        ". /px/build.sh && build_binary $NAME"
 
     rc_log "$NAME: test-binary in $TEST_IMAGE"
     rc_prepare "$_t"
     # binary artifact (px.dist-*/px-v*) -> fresh checkout, as test-binary downloads it
     (cd "$_b" && for f in px.dist-*/px-v*; do mkdir -p "$_t/$(dirname "$f")" && cp "$f" "$_t/$f"; done)
     rc_stage "$_t" extract sh -c "cd '$_t' && . ./build.sh && extract_archives $NAME"
-    rc_stage "$_t" test rc_run_in "$_t" "$TEST_IMAGE" /bin/sh ". /px/build.sh && test_binary $NAME" --privileged
+    rc_stage "$_t" test rc_run_in "$_t" "$TEST_IMAGE" /bin/sh install_test_deps \
+        ". /px/build.sh && test_binary $NAME" --privileged
     rc_log "$NAME: PASSED"
 }
 
@@ -624,6 +680,7 @@ release_check() {
     for _t in $RC_TARGETS; do
         case "$_t" in scenario) rc_scenario ;; *) rc_target "$_t" ;; esac
     done
+    check_no_root_files "$RC_ROOT" . || return 1
     rc_log "release check passed for:$RC_TARGETS (work dir: $RC_ROOT)"
 }
 

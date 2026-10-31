@@ -290,13 +290,19 @@ The resolver's bounded lookup, positive cache, and negative cache prevent
 requests from repeatedly blocking on DNS; an unresolved hostname is left for
 the upstream proxy to handle.
 
-When the selected upstream proxy has a hostname, `ConnectionHandler` also uses
-that resolver result to set libcurl's request-scoped `CURLOPT_RESOLVE` entry.
-The proxy hostname remains the configured name (so Kerberos selects the same
-SPN), while a burst of new curl handles shares one DNS lookup instead of each
-starting its own resolver request. Px clears and frees the libcurl entry after
-the transfer; a failed Px lookup simply leaves libcurl's normal resolution
-path in place.
+When the selected upstream proxy has a hostname, `ConnectionHandler` obtains
+the shared resolver through `Wproxy.get_resolver()`, requests all IPv4 and
+IPv6 addresses with `AF_UNSPEC`, and seeds them into libcurl with one
+`CURLOPT_RESOLVE` entry. The proxy hostname remains the configured name (so
+Kerberos selects the same SPN), while a burst of new curl handles shares one
+DNS lookup and libcurl can fail over between the returned addresses.
+
+`CURLOPT_RESOLVE` seeds libcurl's shared multi DNS cache, not a request-local
+cache. Px prefixes its entry with `+`, so libcurl expires it according to its
+DNS cache timeout instead of retaining a permanent override. Px clears the
+option and frees its slist after the transfer, while the temporary shared-cache
+entry remains usable until that timeout. A failed Px lookup adds no entry, so
+libcurl follows its normal DNS resolution path.
 
 ## PAC file evaluation (`px.pac`)
 

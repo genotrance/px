@@ -180,6 +180,12 @@ class TestWproxyBase:
         assert w.check_noproxy_for_netloc(("cache.example", 8080)) == ("192.0.2.25", 8080)
         assert calls == 1
 
+    def test_get_resolver_is_public_and_shared(self):
+        from px.wproxy import _WproxyBase
+
+        w = _WproxyBase(mode=MODE_CONFIG, servers=[("proxy.com", 8080)])
+        assert w.get_resolver() is w.get_resolver()
+
     def test_noproxy_unresolvable_host_uses_proxy(self, monkeypatch):
         from px.wproxy import _WproxyBase
 

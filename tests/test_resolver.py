@@ -1,11 +1,12 @@
 """Tests for non-blocking PAC DNS resolution."""
 
+import asyncio
 import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from px import config, resolver
+from px import config, handler, resolver
 
 
 def test_my_ip_address_does_not_use_dns(monkeypatch):
@@ -197,3 +198,81 @@ def test_resolver_returns_ipv6_literal_without_dns(monkeypatch):
         assert dns.lookup("2001:db8::1", socket.AF_INET6) == "2001:db8::1"
     finally:
         dns.close()
+
+
+def test_resolver_keeps_all_unspecified_family_addresses(monkeypatch):
+    def getaddrinfo(*_):
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::8", 0, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.8", 0)),
+            (socket.AF_INET6, socket.SOCK_DGRAM, 17, "", ("2001:db8::8", 0, 0, 0)),
+        ]
+
+    monkeypatch.setattr(resolver.socket, "getaddrinfo", getaddrinfo)
+    dns = resolver.Resolver()
+    try:
+        assert dns.lookup_all("proxy.example", socket.AF_UNSPEC) == ["2001:db8::8", "192.0.2.8"]
+        assert dns.lookup("proxy.example", socket.AF_UNSPEC) == "2001:db8::8"
+    finally:
+        dns.close()
+
+
+class ResolveCurl:
+    easyhash = "fake"
+
+    def __init__(self):
+        self.options = []
+
+    def setopt(self, option, value):
+        self.options.append((option, value))
+
+
+class ResolveLibcurl:
+    CURLOPT_RESOLVE = "resolve"
+
+    @staticmethod
+    def curl_slist_append(_head, value):
+        return f"slist:{value}"
+
+
+class ResolveFfi:
+    NULL = None
+
+
+def _set_proxy_resolve(monkeypatch, addresses):
+    calls = []
+
+    class Resolver:
+        def lookup_all(self, host, family):
+            calls.append((host, family))
+            return addresses
+
+    class Wproxy:
+        def get_resolver(self):
+            return Resolver()
+
+    curl = ResolveCurl()
+    connection = handler.ConnectionHandler.__new__(handler.ConnectionHandler)
+    connection.curl = curl
+    monkeypatch.setattr(handler.STATE, "wproxy", Wproxy())
+    monkeypatch.setattr(handler.mcurl, "libcurl", ResolveLibcurl())
+    monkeypatch.setattr(handler.mcurl, "ffi", ResolveFfi())
+    monkeypatch.setattr(handler.mcurl, "py2cstr", lambda value: value)
+
+    return asyncio.run(connection._set_proxy_resolve("proxy.corp.test", 3128)), calls, curl
+
+
+def test_proxy_resolution_seeds_temporary_all_address_curl_entry(monkeypatch):
+    resolve, calls, curl = _set_proxy_resolve(monkeypatch, ["192.0.2.8", "2001:db8::8"])
+
+    assert calls == [("proxy.corp.test", socket.AF_UNSPEC)]
+    assert resolve == "slist:+proxy.corp.test:3128:192.0.2.8,[2001:db8::8]"
+    assert curl.options == [("resolve", resolve)]
+
+
+def test_proxy_resolution_failure_leaves_curl_dns_unmodified(monkeypatch):
+    resolve, calls, curl = _set_proxy_resolve(monkeypatch, None)
+
+    assert calls == [("proxy.corp.test", socket.AF_UNSPEC)]
+    assert resolve is None
+    assert curl.options == []

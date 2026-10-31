@@ -1198,17 +1198,20 @@ class ConnectionHandler:
         await asyncio.to_thread(STATE.mcurl.remove, self.curl)
 
     async def _set_proxy_resolve(self, host, port):
-        """Seed libcurl's DNS cache with Px's shared proxy lookup.
+        """Temporarily seed libcurl's DNS cache with Px's shared proxy lookup.
 
         A burst of new handles otherwise starts one resolver request per
         handle.  Sharing the existing Wproxy resolver keeps a busy local DNS
-        service from exhausting the connection timeout before uploads begin.
+        service from exhausting the connection timeout before uploads begin,
+        while retaining all returned addresses for libcurl failover.
         """
-        address = await asyncio.to_thread(STATE.wproxy._get_resolver().lookup, host)
-        if address is None or address == host:
+        addresses = await asyncio.to_thread(STATE.wproxy.get_resolver().lookup_all, host, socket.AF_UNSPEC)
+        if not addresses or addresses == [host]:
             return None
 
-        entry = f"{host}:{port}:{address}"
+        # '+' makes the entry expire with libcurl's DNS cache timeout rather
+        # than permanently overriding the shared multi DNS cache.
+        entry = f"+{host}:{port}:" + ",".join(f"[{address}]" if ":" in address else address for address in addresses)
         resolve = mcurl.libcurl.curl_slist_append(mcurl.ffi.NULL, mcurl.py2cstr(entry))
         if resolve == mcurl.ffi.NULL:
             dprint(self.curl.easyhash + ": Could not allocate proxy DNS override")

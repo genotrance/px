@@ -30,7 +30,7 @@ Tests live in `tests/`.
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
 | `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of the probe and its reporting, final-status (401/407) failure, and Negotiate SPN addressing (`_negotiate_test_target`) |
-| `test_resolver.py` | Resolver tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IP literals, DNS-free `myIpAddress` discovery |
+| `test_resolver.py` | Resolver and upstream-proxy DNS seeding tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IPv4/IPv6 literals and results, temporary libcurl entries, DNS-free `myIpAddress` discovery |
 | `test_wproxy.py` | Proxy parsing tests — `parse_proxy`, `parse_noproxy`, `_WproxyBase` methods, resolver-backed `--noproxy` IP matching |
 
 ---
@@ -82,9 +82,10 @@ is reinstalled from it for the client's interpreter.
 upstream proxy. The GitHub 2-vCPU failure reported libcurl's `Resolving timed
 out after 10000 milliseconds`: 60 simultaneous handles each tried to resolve
 the same proxy before the connection timeout, rather than timing out while
-uploading. Px now shares its cached proxy lookup with libcurl through
-`CURLOPT_RESOLVE`, preserving the proxy hostname for Kerberos while avoiding
-the burst. To reproduce this coverage locally, limit the selected lab client's
+uploading. Px now shares all cached IPv4/IPv6 proxy addresses with libcurl
+through a temporary `CURLOPT_RESOLVE` entry, preserving the proxy hostname for
+Kerberos while avoiding the burst and retaining libcurl failover. To reproduce
+this coverage locally, limit the selected lab client's
 CPU allocation to two, then run the test with `UV_PYTHON=3.11` and
 each of `PX_EVENT_LOOP=asyncio` and `PX_EVENT_LOOP=auto`; restore the
 allocation after the run. The scenario test's 60 mixed, 8 MiB uploads and both

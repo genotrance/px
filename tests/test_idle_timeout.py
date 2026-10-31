@@ -22,56 +22,6 @@ class FakeCurl:
         self.low_speed.append((limit, seconds))
 
 
-class ResolveCurl:
-    easyhash = "fake"
-
-    def __init__(self):
-        self.options = []
-
-    def setopt(self, option, value):
-        self.options.append((option, value))
-
-
-class ResolveLibcurl:
-    CURLOPT_RESOLVE = "resolve"
-
-    @staticmethod
-    def curl_slist_append(_head, value):
-        return f"slist:{value}"
-
-
-class ResolveFfi:
-    NULL = None
-
-
-def test_proxy_resolution_is_shared_with_later_curl_handles(monkeypatch):
-    resolved = []
-
-    class Resolver:
-        def lookup(self, host):
-            resolved.append(host)
-            return "192.0.2.8"
-
-    class Wproxy:
-        @staticmethod
-        def _get_resolver():
-            return Resolver()
-
-    curl = ResolveCurl()
-    h = handler.ConnectionHandler.__new__(handler.ConnectionHandler)
-    h.curl = curl
-    monkeypatch.setattr(handler.STATE, "wproxy", Wproxy())
-    monkeypatch.setattr(handler.mcurl, "libcurl", ResolveLibcurl())
-    monkeypatch.setattr(handler.mcurl, "ffi", ResolveFfi())
-    monkeypatch.setattr(handler.mcurl, "py2cstr", lambda value: value)
-
-    resolve = asyncio.run(h._set_proxy_resolve("proxy.corp.test", 3128))
-
-    assert resolved == ["proxy.corp.test"]
-    assert resolve == "slist:proxy.corp.test:3128:192.0.2.8"
-    assert curl.options == [("resolve", resolve)]
-
-
 def _run(method, curl_cls, curl=None):
     h = handler.ConnectionHandler.__new__(handler.ConnectionHandler)
     h.curl = curl

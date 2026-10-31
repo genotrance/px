@@ -509,7 +509,10 @@ The `[tool.tox]` configuration in `pyproject.toml` defines py310–py314 and a
 `binary` environment. Each Python environment installs the release wheel and
 runs the default selection; the `binary` environment runs the same suite
 against the compiled binary named by `PXBIN`. Linux runs `pytest -n auto`, and
-the native macOS and Windows runs use `-n 2`. tox and tox-uv are not dev
+the native macOS and Windows runs use `-n 2`. Each xdist worker reserves a
+block of three Px ports from 3148–3947 (`find_free_port_block` in
+`tests/helpers.py`), wide enough for two parallel tox environments with one
+worker per core on large hosts. tox and tox-uv are not dev
 dependencies: the `test-binary` job in `build.yml` installs them, and
 `make test-glibc` or `make test-musl` (`build_local` in `build.sh`) run the same
 matrix locally in the build containers. See [Build](build.md#github-actions).
@@ -698,7 +701,9 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   runner itself has stopped cooperating, so a frozen runner is torn down in
   minutes instead of the full job timeout; the step timeout and the
   preceding diagnostic step still help for an ordinary (non-frozen-runner)
-  hang, for example a stalled distribution or kernel download. If
+  hang, for example a stalled distribution or kernel download.
+  `tests/test_ci_plan.py` keeps both timeouts and the diagnostic step in
+  place. If
   `scenario-windows` times out with no log past "Set up WSL2" and no later
   diagnostic output, re-run the job; this is the GitHub-side bug, not a
   regression to chase down locally.

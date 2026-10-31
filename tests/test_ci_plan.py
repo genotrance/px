@@ -68,3 +68,14 @@ def test_windows_scenario_keeps_wsl_lab_alive_for_the_https_burst():
     assert "Write-Host" in health_check["run"]
     assert stop_keep_alive["if"] == "always()"
     assert "Stop-Process" in stop_keep_alive["run"]
+
+
+def test_windows_scenario_bounds_a_frozen_wsl_setup():
+    # actions/runner-images#14938: only a job-level timeout ends a frozen runner
+    job = WORKFLOW["jobs"]["scenario-windows"]
+    names = [step.get("name") for step in job["steps"]]
+    setup = job["steps"][names.index("Set up WSL2")]
+
+    assert job["timeout-minutes"] == 15
+    assert setup["timeout-minutes"] == 5
+    assert names.index("Log the runner image before WSL2 setup") < names.index("Set up WSL2")

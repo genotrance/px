@@ -7,8 +7,8 @@ def test_scenario_env_installs_mcurl_candidate_wheel():
     text = SCRIPT.read_text()
     for needle in (
         "MCURL_WHEELS",
-        'cp "$wheels/." "client:$wheels/"',
-        '-e "MCURL_WHEELS=$wheels"',
+        'cp "$wheels/." "client:$container_wheels/"',
+        "-e \"MCURL_WHEELS=$([[ -n $wheels ]] && printf '%s' \"$container_wheels\")\"",
         "--reinstall-package pymcurl",
         "--no-index",
         '"pymcurl==$version"',

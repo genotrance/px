@@ -85,6 +85,17 @@ services:
 
   client:
     build: ./client
+    # The only service that mounts the checkout; it runs as the host user
+    # (SCENARIO_CLIENT_USER, set by scenario-env.sh) so nothing it writes is
+    # root-owned. Other services, including the privileged dc, never mount
+    # the checkout and stay root.
+    user: "${SCENARIO_CLIENT_USER:-0:0}"
+    environment:
+      HOME: /tmp/px-client-home
+      UV_CACHE_DIR: /tmp/px-client-home/uv-cache
+      XDG_CACHE_HOME: /tmp/px-client-home/xdg-cache
+      PIP_CACHE_DIR: /tmp/px-client-home/pip-cache
+      UV_PYTHON_INSTALL_DIR: /tmp/px-client-home/uv-python
     depends_on:
       squid-basic:
         condition: service_healthy

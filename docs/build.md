@@ -53,7 +53,7 @@ coverage, tox) live in `pyproject.toml`. The build backend is
 
 ## Dependency lock
 
-`uv.lock` is committed so developer checkouts, CI, and ORC verification use the
+`uv.lock` is committed so developer checkouts and CI use the
 same reviewed dependency versions. Normal installs and `uv run` commands use
 the lock in `--locked` mode and fail when it no longer matches
 `pyproject.toml`.
@@ -125,8 +125,11 @@ Release order:
    "Use pymcurl devel wheels" and "Relock pymcurl" steps and the `check.py`
    call in `setup-python-env`, the mcurl-devel steps, `/mcurl-wheels` mounts,
    find-links variables, checks and `PX_REQUIRE_MCURL_FIX` settings in
-   `ci.yml` and `build.yml`, `PX_REQUIRE_MCURL_FIX` in the tox `passenv`
-   lists, the `skipif` in `tests/test_ntlm_burst.py`, and this section.
+   `.github/workflows/ci.yml` and `.github/workflows/build.yml`, the
+   `MCURL_WHEELS`/`PX_REQUIRE_MCURL_FIX` handling in `build.sh`, the
+   `PX_REQUIRE_MCURL_FIX` tox `passenv` lists in `pyproject.toml`, the
+   `skipif` checks in `tests/test_ntlm_burst.py` and
+   `tests/test_stream_upload.py`, and this section.
 3. Release px 0.13.1.
 
 ## GitHub Actions
@@ -493,11 +496,9 @@ resolve the newest release from PyPI.
   the wheel suites.
   On macOS the test job uses uv-managed CPython (the setup action's
   `managed-python` input and `UV_PYTHON_PREFERENCE=only-managed` for the tox
-  environments) rather than setup-python's or Homebrew's: on the macOS 15+
-  runners those interpreters stall name lookups for about 35 seconds each (see
-  [Testing](testing.md#macos-specific-reasoning)), which made every macOS wheel
-  environment run for about 19.5 minutes. The wheels, binary and release build
-  jobs are unchanged.
+  environments) rather than setup-python's or Homebrew's. This avoids
+  runner-specific name-resolution stalls; the wheels, binary and release build
+  jobs are otherwise unchanged.
   `build.sh` ensures the tox driver venv is created with a non-free-threaded
   Python 3.14 (`/opt/python/cp314-cp314/bin` is preferred when present; the
   version is pinned because the glibc test container has no Python and uv
@@ -552,16 +553,15 @@ same containers, `build.sh` functions and artifact hand-offs, plus a
    provides (`extract_archives`, then `test_binary` with tox).
 5. `scenario` brings up the Docker corporate-proxy lab and runs
    `tests/scenarios -m scenario` through its network-resident client, then
-   tears the lab down. It archives `/home/gt/code/mcurl` at `devel` and builds
-   a temporary wheel in the release-check directory for the runner, without
-   modifying that checkout. It skips with a message instead of failing when
-   Docker is unavailable, and ignores `--fresh` (there is no tree copy to
-   discard).
+   tears the lab down. Set `MCURL_SRC` to an mcurl checkout to build a
+   temporary devel wheel for the runner without modifying that checkout. It
+   skips with a message instead of failing when Docker is unavailable, and
+   ignores `--fresh` (there is no tree copy to discard).
 
 Usage is `./build.sh release_check [--fresh] [glibc|musl|scenario|all]`; the
 default is all three. Each glibc/musl job works on its own copy of the
 working tree (tracked and untracked, not ignored) under `RELEASE_CHECK_DIR`
-(default `px-release-check` under `$ORC_SCRATCH_DIR` or `/tmp`), so the
+(default `/tmp/px-release-check`), so the
 checkout never receives root-owned build output. Completed stages are
 remembered and skipped on re-runs, which makes iterating on a failing stage
 cheap; `--fresh` discards them. The glibc

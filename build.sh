@@ -481,9 +481,10 @@ build_local() {
 # the real-Px scenario suite against the Docker corporate-proxy lab
 # (tests/scenarios/env/scenario-env.sh). Run before dispatching build.yml.
 # Usage: ./build.sh release_check [--fresh] [glibc|musl|scenario|all]
-# Environment: RELEASE_CHECK_DIR (work dir, default px-release-check under
-#   $ORC_SCRATCH_DIR or /tmp), UV_PYTHON (host sdist build, default 3.14),
-#   TEST_IMAGE_GLIBC (glibc test container, default ubuntu).
+# Environment: RELEASE_CHECK_DIR (work dir, default /tmp/px-release-check),
+#   MCURL_SRC (mcurl checkout used to build a temporary scenario wheel),
+#   UV_PYTHON (host sdist build, default 3.14), TEST_IMAGE_GLIBC (glibc test
+#   container, default ubuntu).
 # The working tree (tracked and untracked, not ignored) is copied per job, so
 # the checkout is never touched. Finished stages are skipped on re-runs while
 # the tree is unchanged; --fresh starts over. The scenario stage runs against
@@ -574,10 +575,10 @@ rc_scenario() {
     # pymcurl's required streaming-upload fix is still unreleased. Archive the
     # devel checkout rather than installing from or modifying it, then overlay
     # its wheel only in the network-resident scenario runner.
-    if [ -d /home/gt/code/mcurl/.git ]; then
+    if [ -n "${MCURL_SRC:-}" ] && [ -d "$MCURL_SRC/.git" ]; then
         _mcurl_root=$(mktemp -d "$RC_ROOT/mcurl-devel.XXXXXX")
         _mcurl_wheels=$(mktemp -d "$RC_ROOT/mcurl-wheels.XXXXXX")
-        git -C /home/gt/code/mcurl archive devel | tar -x -C "$_mcurl_root"
+        git -C "$MCURL_SRC" archive devel | tar -x -C "$_mcurl_root"
         uv build --wheel "$_mcurl_root" --out-dir "$_mcurl_wheels"
         export MCURL_WHEELS="$_mcurl_wheels" PX_REQUIRE_MCURL_FIX=1
     fi
@@ -601,7 +602,7 @@ release_check() {
         esac
     done
     RC_TARGETS="${RC_TARGETS:-glibc musl scenario}"
-    RC_ROOT="${RELEASE_CHECK_DIR:-${ORC_SCRATCH_DIR:-/tmp}/px-release-check}"
+    RC_ROOT="${RELEASE_CHECK_DIR:-/tmp/px-release-check}"
     export UV_PYTHON="${UV_PYTHON:-3.14}"
     cd "$(dirname "$0")"
 

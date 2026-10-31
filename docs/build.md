@@ -70,7 +70,7 @@ release on `master`. A changed lock is treated as a release candidate, including
 changes to transitive dependencies that do not have a minimum in
 `pyproject.toml`.
 
-### Temporary: pymcurl 8.23.0.3 from mcurl devel builds
+### pymcurl 8.23.0.3
 
 Px 0.13.1 needs pymcurl 8.23.0.3 or newer from PyPI. It fixes px#268
 (`Curl.get_os_errno`) and streams `bridge()` request bodies through proxy
@@ -78,10 +78,10 @@ authentication (`mcurl.REWIND_ERROR`, a seek callback, and the
 `Expect: 100-continue` probe and immediate auth-method cache that px's streamed
 uploads rely on). `pyproject.toml` sets the minimum and the committed `uv.lock`
 pins the PyPI release, so CI, `build.sh` and the scenario client install
-pymcurl the same way as any other dependency; no devel wheels, relock step or
-`PX_REQUIRE_MCURL_FIX` switch exists any more. The #268 and streamed-upload
-tests always run and fail if pymcurl is too old. `bind_upload_resume()` in
-`px/handler.py` keeps its fallback for pymcurl without `transfer_id`.
+pymcurl the same way as any other dependency; no devel wheels or relock step
+exists any more. The #268 and streamed-upload tests always run and fail if
+pymcurl is too old. `bind_upload_resume()` in
+`px/handler.py` passes each transfer's `transfer_id` to `resume_upload()`.
 
 ## GitHub Actions
 

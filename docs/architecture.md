@@ -187,16 +187,13 @@ identifies the handle's current transfer and changes on `reset()`, and calling
 `body_reader.resume` to `functools.partial(self.curl.resume_upload,
 transfer_id)`, so a resume that only runs once the same handle has moved on to
 a later transfer is recognised as stale by mcurl and discarded (`False`) rather
-than reaching the wrong transfer or raising. Against older pymcurl that has
-`resume_upload` but no `transfer_id`, it binds the plain no-argument call
-instead, which is what that version expects.
+than reaching the wrong transfer or raising.
 
 Locking: a `threading.Lock` in `RequestBody` guards the h11 state and the
 pending chunk shared by mcurl's thread (`read()`) and the event loop
 (`_fetch_done()`). At most one event-loop read is in flight (`_fetching`), so
 `read()` returns `None` again instead of touching h11 meanwhile, and `drain()`
-awaits that task before discarding the rest of the body. A pymcurl without
-`resume_upload` falls back to the old blocking read on mcurl's thread.
+awaits that task before discarding the rest of the body.
 
 mcurl then handles proxy authentication for a body that cannot rewind (see its
 "Streamed request bodies"): except for preconfigured Basic, it sends
@@ -386,7 +383,7 @@ to send further requests to a proxy once `failure_threshold` (3) consecutive
 sends 401 to the client without contacting the upstream proxy. `--authretry`
 (`STATE.authretry`, default `600` seconds; `0` disables retrying) is handed to `mcurl.MCurl.set_auth_retry()`
 right after the multi object is created in `parse_config()`. Px requires
-pymcurl 8.23.0.2 or newer, which supplies this API. mcurl itself owns all
+pymcurl 8.23.0.3 or newer, which supplies this API. mcurl itself owns all
 retry/backoff state (the
 blocked-since timestamp, the in-flight probe slot) — Px only forwards the
 configured interval and never tracks failures or retries on its own.

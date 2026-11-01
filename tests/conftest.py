@@ -105,6 +105,14 @@ COVER_FAST = {
     "test_upload_through_ntlm_proxy_first_request",
 }
 LOOP_FIXTURE = "loop_kind"
+LOOP_MODULE = "test_stream_upload.py"
+# The HTTP method does not change how a body is streamed, so one method per body framing is enough
+METHOD_PARAM = "method"
+
+
+def _cover_keys(item):
+    skip = {LOOP_FIXTURE, METHOD_PARAM}
+    return {(name, repr(value)) for name, value in item.callspec.params.items() if name not in skip}
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -112,27 +120,31 @@ def pytest_collection_modifyitems(config, items):
     """Keep the fast lane (-m "... and not slow") short without dropping any test from the full lane.
 
     Stream upload tests run under both event loops: each CI job only runs its own loop in the fast lane (the
-    asyncio job sets PX_EVENT_LOOP=asyncio). Parametrized Px tests in COVER_FAST keep the first cases that cover
-    every parameter value once (macOS already pairs auth modes with PX_CI_MINIMAL)."""
+    asyncio job sets PX_EVENT_LOOP=asyncio). Parametrized Px tests in COVER_FAST keep a small set of cases that
+    runs every parameter value at least once (macOS already pairs auth modes with PX_CI_MINIMAL)."""
     loop = os.environ.get("PX_EVENT_LOOP", "").lower()
     loop = "" if loop == "auto" else loop
     minimal = os.environ.get("PX_CI_MINIMAL") == "1"
-    covered = set()
+    groups = {}
     for item in items:
         callspec = getattr(item, "callspec", None)
         if callspec is None:
             continue
-        if LOOP_FIXTURE in callspec.params and callspec.params[LOOP_FIXTURE] != loop:
+        if item.path.name == LOOP_MODULE and LOOP_FIXTURE in callspec.params and callspec.params[LOOP_FIXTURE] != loop:
             item.add_marker(pytest.mark.slow)
-            continue
-        if minimal or item.originalname not in COVER_FAST:
-            continue
-        keys = {
-            (item.originalname, name, repr(value)) for name, value in callspec.params.items() if name != LOOP_FIXTURE
-        }
-        if keys <= covered:
-            item.add_marker(pytest.mark.slow)
-        covered |= keys
+        elif not minimal and item.originalname in COVER_FAST:
+            groups.setdefault(item.originalname, []).append(item)
+    for group in groups.values():
+        keys = {id(item): _cover_keys(item) for item in group}
+        uncovered = set().union(*keys.values())
+        kept = set()
+        while uncovered:
+            best = max(group, key=lambda item: len(keys[id(item)] & uncovered))
+            kept.add(id(best))
+            uncovered -= keys[id(best)]
+        for item in group:
+            if id(item) not in kept:
+                item.add_marker(pytest.mark.slow)
 
 
 MEMORY_ROWS = pytest.StashKey[list[tuple[str, int, int, int]]]()

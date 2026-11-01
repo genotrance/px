@@ -23,7 +23,7 @@ import mcurl
 import psutil
 import pytest
 from fixtures import *  # noqa: F403
-from helpers import print_buffer, quit_px, run_px
+from helpers import is_port_free, print_buffer, quit_px, run_px
 
 from px import handler
 
@@ -318,7 +318,7 @@ def start_px(name, port, tmp_path, flags, loop_kind, extra_env=None):
     return run_px(name, port, tmp_path, flags, env, startup_timeout=90)
 
 
-@pytest.fixture(params=EVENT_LOOPS, ids=["auto-loop", "asyncio"])
+@pytest.fixture(scope="module", params=EVENT_LOOPS, ids=["auto-loop", "asyncio"])
 def loop_kind(request):
     return request.param
 
@@ -329,6 +329,17 @@ def direct_px(px_port, tmp_path, loop_kind):
     yield px_port, subp
     print_buffer(buffer)
     quit_px("StreamDirect", subp, cmd, strict=False)
+
+
+@pytest.fixture(scope="module")
+def shared_direct_px(px_port, tmp_path_factory, loop_kind):
+    "One px for the tests that only send requests and keep no state in px, on the block's unused second port"
+    port = px_port + 1
+    assert is_port_free(port), f"Port {port} in use"
+    subp, cmd, buffer = start_px("StreamShared", port, tmp_path_factory, "--noproxy=127.0.0.1 --workers=1", loop_kind)
+    yield port
+    print_buffer(buffer)
+    quit_px("StreamShared", subp, cmd, strict=False)
 
 
 @pytest.fixture
@@ -618,8 +629,8 @@ def test_rewind_error_detection():
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH"])
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
-def test_body_reaches_origin_intact(direct_px, origin, method, chunked):
-    port, _ = direct_px
+def test_body_reaches_origin_intact(shared_direct_px, origin, method, chunked):
+    port = shared_direct_px
     client = Client(port)
     try:
         response = client.send(method, f"http://{origin.addr}/up", BODY_SIZE, chunked=chunked)
@@ -636,9 +647,9 @@ def test_body_reaches_origin_intact(direct_px, origin, method, chunked):
         assert "transfer-encoding" not in seen["headers"]
 
 
-def test_chunked_trailers_and_keep_alive(direct_px, origin):
+def test_chunked_trailers_and_keep_alive(shared_direct_px, origin):
     "Trailers are consumed and the connection stays usable for the next request"
-    port, _ = direct_px
+    port = shared_direct_px
     client = Client(port)
     try:
         url = f"http://{origin.addr}/up"
@@ -654,8 +665,8 @@ def test_chunked_trailers_and_keep_alive(direct_px, origin):
     assert "x-checksum" not in origin.requests[0]["headers"]
 
 
-def test_empty_post_and_zero_length_chunked(direct_px, origin):
-    port, _ = direct_px
+def test_empty_post_and_zero_length_chunked(shared_direct_px, origin):
+    port = shared_direct_px
     client = Client(port)
     try:
         url = f"http://{origin.addr}/up"
@@ -666,9 +677,9 @@ def test_empty_post_and_zero_length_chunked(direct_px, origin):
     assert [r["length"] for r in origin.requests] == [0, 0]
 
 
-def test_expect_continue_does_not_deadlock(direct_px, origin):
+def test_expect_continue_does_not_deadlock(shared_direct_px, origin):
     "px answers 100 Continue itself, so a client waiting for it sends the body"
-    port, _ = direct_px
+    port = shared_direct_px
     client = Client(port, timeout=20)
     try:
         url = f"http://{origin.addr}/up"
@@ -682,8 +693,8 @@ def test_expect_continue_does_not_deadlock(direct_px, origin):
     assert all("expect" not in r["headers"] for r in origin.requests)
 
 
-def test_hop_by_hop_headers_not_forwarded(direct_px, origin):
-    port, _ = direct_px
+def test_hop_by_hop_headers_not_forwarded(shared_direct_px, origin):
+    port = shared_direct_px
     client = Client(port)
     headers = [
         "Connection: close, X-Hop",

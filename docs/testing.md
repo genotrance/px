@@ -900,8 +900,14 @@ tests serially and sets the wall time; every case starts one or more Px processe
   loop's cases are `slow`.
 - Parameter products: the tests listed in `COVER_FAST` (`test_proxy`,
   `test_proxy_auth`, `test_multiprocessing_workers_auth` and the parametrized
-  stream upload tests) keep, in the fast lane, only the first cases that run
-  every parameter value once. The full lane runs the whole product.
+  stream upload tests) keep, in the fast lane, only a small set of cases that
+  runs every parameter value at least once (the HTTP method of the body tests
+  is not a coverage dimension). The full lane runs the whole product.
+
+Stream upload tests that only send requests and keep no state in Px share one
+module-scoped Px per event loop (`shared_direct_px`, on the second port of the
+worker's block) instead of starting a Px each, since a Px start and `--quit`
+cost several seconds on Windows.
 
 Everything else in the suite — including `test_network.py`'s process-spawning
 tests — runs in roughly a second or two per test once the avoidable waits

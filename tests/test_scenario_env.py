@@ -19,4 +19,7 @@ def test_scenario_env_installs_mcurl_candidate_wheel():
 
 
 def test_scenario_env_checks_all_non_device_entries_for_host_ownership():
-    assert 'find "$ROOT" ! -type c ! -user "$(id -u)"' in SCRIPT.read_text()
+    text = SCRIPT.read_text()
+    assert "/proc/self/mountinfo" in text
+    assert 'find "${find_args[@]}" ! -type c ! -user "$(id -u)" -print' in text
+    assert "-prune -o" in text

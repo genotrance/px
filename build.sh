@@ -493,12 +493,38 @@ docker_run_user() {
         "$_drun" "$_dsh" -c "mkdir -p $_dh && $_dscript"
 }
 
+# find_non_host_owned <dir>...: print non-device entries not owned by the host
+# user. On Linux, mount points below the checked trees are pruned because the
+# sandbox mounts its own uid-65534 placeholders there.
+find_non_host_owned() {
+    _droots=() _dmounts=() _dfind=()
+    for _droot in "$@"; do
+        _droots+=("$(cd "$_droot" && pwd -P)") || return 1
+    done
+    if [ -r /proc/self/mountinfo ]; then
+        while IFS= read -r _dmount; do
+            _dmount="$(printf '%b' "$_dmount")"
+            for _droot in "${_droots[@]}"; do
+                case "$_dmount" in "$_droot"/*) _dmounts+=("$_dmount"); break ;; esac
+            done
+        done < <(awk '{print $5}' /proc/self/mountinfo)
+    fi
+    for _droot in "${_droots[@]}"; do _dfind+=("$_droot"); done
+    if [ "${#_dmounts[@]}" -gt 0 ]; then
+        _dfind+=("(")
+        for _dmount in "${_dmounts[@]}"; do _dfind+=(-path "$_dmount" -o); done
+        unset '_dfind[${#_dfind[@]}-1]'
+        _dfind+=(")" -prune -o)
+    fi
+    find "${_dfind[@]}" ! -type c ! -user "$(id -u)" -print 2>/dev/null
+}
+
 # check_no_root_files <dir>...: fail if a mounted tree holds entries not owned by
 # the host user (a container wrote to the mount as a different user). Skipped when
-# the host user is root. Device nodes are ignored.
+# the host user is root. Device nodes and nested mount points are ignored.
 check_no_root_files() {
     [ "$(id -u)" != 0 ] || return 0
-    _dfound="$(find "$@" ! -type c ! -user "$(id -u)" 2>/dev/null | head -20)"
+    _dfound="$(find_non_host_owned "$@" | head -20)"
     [ -z "$_dfound" ] || {
         printf 'ERROR: files not owned by the host user in a mounted tree (containers must run as the host user):\n%s\n' "$_dfound" >&2
         return 1

@@ -308,7 +308,10 @@ def test_binary_is_launched_on_the_test_runner_before_the_suite():
 
 def test_host_ownership_check_includes_directories_and_files():
     script = (ROOT / "build.sh").read_text()
-    assert 'find "$@" ! -type c ! -user "$(id -u)"' in script
+    assert "find_non_host_owned()" in script
+    assert "/proc/self/mountinfo" in script
+    assert 'find "${_dfind[@]}" ! -type c ! -user "$(id -u)" -print' in script
+    assert "-prune -o" in script
 
 
 def test_binary_smoke_check_imports_ssl_and_spnego_before_artifact_tests():

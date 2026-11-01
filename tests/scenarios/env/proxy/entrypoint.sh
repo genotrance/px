@@ -124,4 +124,5 @@ EOF
 fi
 
 cat /etc/squid/common.conf /etc/squid/auth.conf >/etc/squid/squid.conf
+umask 0022
 exec squid -NYCd 1

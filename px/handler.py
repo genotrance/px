@@ -409,6 +409,16 @@ def bind_upload_resume(curl, body_reader):
 # Tunnel relay for CONNECT
 
 
+def _is_connect_passthrough(curl, used_proxy):
+    """Return whether Px must relay the upstream proxy's CONNECT response.
+
+    CURLINFO_USED_PROXY describes libcurl's transfer, but CONNECT_ONLY can
+    report no used proxy even though its active socket is connected to the
+    configured proxy. The configured CONNECT mode is the authoritative state.
+    """
+    return curl.is_connect and not curl.is_tunnel and curl.proxy is not None
+
+
 class TunnelRelay:
     """Bidirectional relay between client socket and upstream socket using event loop FD watchers.
 
@@ -1319,9 +1329,10 @@ class ConnectionHandler:
         "Handle CONNECT tunnel after upstream connection is established"
         self._tunnel_established = True
         ret, used_proxy = self.curl.get_used_proxy()
+        passthrough = _is_connect_passthrough(self.curl, used_proxy)
         if ret != 0:
             dprint(self.curl.easyhash + ": Failed to get used proxy: " + str(ret))
-        elif self.curl.is_tunnel or not used_proxy:
+        elif not passthrough and (self.curl.is_tunnel or not used_proxy):
             # Inform client that SSL connection has been established
             dprint(self.curl.easyhash + ": SSL connected")
             self._send_raw(b"HTTP/1.1 200 Connection established\r\nProxy-Agent: Px\r\n\r\n")
@@ -1352,7 +1363,7 @@ class ConnectionHandler:
             # auth=NONE passthrough: send original client headers to upstream proxy.
             # Use the client's own authority-form target: mcurl prefixes curl.url with
             # "http://" for its connect-only handle, which the proxy would parse as host "http"
-            if self.curl.is_connect and (not self.curl.is_tunnel and used_proxy):
+            if passthrough:
                 dprint(self.curl.easyhash + ": Sending original client headers")
                 curl_sock.sendall((f"{self.curl.method} {target} {self.curl.request_version}\r\n").encode())
                 if self.curl.xheaders is not None:

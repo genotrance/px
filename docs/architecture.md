@@ -147,7 +147,11 @@ for each request to avoid state conflicts.
    from the thread pool to the asyncio transport via `call_soon_threadsafe`.
    CONNECT tunnelling uses zero-thread bidirectional relays: `TunnelRelay`
    (FD watchers) on Linux, `_async_tunnel_relay` (StreamReader/Writer +
-   IOCP) on Windows.
+   IOCP) on Windows. For `--auth=NONE` pass-through, the configured curl
+   mode identifies the upstream-proxy tunnel; `CURLINFO_USED_PROXY` is not
+   used because connect-only transfers can report no proxy after returning
+   the active proxy socket. Px therefore relays the upstream CONNECT response
+   exactly once instead of also generating its normal-mode 200 response.
 5. **Keep-alive** — the connection loop supports HTTP/1.1 keep-alive, processing
    multiple requests on a single TCP connection until a `Connection: close`
    header or a CONNECT tunnel consumes the socket. A request body must be fully
@@ -483,7 +487,8 @@ _handle_request()
   │     └─ Thread released after do() returns
   │
   └─ _handle_connect_tunnel()
-       ├─ Send "200 Connection established" to client
+       ├─ Send "200 Connection established" to client (normal/direct mode);
+       │  pass-through relays the upstream proxy's response instead
        ├─ writer.drain()  ← flush the 200 response
        │
        ├─ [Linux]   pause_reading() + os.dup(client_fd)

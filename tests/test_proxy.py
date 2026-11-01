@@ -1,12 +1,16 @@
 import copy
 import http.client
 import os
+import socket
 import socketserver
 import threading
+import time
 
 import pytest
 from fixtures import *  # noqa: F403
 from helpers import *  # noqa: F403
+
+from px.handler import _is_connect_passthrough
 
 ##
 # Tests
@@ -56,6 +60,12 @@ def test_proxy_auth_chain(
     run_in_temp(cmd, tmp_path, px_upstream, px_chain)
 
 
+def test_auth_none_connect_passthrough_uses_configured_proxy_not_curl_transfer_info():
+    "CONNECT_ONLY's proxy transfer info must not cause Px to send a duplicate 200 response"
+    curl = type("CurlState", (), {"is_connect": True, "is_tunnel": False, "proxy": "corp-proxy.example"})()
+    assert _is_connect_passthrough(curl, used_proxy=False)
+
+
 class _HeaderRecorder(socketserver.ThreadingTCPServer):
     "A fake upstream proxy that records each request's raw header lines and accepts it"
 
@@ -88,6 +98,89 @@ class _HeaderRecorderHandler(socketserver.StreamRequestHandler):
                 b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body
             )
             self.wfile.flush()
+
+
+class _ConnectTunnelProxy(_HeaderRecorder):
+    "A fake upstream proxy that sends a realistic CONNECT response and raw tunnel bytes"
+
+    def __init__(self, chunked):
+        self.chunked = chunked
+        socketserver.ThreadingTCPServer.__init__(self, ("127.0.0.1", 0), _ConnectTunnelProxyHandler)
+        self.requests = []
+
+
+class _ConnectTunnelProxyHandler(_HeaderRecorderHandler):
+    def handle(self):
+        request_line = self.rfile.readline().decode("latin-1").rstrip("\r\n")
+        head = [request_line]
+        while (line := self.rfile.readline()) not in (b"\r\n", b"\n", b""):
+            head.append(line.decode("latin-1").rstrip("\r\n"))
+        self.server.requests.append(head)
+
+        response = (
+            b"HTTP/1.1 200 Connection established\r\n"
+            b"Content-Length: 0\r\n"
+            b"Connection: keep-alive\r\n"
+            b"Proxy-Connection: keep-alive\r\n"
+            b"Proxy-Authenticate: Negotiate bXV0dWFsLWF1dGg=\r\n\r\n"
+        )
+        tunnel_data = b"\x16\x03\x03raw-tunnel-server-data"
+        if self.server.chunked:
+            for offset in range(0, len(response), 7):
+                self.wfile.write(response[offset : offset + 7])
+                self.wfile.flush()
+                time.sleep(0.001)
+            self.wfile.write(tunnel_data)
+        else:
+            self.wfile.write(response + tunnel_data)
+        self.wfile.flush()
+        assert self.rfile.read(len(b"raw-tunnel-client-data")) == b"raw-tunnel-client-data"
+
+
+def _read_through(sock, marker):
+    data = b""
+    while marker not in data:
+        chunk = sock.recv(4096)
+        assert chunk
+        data += chunk
+    return data
+
+
+@pytest.mark.parametrize("event_loop", ["", "asyncio"])
+@pytest.mark.parametrize("chunked", [False, True], ids=["coalesced", "chunked"])
+def test_auth_none_connect_relays_one_response_then_raw_tunnel_data(px_port, tmp_path, event_loop, chunked):
+    "The upstream CONNECT response is relayed once and followed only by raw tunnel bytes"
+    upstream = _ConnectTunnelProxy(chunked)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    env = copy.deepcopy(os.environ)
+    if event_loop:
+        env["PX_EVENT_LOOP"] = event_loop
+    else:
+        env.pop("PX_EVENT_LOOP", None)
+    subp, cmd, buffer = run_px(
+        "AuthNoneConnectTunnel",
+        px_port,
+        tmp_path,
+        f"--proxy={upstream.addr} --auth=NONE --noproxy= --workers=1",
+        env,
+    )
+    try:
+        with socket.create_connection(("127.0.0.1", px_port), timeout=15) as client:
+            client.sendall(
+                b"CONNECT origin.test:443 HTTP/1.1\r\n"
+                b"Host: origin.test:443\r\n"
+                b"Proxy-Authorization: Negotiate dGVzdA==\r\n\r\n"
+            )
+            received = _read_through(client, b"raw-tunnel-server-data")
+            response_end = received.index(b"\r\n\r\n") + 4
+            assert received[:response_end].startswith(b"HTTP/1.1 200 ")
+            assert received[response_end:] == b"\x16\x03\x03raw-tunnel-server-data"
+            client.sendall(b"raw-tunnel-client-data")
+    finally:
+        print_buffer(buffer)
+        quit_px("AuthNoneConnectTunnel", subp, cmd, strict=False)
+        upstream.shutdown()
+        upstream.server_close()
 
 
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])

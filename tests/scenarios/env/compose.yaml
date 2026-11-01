@@ -91,6 +91,9 @@ services:
     # root-owned. Other services, including the privileged dc, never mount
     # the checkout and stay root.
     user: "${SCENARIO_CLIENT_USER:-0:0}"
+    # Squid writes its shared access logs as proxy:proxy (13) with mode 0640.
+    # Keep the host identity primary while granting read-only log access.
+    group_add: ["13"]
     environment:
       HOME: /tmp/px-client-home
       UV_CACHE_DIR: /tmp/px-client-home/uv-cache

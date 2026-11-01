@@ -76,7 +76,9 @@ changing it.
 The `client` service mounts the checkout, so it runs every command as the
 host user (its `HOME` and tool caches live under `/tmp` in the container)
 rather than root, ensuring the run never leaves entries not owned by the host user in the
-checkout; other services never mount the checkout and stay root.
+checkout. It also receives Squid's supplementary log-reader group so the
+wrong-password tests can read the read-only, mode-0640 access-log volume;
+other services never mount the checkout and stay root.
 
 `MCURL_WHEELS` is the downstream release-candidate interface used by mcurl's
 `build.yml` release gate, which supplies one selected candidate wheel. When set

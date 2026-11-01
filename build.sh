@@ -497,26 +497,24 @@ docker_run_user() {
 # user. On Linux, mount points below the checked trees are pruned because the
 # sandbox mounts its own uid-65534 placeholders there.
 find_non_host_owned() {
-    _droots=() _dmounts=() _dfind=()
     for _droot in "$@"; do
-        _droots+=("$(cd "$_droot" && pwd -P)") || return 1
-    done
-    if [ -r /proc/self/mountinfo ]; then
-        while IFS= read -r _dmount; do
-            _dmount="$(printf '%b' "$_dmount")"
-            for _droot in "${_droots[@]}"; do
-                case "$_dmount" in "$_droot"/*) _dmounts+=("$_dmount"); break ;; esac
+        _droot="$(cd "$_droot" && pwd -P)" || return 1
+        _dmounts=""
+        if [ -r /proc/self/mountinfo ]; then
+            _dmounts="$(awk -v root="$_droot/" 'index($5, root) == 1 { print $5 }' /proc/self/mountinfo |
+                while IFS= read -r _dmount; do printf '%b\n' "$_dmount"; done)"
+        fi
+        # -xdev avoids descent into nested sandbox mounts; filter their mount
+        # points too, since find still visits the mount point itself.
+        find "$_droot" -xdev ! -type c ! -user "$(id -u)" -print 2>/dev/null |
+            while IFS= read -r _dentry; do
+                if [ -n "$_dmounts" ] &&
+                    printf '%s\n' "$_dmounts" | grep -F -x -- "$_dentry" >/dev/null; then
+                    continue
+                fi
+                printf '%s\n' "$_dentry"
             done
-        done < <(awk '{print $5}' /proc/self/mountinfo)
-    fi
-    for _droot in "${_droots[@]}"; do _dfind+=("$_droot"); done
-    if [ "${#_dmounts[@]}" -gt 0 ]; then
-        _dfind+=("(")
-        for _dmount in "${_dmounts[@]}"; do _dfind+=(-path "$_dmount" -o); done
-        unset '_dfind[${#_dfind[@]}-1]'
-        _dfind+=(")" -prune -o)
-    fi
-    find "${_dfind[@]}" ! -type c ! -user "$(id -u)" -print 2>/dev/null
+    done
 }
 
 # check_no_root_files <dir>...: fail if a mounted tree holds entries not owned by

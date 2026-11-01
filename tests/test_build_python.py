@@ -310,8 +310,15 @@ def test_host_ownership_check_includes_directories_and_files():
     script = (ROOT / "build.sh").read_text()
     assert "find_non_host_owned()" in script
     assert "/proc/self/mountinfo" in script
-    assert 'find "${_dfind[@]}" ! -type c ! -user "$(id -u)" -print' in script
-    assert "-prune -o" in script
+    assert 'find "$_droot" -xdev ! -type c ! -user "$(id -u)" -print' in script
+    assert 'grep -F -x -- "$_dentry"' in script
+
+    syntax = subprocess.run(  # noqa: S603 -- validates the checked-in POSIX script
+        ["sh", "-n", str(ROOT / "build.sh")],  # noqa: S607 -- invokes the POSIX shell
+        capture_output=True,
+        text=True,
+    )
+    assert syntax.returncode == 0, syntax.stderr
 
 
 def test_binary_smoke_check_imports_ssl_and_spnego_before_artifact_tests():

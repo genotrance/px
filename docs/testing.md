@@ -75,7 +75,7 @@ changing it.
 
 The `client` service mounts the checkout, so it runs every command as the
 host user (its `HOME` and tool caches live under `/tmp` in the container)
-rather than root, ensuring the run never leaves root-owned files in the
+rather than root, ensuring the run never leaves files not owned by the host user in the
 checkout; other services never mount the checkout and stay root.
 
 `MCURL_WHEELS` is the downstream release-candidate interface used by mcurl's

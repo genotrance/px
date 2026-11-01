@@ -1,6 +1,7 @@
 from pathlib import Path
 
 SCRIPT = Path(__file__).parent / "scenarios" / "env" / "scenario-env.sh"
+COMPOSE = SCRIPT.parent / "compose.yaml"
 
 
 def test_scenario_env_installs_mcurl_candidate_wheel():
@@ -23,3 +24,10 @@ def test_scenario_env_checks_all_non_device_entries_for_host_ownership():
     assert "/proc/self/mountinfo" in text
     assert 'find "${find_args[@]}" ! -type c ! -user "$(id -u)" -print' in text
     assert "-prune -o" in text
+
+
+def test_scenario_client_keeps_host_identity_and_reads_squid_logs():
+    text = COMPOSE.read_text()
+    assert 'user: "${SCENARIO_CLIENT_USER:-0:0}"' in text
+    assert 'group_add: ["13"]' in text
+    assert "mode 0640" in text

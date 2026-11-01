@@ -24,10 +24,10 @@ Tests live in `tests/`.
 | `test_network.py` | Network integration tests — `--quit`, `--listen`, `--hostonly`, `--gateway`, `--allow`, `--noproxy` |
 | `test_pac.py` | PAC file tests — loading, evaluation, encoding, JS callables (`dnsResolve` returning `null` on failure, `isResolvable`, `isInNet`, `myIpAddress`) |
 | `test_multiprocessing.py` | Multi-worker tests — `--workers=2` with and without auth on all platforms |
-| `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining |
+| `test_proxy.py` | Proxy functionality tests — HTTP methods, auth, upstream auth, chaining, and `--auth=NONE` CONNECT reaching a fake upstream proxy with the client's own request target and `Proxy-Authorization` (px#282) |
 | `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
-| `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split, the uv cache without a restore fallback, fresh PyPI pymcurl install, `tools.py --check-mcurl` API guard and `--smoke-request` against a real px, and no cross-project or unreleased dependency in workflows |
-| `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix (needs bash, jq and PyYAML) |
+| `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split, the uv cache without a restore fallback, fresh PyPI pymcurl install, `tools.py --check-mcurl` API guard and `--smoke-request` against a real px, `tools.py --scenario-diagnostics` token redaction and helper-invocation counting, and no cross-project or unreleased dependency in workflows |
+| `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix, the `scenario-windows` WSL2 keep-alive and `--test-auth` SSPI steps, and token redaction in the scenario log collection (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
 | `test_scenario_env.py` | Guards the `MCURL_WHEELS` candidate-wheel wiring in `scenario-env.sh` used by mcurl's release gate |
 | `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of probe reporting, final-status (401/407) failure, paced httpbin body echoes, bounded 429 retries and separate rate-limit exits, and Negotiate SPN addressing (`_negotiate_test_target`) |
@@ -278,6 +278,20 @@ one named by `PX_EVENT_LOOP`, which CI sets so every job covers one loop):
 - `test_px_test_all_methods_echo`: `px --test=all:<echo URL>` for NTLM and
   Kerberos with unknown auth on both kinds of proxy; GET, POST, PUT, DELETE and
   PATCH must all pass, which requires the echoed body to match what was sent.
+- `test_px_test_auth_all_methods_and_connect`: `px --test-auth --test=all:<echo URL>`
+  (Px as `auth=NONE`, the test client authenticating to the upstream itself
+  with the Kerberos ticket) for `NEGOTIATE` and `ANY`, over plain HTTP and
+  HTTPS (each method becomes a CONNECT through Px), against both the
+  persistent SSO Squid (3128) and the one that closes every connection after
+  each response (3129, "close-on-407"). A final 407, a method that does not
+  report `Passed`, or a `CONNECT http:443` line in Squid's `access.log`
+  (what an `auth=NONE` CONNECT sent before px#282: the connect-only handle's
+  `http://` URL instead of the client's target, answered `500
+  ERR_CANNOT_FORWARD`) fails the test. It prints the length of every
+  forwarded `Proxy-Authorization` token, taken from Px's debug log. The lab's
+  `negotiate_kerberos_auth` helper runs with `-d`, so `cache.log` records
+  each token it receives and its verdict; `tools.py --scenario-diagnostics`
+  summarises those (tokens redacted) and counts helper invocations per token.
 - `test_upload_client_expect_continue`: a client that sends
   `Expect: 100-continue` receives exactly one `100 Continue` and its upload
   arrives intact, including known and unknown NTLM.
@@ -687,6 +701,25 @@ Full mode also runs the Docker corporate-proxy lab's real-Px suite
   it wakes Docker and retries for a bounded 30 seconds; a final failure records
   `docker ps -a` instead of reporting resulting 502 responses as a Px
   regression.
+- `scenario-windows` also runs `px --test --test-auth` with native SSPI, the
+  Windows counterpart of `test_px_test_auth_all_methods_and_connect`. Px
+  runs as `auth=NONE` while the test client authenticates (`--auth=NEGOTIATE`,
+  then `--auth=ANY`) to the SSO Squid addressed by its SPN host name
+  (`squid-sso.corp.test`, pinned to the local Px by `--test-auth`), for HTTP
+  and HTTPS, against the persistent (31282) and close-on-407 (31287) ports.
+  Each combination must report all five methods `Passed` (a final 401/407
+  fails `px --test`) and leave no `CONNECT http:443` in Squid's access log.
+  For every combination the step slices the Squid `access` and `cache` logs
+  to that run (read through `docker exec` into the WSL2 client container,
+  kept in `RUNNER_TEMP`) and prints the forwarded token lengths and how many
+  helper invocations each distinct token reached. A failing combination also
+  dumps the sanitized diagnostics (Px debug log excerpts, access.log result
+  counts, `negotiate_kerberos_auth` verdict lines with tokens redacted) and
+  appends them to the uploaded `sspi-test-auth-diagnostics.txt`. The log
+  collection steps of both scenario jobs redact long base64 runs because the
+  helper's debug output contains every token. This step is exercised only by
+  CI; locally the same loop was run inside the Linux lab's client container
+  with MIT Kerberos standing in for SSPI.
 - The `scenario-windows` "Set up WSL2" step occasionally hangs on GitHub-hosted Windows runners (an open GitHub infra issue, [actions/runner-images#14938](https://github.com/actions/runner-images/issues/14938)), so it has a 5 minute step timeout, the job has a 15 minute timeout, and the runner image is logged just before it. A job that times out with no output after "Set up WSL2" should be re-run rather than debugged locally.
 - The same job also runs Px against the Negotiate-only proxy
   (`squid-sso.corp.test:31288`, resolved to the WSL2 localhost-forwarded

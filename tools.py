@@ -1035,6 +1035,72 @@ def auto_release() -> dict[str, object]:
 # Main
 
 
+# Scenario diagnostics
+
+REDACT_TOKEN = re.compile(r"[A-Za-z0-9+/_-]{40,}={0,2}")
+FORWARDED_AUTH = re.compile(r"Adding header => proxy-authorization: (\w+) sanitized len\((\d+)\)", re.IGNORECASE)
+HELPER_REQUEST = re.compile(r"negotiate_kerberos_auth: DEBUG: Got '(?:YR|KK) (\S+)'")
+HELPER_VERDICT = re.compile(r"negotiate_kerberos_auth: .*(Got '|OK token|ERR|BH |ERROR|WARNING|authenticated)")
+
+
+def redact(line):
+    "Replace every long base64-like run (a Kerberos/NTLM token, PAC group) with its length"
+    return REDACT_TOKEN.sub(lambda match: f"<redacted len {len(match.group(0))}>", line)
+
+
+def scenario_diagnostics(paths):
+    """Summarise one `px --test-auth` run for CI failures without leaking any token.
+
+    Files are classified by name: those containing "access" are Squid access logs, those containing "cache" are
+    Squid cache logs with negotiate_kerberos_auth debug output, anything else is a Px debug log. Returns text
+    with the forwarded Proxy-Authorization token lengths, the helper verdict lines (tokens redacted), how many
+    helper invocations each distinct token (identified by a short hash) reached, and the access.log results.
+    """
+    out = []
+    forwarded = {}
+    helper_tokens = {}
+    for path in paths:
+        name = os.path.basename(path)
+        lines = pathlib.Path(path).read_text(errors="replace").splitlines()
+        if "access" in name:
+            codes = {}
+            for line in lines:
+                fields = line.split()
+                if len(fields) >= 7:
+                    key = f"{fields[5]} {fields[3]}"
+                    codes[key] = codes.get(key, 0) + 1
+            out.append(f"{name}: {sum(codes.values())} requests; method result/status counts: {codes}")
+            bad = [redact(line) for line in lines if " http:443 " in line or "NONE_NONE/500" in line]
+            out.append(
+                f"{name}: {len(bad)} mangled CONNECT or ERR_CANNOT_FORWARD lines" + "".join(f"\n  {b}" for b in bad)
+            )
+        elif "cache" in name:
+            verdicts = [redact(line) for line in lines if HELPER_VERDICT.search(line)]
+            out.append(f"{name}: negotiate_kerberos_auth verdict lines ({len(verdicts)}), tokens redacted:")
+            out.extend(f"  {line}" for line in verdicts)
+            for line in lines:
+                match = HELPER_REQUEST.search(line)
+                if match:
+                    token = match.group(1)
+                    key = (hashlib.sha256(token.encode()).hexdigest()[:12], len(token))
+                    helper_tokens[key] = helper_tokens.get(key, 0) + 1
+        else:
+            lengths = {}
+            for scheme, length in FORWARDED_AUTH.findall("\n".join(lines)):
+                lengths[(scheme, int(length) - 1)] = lengths.get((scheme, int(length) - 1), 0) + 1
+            for key, count in lengths.items():
+                forwarded[key] = forwarded.get(key, 0) + count
+            out.append(f"{name}: forwarded Proxy-Authorization (scheme, token length): count = {lengths}")
+    total = sum(forwarded.values())
+    invocations = sum(helper_tokens.values())
+    repeated = {key: count for key, count in helper_tokens.items() if count != 1}
+    out.append(f"summary: Px forwarded {total} Proxy-Authorization tokens; the helper ran {invocations} times")
+    out.append(
+        f"summary: {len(helper_tokens)} distinct helper tokens (hash, length); reached the helper more than once: {repeated}"
+    )
+    return "\n".join(out)
+
+
 def main():
     # Build
     if "--wheel" in sys.argv:
@@ -1084,6 +1150,9 @@ def main():
     if "--history" in sys.argv:
         print(get_history())
 
+    if "--scenario-diagnostics" in sys.argv:
+        print(scenario_diagnostics(sys.argv[sys.argv.index("--scenario-diagnostics") + 1 :]))
+
     if "--auto-release" in sys.argv and "--help" not in sys.argv:
         output = json.dumps(auto_release(), indent=2)
         print(output)
@@ -1112,6 +1181,8 @@ Build:
   --wheels-dir=DIR	Wheels directory (default: px.dist-linux-musl-x86_64-wheels)
 --docker-plan=VER	Print comma-separated Docker tags that need pushing for VER
 --history	Print latest changelog section
+--scenario-diagnostics FILE...
+		Print a sanitized summary of Px debug logs and Squid access/cache logs (tokens redacted)
 --auto-release	Upgrade locks/CPython and prepare an automatic patch release
   --output FILE	Write the result JSON to FILE
 """)

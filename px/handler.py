@@ -1221,7 +1221,7 @@ class ConnectionHandler:
             else:
                 self._send_error(self.curl.resp, self.curl.errstr)
         elif self.curl.is_connect:
-            await self._handle_connect_tunnel(h11_trailing=self._recv_buf)
+            await self._handle_connect_tunnel(target, h11_trailing=self._recv_buf)
             self._recv_buf = b""  # Consumed by tunnel
 
         await asyncio.to_thread(STATE.mcurl.remove, self.curl)
@@ -1299,7 +1299,7 @@ class ConnectionHandler:
             self.proxy_servers = servers
             return None
 
-    async def _handle_connect_tunnel(self, h11_trailing=b""):
+    async def _handle_connect_tunnel(self, target, h11_trailing=b""):
         "Handle CONNECT tunnel after upstream connection is established"
         self._tunnel_established = True
         ret, used_proxy = self.curl.get_used_proxy()
@@ -1333,10 +1333,12 @@ class ConnectionHandler:
         curl_sock = socket.fromfd(self.curl.sock_fd, socket.AF_INET, socket.SOCK_STREAM)
 
         try:
-            # auth=NONE passthrough: send original client headers to upstream proxy
+            # auth=NONE passthrough: send original client headers to upstream proxy.
+            # Use the client's own authority-form target: mcurl prefixes curl.url with
+            # "http://" for its connect-only handle, which the proxy would parse as host "http"
             if self.curl.is_connect and (not self.curl.is_tunnel and used_proxy):
                 dprint(self.curl.easyhash + ": Sending original client headers")
-                curl_sock.sendall((f"{self.curl.method} {self.curl.url} {self.curl.request_version}\r\n").encode())
+                curl_sock.sendall((f"{self.curl.method} {target} {self.curl.request_version}\r\n").encode())
                 if self.curl.xheaders is not None:
                     for header in self.curl.xheaders:
                         curl_sock.sendall(f"{header}: {self.curl.xheaders[header]}\r\n".encode())

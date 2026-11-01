@@ -443,6 +443,9 @@ resolve the newest release from PyPI.
   binary, which serves a GET and a streamed POST (the upload resume path)
   through it, so a binary that cannot serve requests never reaches the
   artifact upload. `release_check` runs the same `build_binary`.
+  `tools.py --scenario-diagnostics FILE...` is the other `tools.py` CI helper: the
+  `scenario-windows` `--test-auth` step runs it to summarise Px and Squid logs with
+  tokens redacted (see testing.md).
 
 - **test-binary** — extracts the release archives produced by the binary job,
   then tests them using `tox` to verify functionality across all Python

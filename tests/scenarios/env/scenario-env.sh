@@ -158,8 +158,24 @@ test() {
     # Regression check for the host-user rule: nothing the lab touched should
     # leave entries not owned by the host user behind in the checkout.
     if [[ "$(id -u)" != 0 ]]; then
+        local -a mount_points=() find_args=()
+        local mount_point root_path
+        root_path=$(cd "$ROOT" && pwd -P)
+        if [[ -r /proc/self/mountinfo ]]; then
+            while IFS= read -r mount_point; do
+                mount_point=$(printf '%b' "$mount_point")
+                [[ "$mount_point" == "$root_path/"* ]] && mount_points+=("$mount_point")
+            done < <(awk '{print $5}' /proc/self/mountinfo)
+        fi
+        find_args=("$root_path")
+        if ((${#mount_points[@]})); then
+            find_args+=("(")
+            for mount_point in "${mount_points[@]}"; do find_args+=(-path "$mount_point" -o); done
+            unset 'find_args[${#find_args[@]}-1]'
+            find_args+=(")" -prune -o)
+        fi
         local not_owned
-        not_owned=$(find "$ROOT" ! -type c ! -user "$(id -u)" 2>/dev/null)
+        not_owned=$(find "${find_args[@]}" ! -type c ! -user "$(id -u)" -print 2>/dev/null)
         if [[ -n "$not_owned" ]]; then
             printf 'ERROR: files not owned by the host user in checkout after scenario run:\n%s\n' "$not_owned" >&2
             ((status == 0)) && status=1

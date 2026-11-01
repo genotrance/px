@@ -555,7 +555,8 @@ before. The `test-binary` container keeps `--privileged` (as `build.yml`), which
 without root grants no capabilities but disables the seccomp profile.
 `check_no_root_files` runs after every container stage and, for
 `release_check`, over `RELEASE_CHECK_DIR` and the checkout at the end, failing
-with the list of offending entries (skipped when the host user is root). Delete
+with the list of offending entries (skipped when the host user is root and
+excluding nested Linux mount points, such as sandbox placeholders). Delete
 leftovers not owned by the host user from older runs once, by hand, if it reports any.
 
 ## `build.sh`

@@ -5,6 +5,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 ENV_DIR="$ROOT/tests/scenarios/env"
 ENV_FILE=${SCENARIO_ENV_FILE:-"$ENV_DIR/scenario.env"}
 export SCENARIO_SOURCE_DIR="$ROOT"
+# Consumed by compose.yaml's client service `user:` so exec/test commands that
+# touch the read-only checkout mount run as the host user, never root.
+export SCENARIO_CLIENT_USER="$(id -u):$(id -g)"
 
 # Instance 0 is the documented default lab. Each other instance gets its own
 # Compose project, host ports, and subnet, so checkouts running in parallel
@@ -85,7 +88,10 @@ compose_exec() {
 }
 
 test() {
-    local wheels="" started=0 status=0
+    # MCURL_WHEELS may be an arbitrary host path (e.g. a CI workspace) that
+    # doesn't exist, or isn't writable, inside the client image for the host
+    # user; stage wheels under a path the client always owns instead.
+    local wheels="" container_wheels=/tmp/px-mcurl-wheels started=0 status=0
     if [[ -n ${MCURL_WHEELS:-} ]]; then
         [[ -d $MCURL_WHEELS ]] || { echo "MCURL_WHEELS is not a directory: $MCURL_WHEELS" >&2; return 2; }
         wheels=$(cd "$MCURL_WHEELS" && pwd)
@@ -99,17 +105,20 @@ test() {
     fi
     if [[ ${PX_SCENARIO_ENV:-} == start ]]; then
         "${COMPOSE[@]}" up --build --detach --wait --wait-timeout 180
-        "${COMPOSE[@]}" cp origin:/shared/origin.crt "$ENV_DIR/origin-ca.crt"
+        # origin runs as root (it never mounts the checkout) but `compose cp`
+        # would preserve that root ownership onto the host copy; piping bytes
+        # through `exec` instead lets the host shell own the file it writes.
+        "${COMPOSE[@]}" exec -T origin cat /shared/origin.crt > "$ENV_DIR/origin-ca.crt"
         print_env | tee "$ENV_FILE"
         started=1
     fi
-    if compose_exec sh -c 'rm -rf /tmp/px-venv "$1" && if [ -n "$1" ]; then mkdir -p "$1"; fi' sh "$wheels"; then
+    if compose_exec sh -c 'rm -rf /tmp/px-venv "$1"; if [ -n "$2" ]; then mkdir -p "$1"; fi' sh "$container_wheels" "$wheels"; then
         :
     else
         status=$?
     fi
     if ((status == 0)) && [[ -n $wheels ]]; then
-        if "${COMPOSE[@]}" cp "$wheels/." "client:$wheels/"; then
+        if "${COMPOSE[@]}" cp "$wheels/." "client:$container_wheels/"; then
             :
         else
             status=$?
@@ -117,7 +126,7 @@ test() {
     fi
     if ((status == 0)) && "${COMPOSE[@]}" exec -T \
         -e "UV_PYTHON=${UV_PYTHON:-}" \
-        -e "MCURL_WHEELS=$wheels" \
+        -e "MCURL_WHEELS=$([[ -n $wheels ]] && printf '%s' "$container_wheels")" \
         -e "PX_EVENT_LOOP=${PX_EVENT_LOOP:-}" \
         client sh -ceu '
             # Build from a fresh copy so setuptools never writes egg-info into
@@ -145,6 +154,14 @@ test() {
     if ((started)); then
         "${COMPOSE[@]}" down --volumes --remove-orphans || status=$?
         rm -f "$ENV_FILE" "$ENV_DIR/origin-ca.crt"
+    fi
+    # Regression check for the host-user rule: nothing the lab touched should
+    # leave root-owned files behind in the checkout.
+    local root_owned
+    root_owned=$(find "$ROOT" -user root 2>/dev/null)
+    if [[ -n "$root_owned" ]]; then
+        printf 'root-owned files left in checkout after scenario run:\n%s\n' "$root_owned" >&2
+        ((status == 0)) && status=1
     fi
     return "$status"
 }
@@ -234,7 +251,7 @@ case "${1:-}" in
 up)
     check_owner
     "${COMPOSE[@]}" up --build --detach --wait --wait-timeout 180
-    "${COMPOSE[@]}" cp origin:/shared/origin.crt "$ENV_DIR/origin-ca.crt"
+    "${COMPOSE[@]}" exec -T origin cat /shared/origin.crt > "$ENV_DIR/origin-ca.crt"
     print_env | tee "$ENV_FILE"
     ;;
 down)

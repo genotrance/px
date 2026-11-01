@@ -28,6 +28,7 @@
 ### Internal
 - The corporate-proxy Docker scenario suite runs in CI and `./build.sh release_check`.
 - Release publishing is split between `build.yml` (GitHub release/PyPI) and `publish.yml` (Docker/winget).
+- The scenario lab's client container, the only one that mounts the checkout, now runs as the host user so it never leaves root-owned files behind.
 
 ## v0.13.0 — 2026-10-24
 

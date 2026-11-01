@@ -73,6 +73,11 @@ changing it.
 
 `test` installs the locked dependencies (pymcurl from PyPI) in the client and runs pytest, so the streamed-upload coverage always runs.
 
+The `client` service mounts the checkout, so it runs every command as the
+host user (its `HOME` and tool caches live under `/tmp` in the container)
+rather than root, ensuring the run never leaves root-owned files in the
+checkout; other services never mount the checkout and stay root.
+
 `MCURL_WHEELS` is the downstream release-candidate interface used by mcurl's
 `build.yml` release gate, which supplies one selected candidate wheel. When set
 to a directory containing `pymcurl-*.whl`, the directory is copied into the

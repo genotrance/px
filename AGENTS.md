@@ -14,7 +14,7 @@
 
 ## Docker
 
-- Containers that mount a checkout or worktree run as the host user (`--user "$(id -u):$(id -g)"`, HOME and tool caches under `/tmp` in the container), never root, so no root-owned files are left behind. Root-only steps (package installs) run in a derived image (`docker commit` of a root container with nothing writable mounted), not on the mount. `build.sh` fails if a mounted tree contains root-owned files.
+- Containers that mount a checkout or worktree run as the host user (`--user "$(id -u):$(id -g)"`, HOME and tool caches under `/tmp` in the container), never root, so no files not owned by the host user are left behind. Root-only steps (package installs) run in a derived image (`docker commit` of a root container with nothing writable mounted), not on the mount. `build.sh` fails if a mounted tree contains files not owned by the host user.
 
 ## Documentation
 

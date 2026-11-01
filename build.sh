@@ -493,13 +493,14 @@ docker_run_user() {
         "$_drun" "$_dsh" -c "mkdir -p $_dh && $_dscript"
 }
 
-# check_no_root_files <dir>...: fail if a mounted tree holds root-owned files
-# (a container wrote to the mount as root). Skipped when the host user is root.
+# check_no_root_files <dir>...: fail if a mounted tree holds files not owned by
+# the host user (a container wrote to the mount as a different user). Skipped when
+# the host user is root. Device nodes are ignored.
 check_no_root_files() {
     [ "$(id -u)" != 0 ] || return 0
-    _dfound="$(find "$@" -user root 2>/dev/null | head -20)"
+    _dfound="$(find "$@" -type f ! -user "$(id -u)" 2>/dev/null | head -20)"
     [ -z "$_dfound" ] || {
-        printf 'ERROR: root-owned files in a mounted tree (containers must run as the host user):\n%s\n' "$_dfound" >&2
+        printf 'ERROR: files not owned by the host user in a mounted tree (containers must run as the host user):\n%s\n' "$_dfound" >&2
         return 1
     }
 }

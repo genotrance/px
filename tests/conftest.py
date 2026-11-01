@@ -92,6 +92,49 @@ def pytest_xdist_auto_num_workers():
     return max(2, cpus // 4)
 
 
+# Tests whose parametrize product starts one or more Px per case. The fast lane keeps only enough cases for every
+# parameter value to run once; the full lane (no slow deselection) runs the whole product.
+COVER_FAST = {
+    "test_body_reaches_origin_intact",
+    "test_client_auth_discards_body_and_keeps_connection",
+    "test_client_auth_late_body_is_not_parsed_as_request",
+    "test_many_parallel_streamed_uploads_exact",
+    "test_multiprocessing_workers_auth",
+    "test_proxy",
+    "test_proxy_auth",
+    "test_upload_through_ntlm_proxy_first_request",
+}
+LOOP_FIXTURE = "loop_kind"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    """Keep the fast lane (-m "... and not slow") short without dropping any test from the full lane.
+
+    Stream upload tests run under both event loops: each CI job only runs its own loop in the fast lane (the
+    asyncio job sets PX_EVENT_LOOP=asyncio). Parametrized Px tests in COVER_FAST keep the first cases that cover
+    every parameter value once (macOS already pairs auth modes with PX_CI_MINIMAL)."""
+    loop = os.environ.get("PX_EVENT_LOOP", "").lower()
+    loop = "" if loop == "auto" else loop
+    minimal = os.environ.get("PX_CI_MINIMAL") == "1"
+    covered = set()
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        if callspec is None:
+            continue
+        if LOOP_FIXTURE in callspec.params and callspec.params[LOOP_FIXTURE] != loop:
+            item.add_marker(pytest.mark.slow)
+            continue
+        if minimal or item.originalname not in COVER_FAST:
+            continue
+        keys = {
+            (item.originalname, name, repr(value)) for name, value in callspec.params.items() if name != LOOP_FIXTURE
+        }
+        if keys <= covered:
+            item.add_marker(pytest.mark.slow)
+        covered |= keys
+
+
 MEMORY_ROWS = pytest.StashKey[list[tuple[str, int, int, int]]]()
 
 

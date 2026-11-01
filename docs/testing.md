@@ -890,6 +890,19 @@ by an avoidable wait:
   marker makes that selection available on any platform without the env var.
   Basic proxy auth (one hop, no chaining) stays fast via `test_proxy_auth`.
 
+Two more groups are marked `slow` at collection time by `pytest_collection_modifyitems`
+in `tests/conftest.py`, so the fast lane stays within its 4 minute budget (Windows runs
+tests serially and sets the wall time; every case starts one or more Px processes):
+
+- Event loops: `test_stream_upload.py` runs every test under both the default
+  loop and `asyncio`. The fast lane keeps only the loop the CI job selects with
+  `PX_EVENT_LOOP` (default loop, or `asyncio` in the asyncio jobs); the other
+  loop's cases are `slow`.
+- Parameter products: the tests listed in `COVER_FAST` (`test_proxy`,
+  `test_proxy_auth`, `test_multiprocessing_workers_auth` and the parametrized
+  stream upload tests) keep, in the fast lane, only the first cases that run
+  every parameter value once. The full lane runs the whole product.
+
 Everything else in the suite — including `test_network.py`'s process-spawning
 tests — runs in roughly a second or two per test once the avoidable waits
 below are fixed, so it stays in the fast selection.

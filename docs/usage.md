@@ -98,7 +98,10 @@ address, so the SPN libcurl requests matches the one the upstream proxy
 expects. With a PAC file or multiple proxies configured there is no single
 upstream hostname to borrow, so Px keeps being addressed by its listen
 address, which Kerberos may not have an SPN for — Px logs this limitation
-when it applies.
+when it applies. Some upstream proxies reject the Negotiate/Kerberos token
+forwarded unchanged by `--auth=NONE`; `--test-auth` reports this case
+specifically on a final `407` and the supported setup is to have Px
+authenticate itself instead (`--auth=NEGOTIATE` or `--auth=ANY`).
 
 ## Credentials
 

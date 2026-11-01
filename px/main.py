@@ -363,6 +363,11 @@ def test(testurl):
     else:
         auth = "NONE"
 
+    # --test-auth forces Px's own auth to NONE above, so a non-NONE auth here means
+    # the test client authenticates itself and Px passes its Proxy-Authorization
+    # through unchanged to the upstream proxy.
+    test_auth_passthrough = "--test-auth" in sys.argv and auth != "NONE"
+
     def waitforpx():
         count = 0
         while True:
@@ -430,7 +435,14 @@ def test(testurl):
 
                 success = True
                 if code in _TEST_AUTH_FAILURE_CODES:
-                    pprint(f"Failed: final response status {code} - request was not authenticated")
+                    if code == 407 and test_auth_passthrough:
+                        pprint(
+                            "Failed: upstream proxy rejected the client's pass-through credentials "
+                            "(Kerberos/Negotiate pass-through may be unsupported by this proxy; run Px "
+                            "with --auth=NEGOTIATE or ANY instead)"
+                        )
+                    else:
+                        pprint(f"Failed: final response status {code} - request was not authenticated")
                     success = False
                 if check:
                     # Tests against httpbin

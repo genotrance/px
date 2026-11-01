@@ -211,6 +211,35 @@ def test_single_url_test_fails_on_407(monkeypatch):
     assert any("status 407" in line for line in output)
 
 
+def test_test_auth_passthrough_407_reports_specific_message(monkeypatch):
+    "A final 407 under --test-auth pass-through (Px auth=NONE) gets a specific message, not the generic one"
+    output = []
+    FakeCurl.results = [0]
+    FakeCurl.codes = [407]
+    FakeCurl.headers = []
+    FakeCurl.calls = 0
+    FakeCurl.instances = []
+
+    monkeypatch.setattr(main.config, "get_listen", lambda: "127.0.0.1")
+    monkeypatch.setattr(main.STATE, "config", FakeConfig())
+    monkeypatch.setattr(main.STATE, "auth", "NTLM")
+    monkeypatch.setattr(main.sys, "argv", ["px", "--test-auth"])
+    monkeypatch.setattr(main.socket, "create_connection", lambda *_args: None)
+    monkeypatch.setattr(main.mcurl, "Curl", FakeCurl)
+    monkeypatch.setattr(main.handler, "set_curl_auth", lambda *_args: None)
+    monkeypatch.setattr(main.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(main, "pprint", output.append)
+    monkeypatch.setattr(main.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main.test("http://example.test/")
+
+    assert exc_info.value.code == config.ERROR_TEST
+    assert "Passed" not in output
+    assert any("upstream proxy rejected the client's pass-through credentials" in line for line in output)
+    assert not any(line.startswith("Failed: final response status 407") for line in output)
+
+
 def test_all_test_paces_body_echoes(monkeypatch):
     output = []
     sleeps = []

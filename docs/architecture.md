@@ -128,14 +128,21 @@ for each request to avoid state conflicts.
    `proxyreload` interval has elapsed) and then `Wproxy.find_proxy_for_url()`
    to get the upstream proxy or DIRECT.
 3. **Curl setup** — creates/reuses a `mcurl.Curl` object, sets proxy, auth,
-   headers, and request body. `_upstream_headers()` drops the hop-by-hop
+   headers, and request body. `_read_request()` keeps both a lowercase-keyed
+   header dict (for internal lookups: hop-by-hop stripping, auth) and a
+   second dict in the client's original header-name case (from h11's
+   `raw_items()`), since some upstream proxies reject headers whose case h11
+   normalized away. `_upstream_headers()` drops the hop-by-hop
    headers (`Connection` and the headers it names, `Proxy-Connection`,
    `Keep-Alive`, `TE`, `Trailer`, `Upgrade`), the client's `Expect` and, when
    Px authenticates itself, `Proxy-Authorization`; a forwarded
    `Connection: close` otherwise makes a proxy such as Squid drop an NTLM
-   handshake midway. `Content-Length` (or `Transfer-Encoding: chunked` for an
-   unknown length) is passed to `set_headers()` unchanged so mcurl frames the
-   upstream body.
+   handshake midway. It returns the surviving headers keyed by their original
+   case, which `set_headers()` forwards unchanged — both to curl's own
+   `CURLOPT_HTTPHEADER` list and, for the `--auth=NONE` CONNECT pass-through
+   that writes the request manually, to `curl.xheaders`. `Content-Length`
+   (or `Transfer-Encoding: chunked` for an unknown length) is passed to
+   `set_headers()` unchanged so mcurl frames the upstream body.
 4. **Streaming** — for plain HTTP, a `BridgeWriter` forwards curl response data
    from the thread pool to the asyncio transport via `call_soon_threadsafe`.
    CONNECT tunnelling uses zero-thread bidirectional relays: `TunnelRelay`

@@ -156,10 +156,10 @@ test() {
         rm -f "$ENV_FILE" "$ENV_DIR/origin-ca.crt"
     fi
     # Regression check for the host-user rule: nothing the lab touched should
-    # leave files not owned by the host user behind in the checkout.
+    # leave entries not owned by the host user behind in the checkout.
     if [[ "$(id -u)" != 0 ]]; then
         local not_owned
-        not_owned=$(find "$ROOT" -type f ! -user "$(id -u)" 2>/dev/null)
+        not_owned=$(find "$ROOT" ! -type c ! -user "$(id -u)" 2>/dev/null)
         if [[ -n "$not_owned" ]]; then
             printf 'ERROR: files not owned by the host user in checkout after scenario run:\n%s\n' "$not_owned" >&2
             ((status == 0)) && status=1

@@ -544,7 +544,7 @@ rely on the real workflow.
 Every container that mounts a tree (`build_local` and `release_check`) runs as
 the host user (`--user "$(id -u):$(id -g)"`), never root, with `HOME` and the
 uv, pip, XDG, Nuitka and ccache caches under `/tmp` inside the container, so
-no file not owned by the host user ever lands in a checkout or `RELEASE_CHECK_DIR` where it
+no entry not owned by the host user ever lands in a checkout or `RELEASE_CHECK_DIR` where it
 could not be deleted. Steps that need root (`install_alpine_deps`,
 `install_upx`, `setup_manylinux`, `install_test_deps`) run once in a derived
 image made by `docker_image_with` (a `docker commit` of a root container with
@@ -555,7 +555,7 @@ before. The `test-binary` container keeps `--privileged` (as `build.yml`), which
 without root grants no capabilities but disables the seccomp profile.
 `check_no_root_files` runs after every container stage and, for
 `release_check`, over `RELEASE_CHECK_DIR` and the checkout at the end, failing
-with the list of offending files (skipped when the host user is root). Delete
+with the list of offending entries (skipped when the host user is root). Delete
 leftovers not owned by the host user from older runs once, by hand, if it reports any.
 
 ## `build.sh`
@@ -589,7 +589,7 @@ stays concise. Functions include:
   host user (see above). Invoked via `make test-musl` or `make test-glibc`.
 - `docker_run_user`, `docker_image_with`, `check_no_root_files` — run a
   container as the host user, build the derived image with the root-only
-  steps, and fail if files not owned by the host user appear in a mounted tree.
+  steps, and fail if entries not owned by the host user appear in a mounted tree.
 
 ## `tools.py`
 

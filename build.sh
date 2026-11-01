@@ -452,7 +452,7 @@ target_config() {
 }
 
 # Containers that mount a checkout run as the host user, never root, so no
-# root-owned file is ever written to the mount. Root-only steps (system
+# root-owned entry is ever written to the mount. Root-only steps (system
 # packages) run at image build time, not on the mount.
 
 # docker_image_with <image> <shell> <function>...: print the tag of <image> with
@@ -493,12 +493,12 @@ docker_run_user() {
         "$_drun" "$_dsh" -c "mkdir -p $_dh && $_dscript"
 }
 
-# check_no_root_files <dir>...: fail if a mounted tree holds files not owned by
+# check_no_root_files <dir>...: fail if a mounted tree holds entries not owned by
 # the host user (a container wrote to the mount as a different user). Skipped when
 # the host user is root. Device nodes are ignored.
 check_no_root_files() {
     [ "$(id -u)" != 0 ] || return 0
-    _dfound="$(find "$@" -type f ! -user "$(id -u)" 2>/dev/null | head -20)"
+    _dfound="$(find "$@" ! -type c ! -user "$(id -u)" 2>/dev/null | head -20)"
     [ -z "$_dfound" ] || {
         printf 'ERROR: files not owned by the host user in a mounted tree (containers must run as the host user):\n%s\n' "$_dfound" >&2
         return 1
@@ -599,7 +599,7 @@ rc_stage() {
 
 # rc_run_in <dir> <image> <shell> <setup> <script> [docker args...]: run a
 # build.sh function in a container as the host user with the tree at /px, then
-# fail if the container left root-owned files in the tree
+# fail if the container left root-owned entries in the tree
 rc_run_in() {
     _rc=0
     docker_run_user "$@" || _rc=$?

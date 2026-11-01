@@ -16,3 +16,7 @@ def test_scenario_env_installs_mcurl_candidate_wheel():
         assert needle in text, needle
     assert text.index("uv sync --locked") < text.index("--reinstall-package pymcurl")
     assert "MCURL_SRC" not in text and "PX_REQUIRE_MCURL_FIX" not in text
+
+
+def test_scenario_env_checks_all_non_device_entries_for_host_ownership():
+    assert 'find "$ROOT" ! -type c ! -user "$(id -u)"' in SCRIPT.read_text()

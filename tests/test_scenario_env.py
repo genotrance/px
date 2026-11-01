@@ -22,4 +22,4 @@ def test_scenario_env_checks_all_non_device_entries_for_host_ownership():
     text = SCRIPT.read_text()
     assert "/proc/self/mountinfo" in text
     assert 'find "${find_args[@]}" ! -type c ! -user "$(id -u)" -print' in text
-    assert '-prune -o' in text
+    assert "-prune -o" in text

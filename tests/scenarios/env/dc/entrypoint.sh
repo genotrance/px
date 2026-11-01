@@ -57,7 +57,7 @@ http_access deny CONNECT !SSL_ports
 # maxconn limit here: after a run of aborted uploads Squid kept counting the closed connections
 # and answered 403 to every later request from the same address.
 client_request_buffer_max_size 16 MB
-auth_param negotiate program /usr/lib/squid/negotiate_kerberos_auth -k /shared/squid-http.keytab -s HTTP/squid-sso.corp.test
+auth_param negotiate program /usr/lib/squid/negotiate_kerberos_auth -d -k /shared/squid-http.keytab -s HTTP/squid-sso.corp.test
 auth_param negotiate children 20 startup=2 idle=2
 auth_param ntlm program /usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp --domain=CORP
 auth_param ntlm children 20 startup=2 idle=2

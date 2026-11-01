@@ -489,3 +489,35 @@ def test_workflows_use_only_released_dependencies():
     for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
         text = wf.read_text()
         assert not re.search(r"genotrance/mcurl|MCURL_WHEELS|\.whl@|git\+https", text), wf.name
+
+
+def test_scenario_diagnostics_redacts_tokens_and_counts_helper_invocations(tmp_path):
+    token_a, token_b = "A" * 60, "B" * 60
+    px_log = tmp_path / "px.log"
+    px_log.write_text(
+        "1: x: Adding header => proxy-authorization: Negotiate sanitized len(61)\n"
+        "2: x: Adding header => proxy-authorization: Negotiate sanitized len(61)\n"
+    )
+    cache_log = tmp_path / "squid-cache.log"
+    cache_log.write_text(
+        f"negotiate_kerberos_auth: DEBUG: Got 'YR {token_a}' from squid (length: 63).\n"
+        f"negotiate_kerberos_auth: DEBUG: OK token={token_b} user=pxgood@CORP.TEST\n"
+        f"negotiate_kerberos_auth: DEBUG: Got 'YR {token_a}' from squid (length: 63).\n"
+        "negotiate_kerberos_pac.cc(188): negotiate_kerberos_auth: Info: Got rid: 513\n"
+    )
+    access_log = tmp_path / "squid-access.log"
+    access_log.write_text(
+        "1.0 5 192.0.2.1 NONE_NONE/500 0 CONNECT http:443 pxgood@CORP.TEST HIER_NONE/- -\n"
+        "2.0 5 192.0.2.1 TCP_TUNNEL/200 9 CONNECT origin.corp.test:8443 pxgood@CORP.TEST HIER_DIRECT/192.0.2.2 -\n"
+    )
+
+    text = tools.scenario_diagnostics([str(px_log), str(access_log), str(cache_log)])
+
+    assert token_a not in text and token_b not in text
+    assert "('Negotiate', 60): 2" in text
+    assert "Px forwarded 2 Proxy-Authorization tokens; the helper ran 2 times" in text
+    assert "1 distinct helper tokens" in text
+    assert "reached the helper more than once: {" in text and ": 2}" in text
+    assert "OK token=<redacted len 60> user=pxgood@CORP.TEST" in text
+    assert "Got rid" not in text
+    assert "1 mangled CONNECT or ERR_CANNOT_FORWARD lines" in text

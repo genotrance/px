@@ -299,7 +299,9 @@ jobs:
           SCENARIO_INSTANCE: ${{ strategy.job-index }}
         run: |
           mkdir -p "${{ runner.temp }}/scenario-artifacts"
-          tests/scenarios/env/scenario-env.sh logs > "${{ runner.temp }}/scenario-artifacts/compose.log" 2>&1 || true
+          # negotiate_kerberos_auth runs with -d and logs every token; redact long base64 runs
+          tests/scenarios/env/scenario-env.sh logs 2>&1 \
+            | sed -E 's/[A-Za-z0-9+\/_-]{40,}={0,2}/<redacted>/g' > "${{ runner.temp }}/scenario-artifacts/compose.log" || true
           tests/scenarios/env/scenario-env.sh artifacts "${{ runner.temp }}/scenario-artifacts" || true
 
       - name: Upload scenario logs
@@ -456,6 +458,60 @@ jobs:
           done
           exit $fail
 
+      # `px --test --test-auth` runs Px as auth=NONE and makes the test client authenticate to
+      # the upstream proxy itself, addressing it by its SPN host name (squid-sso.corp.test,
+      # pinned to the local Px with CURLOPT_RESOLVE) so SSPI builds the right SPN. Every
+      # request must end in 2xx: px --test already fails on a final 401/407, and each
+      # run must also report all five methods Passed. Plain HTTP exercises GET, DELETE,
+      # POST, PUT and PATCH; HTTPS makes each of them a CONNECT through Px to Squid (an
+      # auth=NONE CONNECT once reached Squid as "CONNECT http:443"). 31282 is the persistent
+      # SSO Squid, 31287 the one closing every connection after each response. The Squid
+      # logs are sliced to this run (tokens stay in RUNNER_TEMP), and a failing run dumps a
+      # sanitized summary: Px forwarded token lengths, negotiate_kerberos_auth verdict lines
+      # with tokens redacted, and how many helper invocations each token reached.
+      - name: px --test --test-auth with SSPI against the persistent and close-on-407 proxies (NEGOTIATE and ANY)
+        shell: bash
+        env:
+          PX_PASSWORD: GoodPass1!
+        run: |
+          lab() { MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu-24.04 -- docker exec px-scenario-client-1 "$@"; }
+          out="$RUNNER_TEMP/sspi-test-auth"
+          mkdir -p "$out" scenario-artifacts
+          fail=0
+          for port in 31282 31287; do
+            if [ "$port" = 31282 ]; then suffix=""; else suffix="-close"; fi
+            for auth in NEGOTIATE ANY; do
+              for target in http://origin.corp.test:8080/echo https://origin.corp.test:8443/echo; do
+                label="$port-$auth-${target%%:*}"
+                echo "::group::px --test --test-auth --auth=$auth via :$port to $target"
+                config="$RUNNER_TEMP/px-scenario-test-auth-$label.ini"
+                : > "$config"
+                cache_before=$(lab stat -c %s "/scenario-logs/cache$suffix.log" | tr -d '\r')
+                access_before=$(lab stat -c %s "/scenario-logs/access$suffix.log" | tr -d '\r')
+                rc=0
+                uv run --locked python -m px --config="$config" --noproxy= --verbose --port=3140 \
+                  --proxy=squid-sso.corp.test:$port --auth=$auth --username='pxgood@CORP.TEST' \
+                  --test-auth --test=all:$target > "$out/px-$label.log" 2>&1 || rc=$?
+                sleep 2
+                lab tail -c +$((cache_before + 1)) "/scenario-logs/cache$suffix.log" > "$out/squid-cache-$label.log"
+                lab tail -c +$((access_before + 1)) "/scenario-logs/access$suffix.log" > "$out/squid-access-$label.log"
+                passed=$(grep -o "Passed" "$out/px-$label.log" | wc -l || true)
+                uv run --locked python tools.py --scenario-diagnostics "$out/px-$label.log" \
+                  "$out/squid-access-$label.log" "$out/squid-cache-$label.log" > "$out/diagnostics-$label.txt" || true
+                grep -E "forwarded Proxy-Authorization|^summary:" "$out/diagnostics-$label.txt" || true
+                if [ $rc -ne 0 ] || [ "$passed" -ne 5 ] || grep -q "http:443" "$out/squid-access-$label.log"; then
+                  echo "::error::px --test-auth $label failed: exit code $rc, $passed of 5 methods passed"
+                  grep -E "Failed|final response status" "$out/px-$label.log" | head -20 || true
+                  cat "$out/diagnostics-$label.txt"
+                  { echo "=== $label"; cat "$out/diagnostics-$label.txt"; } >> scenario-artifacts/sspi-test-auth-diagnostics.txt
+                  fail=1
+                fi
+                echo "::endgroup::"
+              done
+            done
+          done
+          exit $fail
+
       # --test=all only sends small bodies; this checks the exact bytes mcurl's
       # Expect:100-continue handling (docs/testing.md) is meant to protect once SSPI
       # has settled on NTLM-in-SPNEGO, for small, multi-MB and chunked (unknown
@@ -604,13 +660,16 @@ jobs:
           mkdir -p scenario-artifacts
           cp "$RUNNER_TEMP/px-windows.log" scenario-artifacts/ 2>/dev/null || true
           cp "$RUNNER_TEMP/px-windows-negotiate.log" scenario-artifacts/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/sspi-test-auth/px-*.log scenario-artifacts/ 2>/dev/null || true
 
       - name: Collect Squid and Samba logs from WSL2
         if: failure()
         shell: wsl-bash {0}
         run: |
-          bash tests/scenarios/env/scenario-env.sh logs > compose.log 2>&1 || true
-          docker exec px-scenario-client-1 sh -c 'cd /scenario-logs && tail -n +1 *' > squid-logs.txt 2>&1 || true
+          # negotiate_kerberos_auth runs with -d and logs every token; redact long base64 runs
+          redact() { sed -E 's/[A-Za-z0-9+\/_-]{40,}={0,2}/<redacted>/g'; }
+          bash tests/scenarios/env/scenario-env.sh logs 2>&1 | redact > compose.log || true
+          docker exec px-scenario-client-1 sh -c 'cd /scenario-logs && tail -n +1 *' 2>&1 | redact > squid-logs.txt || true
 
       - name: Upload scenario logs
         if: failure()

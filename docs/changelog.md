@@ -21,6 +21,7 @@
 - A request body sent late after a client-authentication `407` to `Expect: 100-continue` is no longer parsed as the next request.
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
 - `px --test`/`--test-auth` now fail requests ending with `401`/`407` (px#282).
+- `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).
 - `--test-auth` with Negotiate and one explicit proxy now uses the upstream proxy hostname.
 - Downstream NTLM/Digest/Basic authentication no longer stalls on repeated password lookups.
 - `px --test` output is retained when piped.

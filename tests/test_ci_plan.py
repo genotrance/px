@@ -79,3 +79,29 @@ def test_windows_scenario_bounds_a_frozen_wsl_setup():
     assert job["timeout-minutes"] == 15
     assert setup["timeout-minutes"] == 5
     assert names.index("Log the runner image before WSL2 setup") < names.index("Set up WSL2")
+
+
+def test_windows_scenario_runs_sspi_test_auth_against_both_squid_ports():
+    steps = {step["name"]: step for step in WORKFLOW["jobs"]["scenario-windows"]["steps"] if "name" in step}
+    step = next(s for name, s in steps.items() if name.startswith("px --test --test-auth with SSPI"))
+    run = step["run"]
+
+    assert step["shell"] == "bash"
+    assert "for port in 31282 31287" in run
+    assert "for auth in NEGOTIATE ANY" in run
+    assert "http://origin.corp.test:8080/echo https://origin.corp.test:8443/echo" in run
+    assert "--test-auth --test=all:$target" in run
+    assert "--proxy=squid-sso.corp.test:$port" in run
+    assert "-ne 5" in run  # five methods must each report Passed
+    assert "http:443" in run
+    assert "tools.py --scenario-diagnostics" in run
+    assert run.rstrip().endswith("exit $fail")
+
+
+def test_scenario_log_collection_redacts_helper_tokens():
+    for job, name in (
+        ("scenario-linux", "Collect Squid, Samba and Px logs"),
+        ("scenario-windows", "Collect Squid and Samba logs from WSL2"),
+    ):
+        step = next(s for s in WORKFLOW["jobs"][job]["steps"] if s.get("name") == name)
+        assert "<redacted>" in step["run"], name

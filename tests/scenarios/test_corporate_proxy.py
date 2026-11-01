@@ -14,6 +14,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import select
 import socket
 import subprocess
@@ -1117,6 +1118,66 @@ def test_px_test_all_methods_echo(scenario_env, kerberos_cache, tmp_path, scheme
     for method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
         assert f"Testing {method} {ECHO_URL}/{method.lower()}" in output, output
     assert "Failed" not in output, output
+
+
+###
+# `px --test-auth`: the test client authenticates through Px (auth=NONE) to the upstream proxy itself,
+# so every request, including each HTTPS CONNECT, must reach Squid exactly as the client sent it
+
+ECHO_HTTPS_URL = "https://origin.corp.test:8443/echo"
+FORWARDED_TOKEN = re.compile(r"Adding header => proxy-authorization: Negotiate sanitized len\((\d+)\)", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("auth", ["NEGOTIATE", "ANY"])
+@pytest.mark.parametrize("url", [ECHO_URL, ECHO_HTTPS_URL], ids=["http", "https-connect"])
+@pytest.mark.parametrize(
+    "proxy_key", ["SCENARIO_SSO_PROXY", "SCENARIO_SSO_CLOSE_PROXY"], ids=["persistent", "close-on-407"]
+)
+def test_px_test_auth_all_methods_and_connect(scenario_env, kerberos_cache, tmp_path, proxy_key, url, auth):
+    """`px --test-auth --test=all:URL` passes GET, DELETE, POST, PUT and PATCH, over plain HTTP and an HTTPS CONNECT.
+
+    Px runs as auth=NONE here, so it forwards the client's Kerberos token unchanged. Each request must end in
+    2xx (a final 407 fails `px --test`), and Squid must never log the mangled `CONNECT http:443` an auth=NONE
+    CONNECT once produced (Px sent the connect-only handle's `http://` URL instead of the client's target).
+    The forwarded Proxy-Authorization token length is printed per request for diagnosing token-size issues.
+    """
+    if proxy_key not in scenario_env:
+        pytest.skip("the running lab predates SCENARIO_SSO_CLOSE_PROXY")
+    config = tmp_path / "empty.ini"
+    config.touch()
+    command = [
+        sys.executable,
+        "-m",
+        "px",
+        f"--config={config}",
+        f"--auth={auth}",
+        f"--username={scenario_env['SCENARIO_USER']}@{scenario_env['SCENARIO_REALM']}",
+        "--noproxy=",
+        "--listen=127.0.0.2",
+        f"--proxy={_proxy_addr(scenario_env[proxy_key])}",
+        f"--port={_free_port()}",
+        "--verbose",
+        "--test-auth",
+        f"--test=all:{url}",
+    ]
+    log_dir = Path(scenario_env["SCENARIO_SQUID_LOG_DIR"])
+    log_sizes = {log: log.stat().st_size for log in log_dir.glob("access*.log")}
+    proc_env = os.environ | {"KRB5CCNAME": str(kerberos_cache), "PYTHONUNBUFFERED": "1"}
+    proc_env.pop("PX_PASSWORD", None)
+    result = subprocess.run(command, cwd=ROOT, env=proc_env, capture_output=True, text=True, timeout=90)  # noqa: S603
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert output.count("Passed") == 5, output
+    assert "Failed" not in output, output
+    for method in ("GET", "DELETE", "POST", "PUT", "PATCH"):
+        assert f"Testing {method} {url}/{method.lower()}" in output, output
+
+    lengths = [int(length) - 1 for length in FORWARDED_TOKEN.findall(output)]
+    print(f"forwarded Proxy-Authorization Negotiate token lengths for {url} via {proxy_key}: {lengths}")
+    assert lengths, "Px forwarded no Negotiate Proxy-Authorization header"
+
+    for access_log, size in log_sizes.items():
+        assert "http:443" not in access_log.read_bytes()[size:].decode(errors="replace"), access_log.name
 
 
 ###

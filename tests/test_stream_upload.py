@@ -765,9 +765,15 @@ def test_client_auth_late_body_is_not_parsed_as_request(client_auth_px, origin, 
     assert origin.requests == []
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_large_upload_bounded_memory(direct_px, origin, loop_kind, chunked):
-    "A 100 MB body streams through px with RSS far below the body size"
+    """A 100 MB body streams through px with RSS far below the body size.
+
+    The ceiling only means anything against a body this large (a bug that buffers a few MiB
+    would still pass against a small body), so this cannot be shrunk into a fast-lane test;
+    streaming correctness at moderate sizes is already covered fast via BODY_SIZE elsewhere
+    in this file (test_body_reaches_origin_intact, test_many_parallel_streamed_uploads_exact)."""
     if chunked and loop_kind:
         pytest.skip("100 MB chunked is covered on the default event loop; the transfer takes ~30 s")
     port, subp = direct_px
@@ -953,10 +959,14 @@ def test_stalled_uploads_on_reused_keep_alive_handle(direct_px, origin):
     port, _ = direct_px
     url = f"http://{origin.addr}/x"
     client = Client(port, timeout=30)
+    # No race is observed here (unlike check_stalled_does_not_delay): the pause only needs
+    # to split the body across two sends, so an already-set event resumes it immediately.
+    no_stall = threading.Event()
+    no_stall.set()
     try:
-        first = send_stalled_on(client, url, threading.Event())
-        second = send_stalled_on(client, url, threading.Event())
-        third = send_stalled_on(client, url, threading.Event())
+        first = send_stalled_on(client, url, no_stall)
+        second = send_stalled_on(client, url, no_stall)
+        third = send_stalled_on(client, url, no_stall)
     finally:
         client.close()
     expected = {"sha256": body_sha256(BODY_SIZE), "length": BODY_SIZE}
@@ -968,8 +978,11 @@ def test_stalled_upload_through_auth_none_proxy_completes(origin, px_port, tmp_p
     "--auth=NONE runs the easy interface where a paused upload is never resumed: the body must still arrive"
     flags = f"--server={origin.addr} --auth=NONE --noproxy= --workers=1"
     subp, cmd, buffer = start_px("StreamAuthNone", px_port, tmp_path, flags, loop_kind)
+    # No race is observed here: the pause only needs to split the body across two sends.
+    no_stall = threading.Event()
+    no_stall.set()
     try:
-        response, took = timed(send_stalled, px_port, "http://auth-none.test/x", threading.Event())
+        response, took = timed(send_stalled, px_port, "http://auth-none.test/x", no_stall)
     finally:
         print_buffer(buffer)
         quit_px("StreamAuthNone", subp, cmd, strict=False)

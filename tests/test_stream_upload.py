@@ -605,16 +605,18 @@ def test_upstream_headers_strip_hop_by_hop():
         "transfer-encoding": "chunked",
         "x-keep": "yes",
     }
-    kept = handler.ConnectionHandler._upstream_headers(headers)
+    kept = handler.ConnectionHandler._upstream_headers(headers, headers)
     assert kept == {
         "host": "origin.test",
         "proxy-authorization": "Basic Zm9vOmJhcg==",
         "transfer-encoding": "chunked",
         "x-keep": "yes",
     }
-    assert "proxy-authorization" not in handler.ConnectionHandler._upstream_headers(headers, strip_proxy_auth=True)
+    assert "proxy-authorization" not in handler.ConnectionHandler._upstream_headers(
+        headers, headers, strip_proxy_auth=True
+    )
     sized = {"content-length": "5", "connection": "Content-Length"}
-    assert handler.ConnectionHandler._upstream_headers(sized) == {"content-length": "5"}
+    assert handler.ConnectionHandler._upstream_headers(sized, sized) == {"content-length": "5"}
 
 
 def test_rewind_error_detection():

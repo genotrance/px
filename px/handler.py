@@ -708,7 +708,7 @@ class ConnectionHandler:
                 if request is None:
                     break
 
-                method, target, headers, body, request_version = request
+                method, target, headers, orig_headers, body, request_version = request
 
                 if body is None:
                     # CONNECT: save any data h11 buffered beyond the request (tunnel data)
@@ -721,7 +721,7 @@ class ConnectionHandler:
                 self._drain_body = False
                 self._tunnel_established = False
                 self._request_body = body
-                await self._handle_request(method, target, headers, body, request_version)
+                await self._handle_request(method, target, headers, orig_headers, body, request_version)
 
                 # CONNECT tunnels consume the connection (only when actually established)
                 if method == "CONNECT" and self._tunnel_established:
@@ -799,15 +799,27 @@ class ConnectionHandler:
                 target = event.target.decode("ascii")
                 request_version = "HTTP/" + event.http_version.decode("ascii")
 
-                # Build headers dict (h11 normalizes names to lowercase)
+                # Build a lowercase-keyed dict for internal lookups (hop-by-hop
+                # stripping, auth, etc.) and a separate original-case dict for
+                # forwarding upstream: some proxies are case-sensitive about
+                # header names, so the client's own casing must be preserved
+                # (event.headers.raw_items() keeps it; h11's normal iteration
+                # lowercases names). Duplicates are merged under the first
+                # casing seen, same as the lowercase dict.
                 headers: dict[str, str] = {}
-                for name, value in event.headers:
-                    hname = name.decode("ascii")
+                orig_name_of: dict[str, str] = {}
+                orig_headers: dict[str, str] = {}
+                for raw_name, value in event.headers.raw_items():
+                    orig_name = raw_name.decode("ascii")
+                    hname = orig_name.lower()
                     hvalue = value.decode("ascii")
                     if hname in headers:
                         headers[hname] = headers[hname] + ", " + hvalue
+                        orig_headers[orig_name_of[hname]] = headers[hname]
                     else:
                         headers[hname] = hvalue
+                        orig_name_of[hname] = orig_name
+                        orig_headers[orig_name] = hvalue
 
                 # The body is not read here: CONNECT has none and for other
                 # methods it streams lazily to mcurl as upstream needs it
@@ -816,7 +828,7 @@ class ConnectionHandler:
                     expect = headers.get("expect", "").lower() == "100-continue" and request_version == "HTTP/1.1"
                     body = RequestBody(h11_conn, self.reader, asyncio.get_running_loop(), self.transport, expect)
 
-                return method, target, headers, body, request_version
+                return method, target, headers, orig_headers, body, request_version
 
             if isinstance(event, (h11.ConnectionClosed, h11.RemoteProtocolError)):
                 return None
@@ -1105,7 +1117,7 @@ class ConnectionHandler:
     ###
     # Core request handling
 
-    async def _handle_request(self, method, target, headers, body, request_version):
+    async def _handle_request(self, method, target, headers, orig_headers, body, request_version):
         "Handle one proxy request"
         # Handle quit request
         if method == "GET" and target == "/PxQuit":
@@ -1158,7 +1170,7 @@ class ConnectionHandler:
 
         # Build headers dict for curl, stripping hop-by-hop and proxy headers
         strip_proxy_auth = strip_proxy_headers or (ipport is None and STATE.auth != "NONE")
-        curl_headers = self._upstream_headers(headers, strip_proxy_headers, strip_proxy_auth)
+        curl_headers = self._upstream_headers(headers, orig_headers, strip_proxy_headers, strip_proxy_auth)
 
         # Plain HTTP: bridge request body and response
         body_reader = None
@@ -1249,8 +1261,12 @@ class ConnectionHandler:
         return resolve
 
     @staticmethod
-    def _upstream_headers(headers, strip_proxy_headers=False, strip_proxy_auth=False):
-        """Client headers to forward upstream.
+    def _upstream_headers(headers, orig_headers, strip_proxy_headers=False, strip_proxy_auth=False):
+        """Client headers to forward upstream, keyed by the client's original header-name case.
+
+        Some upstream proxies are case-sensitive about header names (unlike Squid), so the
+        client's casing (e.g. "Proxy-Authorization") is preserved rather than the lowercase
+        names h11 normalizes to for the drop-decision lookups below.
 
         Drops hop-by-hop headers (Connection and the headers it names, Proxy-Connection,
         Keep-Alive, TE, Trailer, Upgrade) since they describe the client connection and
@@ -1267,7 +1283,7 @@ class ConnectionHandler:
             drop.add("proxy-authorization")
         return {
             name: value
-            for name, value in headers.items()
+            for name, value in orig_headers.items()
             if name.lower() not in drop and not (strip_proxy_headers and name.lower().startswith("proxy-"))
         }
 

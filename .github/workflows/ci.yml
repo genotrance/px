@@ -357,7 +357,7 @@ jobs:
       - name: Set up WSL2
         # Catches ordinary WSL2 hangs; a frozen runner is caught by the job timeout instead.
         timeout-minutes: 5
-        uses: Vampire/setup-wsl@v5
+        uses: Vampire/setup-wsl@v7
         with:
           distribution: Ubuntu-24.04
           wsl-version: 2

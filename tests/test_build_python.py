@@ -306,6 +306,11 @@ def test_binary_is_launched_on_the_test_runner_before_the_suite():
     assert body.index('smoke_binary "$NAME"') < body.index("tox ")
 
 
+def test_host_ownership_check_includes_directories_and_files():
+    script = (ROOT / "build.sh").read_text()
+    assert 'find "$@" ! -type c ! -user "$(id -u)"' in script
+
+
 def test_binary_smoke_check_imports_ssl_and_spnego_before_artifact_tests():
     script = (ROOT / "build.sh").read_text()
     smoke = script[script.index("smoke_binary() {") : script.index("# Set up manylinux static libs")]

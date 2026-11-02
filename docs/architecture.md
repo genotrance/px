@@ -151,7 +151,11 @@ for each request to avoid state conflicts.
    mode identifies the upstream-proxy tunnel; `CURLINFO_USED_PROXY` is not
    used because connect-only transfers can report no proxy after returning
    the active proxy socket. Px therefore relays the upstream CONNECT response
-   exactly once instead of also generating its normal-mode 200 response.
+   exactly once instead of also generating its normal-mode 200 response. The
+   manually written CONNECT request (and any client bytes already buffered
+   behind it) is sent with a single `sendall`, because strict proxies parse the
+   CONNECT from the first TCP segment and treat later header segments as
+   tunnel data.
 5. **Keep-alive** — the connection loop supports HTTP/1.1 keep-alive, processing
    multiple requests on a single TCP connection until a `Connection: close`
    header or a CONNECT tunnel consumes the socket. A request body must be fully

@@ -183,6 +183,87 @@ def test_auth_none_connect_relays_one_response_then_raw_tunnel_data(px_port, tmp
         upstream.server_close()
 
 
+class _StrictConnectProxy(socketserver.ThreadingTCPServer):
+    "A fake strict upstream proxy that parses the CONNECT from its first recv() only"
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self):
+        super().__init__(("127.0.0.1", 0), _StrictConnectProxyHandler)
+        self.first_recv = None
+
+    @property
+    def addr(self):
+        return f"127.0.0.1:{self.server_address[1]}"
+
+
+class _StrictConnectProxyHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        sock = self.request
+        sock.settimeout(10)
+        self.server.first_recv = first = sock.recv(65536)
+        if not first.startswith(b"CONNECT "):
+            return
+        sock.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+        data = b""
+        while b"client-hello" not in data:
+            chunk = sock.recv(65536)
+            if not chunk:
+                return
+            data += chunk
+            if not data.startswith(b"\x16"):
+                sock.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                return
+        sock.sendall(b"\x16\x03\x03tunnel-ok")
+        time.sleep(0.2)
+
+
+@pytest.mark.parametrize("event_loop", ["", "asyncio"])
+def test_auth_none_connect_sent_in_one_write(px_port, tmp_path, event_loop):
+    "A strict proxy that reads only its first recv() must see the complete CONNECT request"
+    upstream = _StrictConnectProxy()
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    env = copy.deepcopy(os.environ)
+    if event_loop:
+        env["PX_EVENT_LOOP"] = event_loop
+    else:
+        env.pop("PX_EVENT_LOOP", None)
+    subp, cmd, buffer = run_px(
+        "AuthNoneConnectOneWrite",
+        px_port,
+        tmp_path,
+        f"--proxy={upstream.addr} --auth=NONE --noproxy= --workers=1",
+        env,
+    )
+    try:
+        with socket.create_connection(("127.0.0.1", px_port), timeout=15) as client:
+            client.sendall(
+                b"CONNECT origin.test:443 HTTP/1.1\r\n"
+                b"Host: origin.test:443\r\n"
+                b"Proxy-Authorization: Negotiate dGVzdA==\r\n"
+                b"X-MyCustomHeader: value1\r\n\r\n"
+            )
+            received = _read_through(client, b"\r\n\r\n")
+            assert received.startswith(b"HTTP/1.1 200 "), received
+            client.sendall(b"\x16\x03\x03client-hello")
+            tail = received[received.index(b"\r\n\r\n") + 4 :]
+            if b"tunnel-ok" not in tail:
+                tail += _read_through(client, b"tunnel-ok") if not tail else b""
+                while b"tunnel-ok" not in tail and b"400 Bad Request" not in tail:
+                    tail += client.recv(4096)
+            assert b"400 Bad Request" not in tail, tail
+            assert b"tunnel-ok" in tail, tail
+        first = upstream.first_recv or b""
+        assert first.endswith(b"\r\n\r\n"), first
+        assert b"X-MyCustomHeader: value1\r\n" in first, first
+    finally:
+        print_buffer(buffer)
+        quit_px("AuthNoneConnectOneWrite", subp, cmd, strict=False)
+        upstream.shutdown()
+        upstream.server_close()
+
+
 @pytest.mark.parametrize("event_loop", ["", "asyncio"])
 def test_auth_none_connect_forwards_client_target(px_port, tmp_path, event_loop):
     "With --auth=NONE, CONNECT reaches the upstream proxy with the client's own request target"

@@ -1363,17 +1363,20 @@ class ConnectionHandler:
             # auth=NONE passthrough: send original client headers to upstream proxy.
             # Use the client's own authority-form target: mcurl prefixes curl.url with
             # "http://" for its connect-only handle, which the proxy would parse as host "http"
+            # Send the whole request in one write: strict proxies parse the CONNECT from the
+            # first segment and treat later header segments as tunnel data
+            request = b""
             if passthrough:
-                dprint(self.curl.easyhash + ": Sending original client headers")
-                curl_sock.sendall((f"{self.curl.method} {target} {self.curl.request_version}\r\n").encode())
+                lines = [f"{self.curl.method} {target} {self.curl.request_version}\r\n"]
                 if self.curl.xheaders is not None:
-                    for header in self.curl.xheaders:
-                        curl_sock.sendall(f"{header}: {self.curl.xheaders[header]}\r\n".encode())
-                curl_sock.sendall(b"\r\n")
+                    lines.extend(f"{header}: {self.curl.xheaders[header]}\r\n" for header in self.curl.xheaders)
+                lines.append("\r\n")
+                request = "".join(lines).encode()
+                dprint(self.curl.easyhash + ": Sending original client headers (" + str(len(request)) + " bytes)")
 
             # Send any data that was buffered beyond the CONNECT request
-            if h11_trailing:
-                curl_sock.sendall(h11_trailing)
+            if request or h11_trailing:
+                curl_sock.sendall(request + h11_trailing)
 
             if sys.platform == "win32":
                 # Windows: zero-thread async relay using StreamReader/Writer

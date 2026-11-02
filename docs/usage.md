@@ -103,6 +103,13 @@ forwarded unchanged by `--auth=NONE`; `--test-auth` reports this case
 specifically on a final `407` and the supported setup is to have Px
 authenticate itself instead (`--auth=NEGOTIATE` or `--auth=ANY`).
 
+With `--auth=NONE`, pass-through behaviour is:
+
+- HTTPS CONNECT is forwarded upstream with the client's own target.
+- The client receives exactly one CONNECT response, the upstream's.
+- Client header names keep their original case.
+- The CONNECT request is sent to the upstream in a single write.
+
 ## Credentials
 
 If SSPI is not available or not preferred, providing `--username` in

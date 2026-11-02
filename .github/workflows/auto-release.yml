@@ -14,6 +14,7 @@ permissions:
   actions: write
   contents: write
   issues: write
+  pull-requests: write
 
 concurrency:
   group: auto-release
@@ -215,20 +216,58 @@ jobs:
           echo "Release build run: $URL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Merge released master into devel
-        if: steps.publish.outcome == 'success'
+        if: steps.publish.outcome == 'success' && env.DRY_RUN != 'true'
         working-directory: release
         env:
           SHA: ${{ steps.candidate.outputs.sha }}
+          VERSION: ${{ steps.prepare.outputs.version }}
         run: |
+          open_backmerge_pr() {
+            local REASON="$1"
+            local BRANCH="auto-release/merge-v$VERSION"
+
+            git merge --abort 2>/dev/null || true
+            git push origin "$SHA:refs/heads/$BRANCH"
+
+            PR_URL=$(gh pr list --state open --base devel --head "$BRANCH" \
+              --json url --jq '.[0].url // empty')
+            if [ -z "$PR_URL" ]; then
+              cat > /tmp/backmerge-pr.md <<EOF
+          The automatic release published \`$SHA\` to \`master\`, but it could not be merged into \`devel\`.
+
+          Reason: $REASON
+          EOF
+              PR_URL=$(gh pr create --base devel --head "$BRANCH" \
+                --title "Merge automatic release v$VERSION into devel" --body-file /tmp/backmerge-pr.md)
+            fi
+
+            {
+              echo "## Release back-merge requires review"
+              echo
+              echo "Released master commit \`$SHA\` needs a manual merge into \`devel\`."
+              echo "Pull request: $PR_URL"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$REASON See $PR_URL"
+            exit 1
+          }
+
           git fetch origin devel master
           git checkout -B auto-release-sync origin/devel
-          if ! git merge --no-edit "$SHA"; then
-            git merge --abort
-            echo "::warning::Could not merge master into devel; resolve the conflict manually."
-            echo "Master could not be merged into devel automatically." >> "$GITHUB_STEP_SUMMARY"
-          elif ! git push origin HEAD:devel; then
-            echo "::warning::devel moved; merge master into devel manually."
-            echo "devel moved before the synchronization push." >> "$GITHUB_STEP_SUMMARY"
+          if ! git merge --no-ff --no-edit "$SHA"; then
+            open_backmerge_pr "Released master conflicts with devel."
+          fi
+          if git push origin HEAD:devel; then
+            exit 0
+          fi
+
+          echo "devel moved before the synchronization push; retrying once." >> "$GITHUB_STEP_SUMMARY"
+          git fetch origin devel master
+          git checkout -B auto-release-sync origin/devel
+          if ! git merge --no-ff --no-edit "$SHA"; then
+            open_backmerge_pr "Released master conflicts with devel after retrying."
+          fi
+          if ! git push origin HEAD:devel; then
+            open_backmerge_pr "devel moved again before the synchronization push."
           fi
 
       - name: Close resolved blocked issue

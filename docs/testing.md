@@ -28,7 +28,7 @@ Tests live in `tests/`.
 | `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
 | `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split, the uv cache without a restore fallback, fresh PyPI pymcurl install, `tools.py --check-mcurl` API guard and `--smoke-request` against a real px, `tools.py --scenario-diagnostics` token redaction and helper-invocation counting, and no cross-project or unreleased dependency in workflows |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix, the `scenario-windows` WSL2 keep-alive and `--test-auth` SSPI steps, and token redaction in the scenario log collection (needs bash, jq and PyYAML) |
-| `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
+| `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers, release-build dispatch, and strict master-to-devel back-merge/PR-fallback workflow structure |
 | `test_scenario_env.py` | Guards the `MCURL_WHEELS` candidate-wheel wiring in `scenario-env.sh` used by mcurl's release gate |
 | `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of probe reporting, final-status (401/407) failure, paced httpbin body echoes, bounded 429 retries and separate rate-limit exits, and Negotiate SPN addressing (`_negotiate_test_target`) |
 | `test_resolver.py` | Resolver and upstream-proxy DNS seeding tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IPv4/IPv6 literals and results, temporary libcurl entries, DNS-free `myIpAddress` discovery |
@@ -604,6 +604,11 @@ Callers: a manual `build.yml` dispatch on `devel` calls `ci.yml` through
 `workflow_call` with `full: true`, and `auto-release.yml` dispatches it on the
 release candidate branch with `-f full=true`. To run the full set by hand, use
 `gh workflow run ci.yml --ref devel`; add `-f full=false` for a fast run.
+The weekly automatic release prepares and tests its candidate from `master`,
+then fast-forwards that branch only after the candidate passes this full set.
+It immediately back-merges the published commit into `devel`; a conflict or a
+second concurrent `devel` update opens a pull request against `devel` and
+fails the release workflow rather than leaving the branches out of sync.
 
 **Fast mode** runs `quality` (pre-commit and mypy), `kerberos` and these test
 jobs, with the `slow` marker deselected (`-m "not integration and not benchmark

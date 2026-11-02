@@ -38,3 +38,24 @@ def test_workflow_dispatches_release_build_after_master_push():
     block = text[step : text.index("name: Merge released master into devel")]
     assert "if: steps.publish.outcome == 'success'" in block
     assert "gh workflow run build.yml --ref master" in block
+
+
+def test_workflow_backmerges_published_release_or_opens_a_pr():
+    text = (Path(__file__).resolve().parent.parent / ".github/workflows/auto-release.yml").read_text()
+    assert "pull-requests: write" in text
+
+    start = text.index("name: Merge released master into devel")
+    end = text.index("name: Close resolved blocked issue")
+    block = text[start:end]
+    assert "if: steps.publish.outcome == 'success' && env.DRY_RUN != 'true'" in block
+    assert "git fetch origin devel master" in block
+    assert "git checkout -B auto-release-sync origin/devel" in block
+    assert block.count('git merge --no-ff --no-edit "$SHA"') == 2
+    assert "git push origin HEAD:devel" in block
+    assert "--force" not in block
+    assert "git merge --abort" in block
+    assert 'git push origin "$SHA:refs/heads/$BRANCH"' in block
+    assert 'gh pr list --state open --base devel --head "$BRANCH"' in block
+    assert 'gh pr create --base devel --head "$BRANCH"' in block
+    assert "::error::" in block
+    assert "exit 1" in block

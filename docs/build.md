@@ -201,12 +201,15 @@ CPython changed, the workflow exits successfully. Otherwise it:
    one, also invokes `build.yml`'s reusable full CI gate while the artifact
    jobs run; the candidate's exact full CI run in step 2 remains the release
    precondition, so this second run adds no additional coverage.
-4. The automatic-release workflow then attempts to merge the released
-   `master` back into `devel` without waiting for the dispatched build. In
+4. The automatic-release workflow then merges the released `master` commit
+   back into `devel` with a non-fast-forward merge, without waiting for the
+   dispatched build. If `devel` moves before the push, it fetches and retries
+   the merge once. A conflict, or a second rejected push, aborts the local
+   merge, pushes the released commit without rewriting a branch, opens (or
+   reuses) a pull request against `devel`, and fails for manual resolution. In
    parallel, a successful `build.yml` run on `master` emits the `workflow_run`
    event that starts `publish.yml`, which publishes Docker and Winget from the
-   existing GitHub release. A merge conflict or concurrent `devel` update
-   emits a warning for manual follow-up but does not rewrite either branch.
+   existing GitHub release.
 
 If CI fails, nothing reaches `master`. The workflow opens or updates the single
 GitHub issue titled `auto-release blocked` with the run and failing job names;

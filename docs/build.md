@@ -65,10 +65,10 @@ dependencies locally, run `uv lock --upgrade` for all packages or
 and commit both `pyproject.toml` (when changed) and `uv.lock`. Review and test
 Dependabot pull requests in the same way.
 
-The dependency-refresh workflow (`auto-release.yml`, see below) also runs
-`uv lock --upgrade` against `devel`. A changed lock is proposed as a pull
-request, including changes to transitive dependencies that do not have a
-minimum in `pyproject.toml`.
+The automatic release workflow also runs `uv lock --upgrade` against the last
+release on `master`. A changed lock is treated as a release candidate, including
+changes to transitive dependencies that do not have a minimum in
+`pyproject.toml`.
 
 ### pymcurl 8.23.0.3
 
@@ -93,10 +93,9 @@ All CI and release builds run via GitHub Actions. The workflows live in
 Runs a fast set on pushes to `devel`/`working` and on pull requests, and the
 full set on `workflow_dispatch` (`full` boolean input, default true), a weekly
 `schedule` (Sundays 05:37 UTC, on the default `devel` branch) and
-`workflow_call`. A manual `build.yml` dispatch calls it via `workflow_call`
-with `full: true`, and `auto-release.yml` dispatches it directly on its
-dependency-refresh pull request branch with `-f full=true`. Start the full set
-with `gh workflow run ci.yml --ref devel`. The split exists because macOS runners
+`workflow_call`. A manual `build.yml` dispatch and the automatic release
+candidate call it with `full: true`. Start the full set with
+`gh workflow run ci.yml --ref devel`. The split exists because macOS runners
 are expensive, slow and few. The policy, per-mode job lists and rationale are in
 [Testing](testing.md#ci-testing).
 
@@ -171,46 +170,53 @@ are expensive, slow and few. The policy, per-mode job lists and rationale are in
 Every pytest call in the workflow passes `--durations=30` so the job logs show
 the slowest tests.
 
-### Dependency refresh (`auto-release.yml`)
+### Automatic release (`auto-release.yml`)
 
 Runs on Tuesdays at 06:17 UTC (the cron in `auto-release.yml`) and can also be
-started manually with a `dry_run` input (default `true`). It checks out
-`devel` only and never touches `master`; it proposes a reviewed pull request
-instead of releasing anything by itself.
+started manually. Scheduled workflows run from the default `devel` branch, but
+this workflow explicitly checks out `master`; unreleased work on `devel` can
+therefore never enter an automatic release.
 
 `tools.py --auto-release` upgrades `uv.lock` and looks up the newest CPython
 3.14 patch published on python.org to compare against
-`.github/bundled-python-version`, which records the currently bundled patch.
-It does not bump Px's version or raise the `pymcurl`/`quickjs-ng` minimums in
-`pyproject.toml` — only the lock, the bundled CPython patch, and a one-line
-summary under `docs/changelog.md`'s `Unreleased` / `Improvements` section
-change, and a later run replaces its own previous summary line instead of
-adding a second one. If neither the lock nor CPython changed, the workflow
-exits successfully without writing anything.
+`.github/bundled-python-version`, which records the patch bundled by the last
+release. This lookup only decides whether a new patch is worth cutting a
+release for; it never fails the release build itself. If neither the lock nor
+CPython changed, the workflow exits successfully. Otherwise it:
 
-Otherwise, unless `dry_run` is set, it:
+1. Raises the `pymcurl` and `quickjs-ng` minimums to their newly resolved
+   versions, bumps Px's patch version, records the CPython patch, and inserts a
+   changelog section listing every changed locked dependency.
+2. Pushes that single candidate commit to `release/auto-<version>` and
+   dispatches the existing `ci.yml` workflow on that exact branch with
+   `full=true`, so the candidate runs the complete matrix. It does not add or
+   duplicate CI matrix jobs.
+3. On CI success, verifies that the version still has no tag or GitHub release
+   and that `master` has not moved, then fast-forwards `master` to the tested
+   commit. Pushes made with `GITHUB_TOKEN` do not trigger workflows, so the
+   workflow explicitly dispatches `build.yml` on `master` and logs the run URL
+   without waiting for it. That build bundles and logs whatever CPython patch
+   its own build tools provide, builds and tests the release artifacts, and
+   publishes PyPI and the GitHub release. Any manual dispatch, including this
+   one, also invokes `build.yml`'s reusable full CI gate while the artifact
+   jobs run; the candidate's exact full CI run in step 2 remains the release
+   precondition, so this second run adds no additional coverage.
+4. The automatic-release workflow then merges the released `master` commit
+   back into `devel` with a non-fast-forward merge, without waiting for the
+   dispatched build. If `devel` moves before the push, it fetches and retries
+   the merge once. A conflict, or a second rejected push, aborts the local
+   merge, pushes the released commit without rewriting a branch, opens (or
+   reuses) a pull request against `devel`, and fails for manual resolution. In
+   parallel, a successful `build.yml` run on `master` emits the `workflow_run`
+   event that starts `publish.yml`, which publishes Docker and Winget from the
+   existing GitHub release.
 
-1. Commits `uv.lock`, `.github/bundled-python-version` and
-   `docs/changelog.md` as one commit on `deps/refresh-<date>` (UTC date) and
-   pushes it. If an open pull request from an earlier `deps/refresh-*` branch
-   already exists, it reuses that branch instead — rebuilding it from the
-   current `devel` and force-pushing with `--force-with-lease`, since the
-   branch is automation-owned — rather than opening a second pull request.
-2. Opens that pull request against `devel`, or updates the existing one's
-   body, listing the changed locked dependencies and the CPython change (with
-   a link to the new patch's python.org release notes).
-3. Dispatches the existing `ci.yml` workflow on the pull request branch with
-   `full=true` — pushes and pull requests made with `GITHUB_TOKEN` do not
-   trigger workflows, so this dispatch is explicit — and stops without
-   waiting for it.
-
-A dry run performs the same detection and writes the JSON result and
-`git diff --stat` to the workflow summary, but pushes nothing, opens nothing,
-and dispatches nothing.
-
-A release only happens through the existing, unchanged, reviewed `devel` ->
-`master` merge (see "Build" below); this workflow never bumps the version,
-tags, publishes, or dispatches `build.yml`.
+If CI fails, nothing reaches `master`. The workflow opens or updates the single
+GitHub issue titled `auto-release blocked` with the run and failing job names;
+a later successful automatic release closes it. A manual dispatch defaults to
+`dry_run: true`: it performs dependency and CPython detection, prepares the
+candidate in the runner, and writes the proposed versions to the workflow
+summary without pushing a branch, dispatching CI, or publishing.
 
 ### Build (`build.yml`)
 
@@ -233,12 +239,12 @@ before a merge to `master`. Run it with `gh workflow run build.yml --ref devel`
 after `./build.sh release_check` passes, and do not merge until it is green.
 Publishing never runs from this dispatch because the `release` job is guarded
 by a master-only condition, so a devel dispatch is effectively a dry run.
-Master pushes do not call CI again. That pre-release gate already runs the
-full matrix against the exact commit that becomes `master`, so calling it a
-second time on the push would add delay without covering a new revision. All
-CI scaffolding (environment setup, wheel building, binary building, archive
-extraction, and test execution) is implemented as shell functions in
-`build.sh` and called from the workflow steps.
+Master pushes do not call CI again. Automatic release already runs the full
+matrix against its exact candidate before
+fast-forwarding master, so calling it twice would add delay without covering a
+new revision. All CI scaffolding (environment setup, wheel building, binary
+building, archive extraction, and test execution) is implemented as shell
+functions in `build.sh` and called from the workflow steps.
 
 Publication is safe to repeat: `publish.yml` only pushes Docker tags
 that are missing or do not identify the release version. `latest` and
@@ -382,10 +388,10 @@ resolve the newest release from PyPI.
   index, or the `python:3.14-alpine` Docker image provide yet. A release build
   previously failed this way in all six binary jobs (dry run 40266792761) the
   day python.org published 3.13.18 before any of those tools did; weekly
-  dependency-refresh pull requests (see "Dependency refresh" above), once
-  reviewed and merged, now keep the bundled patch current without a
-  months-long gap like issue #275's, so a hard python.org gate on every build
-  added delay without adding safety.
+  automatic releases (see "Automatic release" above) now keep the bundled
+  patch current on their own, which is also what fixed issue #275's
+  months-long release gap, so a hard python.org gate on every build added
+  delay without adding safety.
   macOS and Linux musl always use the newest uv-managed python-build-standalone
   CPython. For macOS this also sidesteps `actions/setup-python`'s CPython,
   which links Homebrew's OpenSSL by absolute path
@@ -647,8 +653,8 @@ The moving `python:3.14-alpine` base tag is pulled fresh (`docker build --pull`)
 before each image build, and its bundled interpreter version is validated and
 logged. The completed mini and full images are checked again after they build.
 A wrong, missing, or unparsable Python version fails the build; an older patch
-than python.org only emits a warning, because weekly dependency-refresh pull
-requests keep the bundled patch current instead once merged.
+than python.org only emits a warning, because weekly automatic releases keep
+the bundled patch current instead.
 Run `make docker` to build both images locally.
 
 Three additional Dockerfiles support the Kerberos integration test

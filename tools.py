@@ -923,12 +923,11 @@ def get_history():
     return h.strip()
 
 
-# Dependency refresh
+# Automatic patch release
 
 AR_ROOT = pathlib.Path(os.environ.get("PX_RELEASE_ROOT", pathlib.Path(__file__).resolve().parent)).resolve()
 PYTHON_VERSION_FILE = AR_ROOT / ".github" / "bundled-python-version"
 INITIAL_BUNDLED_PYTHON = "3.13.17"
-REFRESH_LINE = re.compile(r"(?m)^- (Refreshed locked dependencies|Bundled CPython)\b.*$")
 
 
 def package_versions(lock: bytes) -> dict[str, tuple[str, ...]]:
@@ -938,6 +937,19 @@ def package_versions(lock: bytes) -> dict[str, tuple[str, ...]]:
     for package in tomllib.loads(lock.decode())["package"]:
         packages.setdefault(package["name"], set()).add(package["version"])
     return {name: tuple(sorted(versions)) for name, versions in packages.items()}
+
+
+def bump_patch(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def replace_requirement(text: str, name: str, version: str) -> str:
+    pattern = rf'("{re.escape(name)}>=)[^"]+(")'
+    updated, count = re.subn(pattern, rf"\g<1>{version}\2", text, count=1)
+    if count != 1:
+        raise ValueError(f"could not update the {name} minimum")  # noqa: TRY003
+    return updated
 
 
 def dependency_changes(old: dict[str, tuple[str, ...]], new: dict[str, tuple[str, ...]]) -> list[str]:
@@ -950,66 +962,32 @@ def dependency_changes(old: dict[str, tuple[str, ...]], new: dict[str, tuple[str
     return changes
 
 
-def refresh_summary_line(dependencies: list[str], old_python: str, new_python: str) -> str | None:
-    parts = []
-    if dependencies:
-        parts.append(f"refreshed locked dependencies ({', '.join(dependencies)})")
-    if old_python != new_python:
-        parts.append(f"bundled CPython {old_python} -> {new_python}")
-    if not parts:
-        return None
-    text = " and ".join(parts)
-    return f"- {text[0].upper()}{text[1:]}."
-
-
-def insert_changelog(dependencies: list[str], old_python: str, new_python: str) -> None:
-    """Add or replace the dependency-refresh line under Unreleased/Improvements."""
-    line = refresh_summary_line(dependencies, old_python, new_python)
-    if line is None:
-        return
-
+def insert_changelog(version: str, dependencies: list[str], old_python: str, new_python: str) -> None:
     path = AR_ROOT / "docs" / "changelog.md"
-    lines = path.read_text().splitlines()
-
-    try:
-        start = lines.index("## Unreleased")
-    except ValueError:
-        sep = lines.index("---")
-        lines[sep + 1 : sep + 1] = ["", "## Unreleased", "", "### Improvements", line, "", "---"]
-        path.write_text("\n".join(lines) + "\n")
-        return
-
-    end = start + 1
-    while end < len(lines) and not (lines[end].startswith("## ") or lines[end] == "---"):
-        end += 1
-    section = lines[start:end]
-
-    try:
-        imp_start = section.index("### Improvements")
-    except ValueError:
-        at = 2 if len(section) > 1 and section[1] == "" else 1
-        section[at:at] = ["### Improvements", line, ""]
-    else:
-        sub_start = imp_start + 1
-        sub_end = sub_start
-        while sub_end < len(section) and not section[sub_end].startswith("#"):
-            sub_end += 1
-        subsection = section[sub_start:sub_end]
-        for i, entry in enumerate(subsection):
-            if REFRESH_LINE.match(entry):
-                subsection[i] = line
-                break
-        else:
-            while subsection and subsection[-1] == "":
-                subsection.pop()
-            subsection.extend([line, ""])
-        section[sub_start:sub_end] = subsection
-
-    lines[start:end] = section
-    path.write_text("\n".join(lines) + "\n")
+    text = path.read_text()
+    lines = [
+        f"## v{version} — {datetime.date.today().isoformat()}",
+        "",
+        "### Improvements",
+    ]
+    if dependencies:
+        lines.append("- Refreshed locked dependencies:")
+        lines.extend(f"  - {change}" for change in dependencies)
+    if old_python != new_python:
+        lines.extend([
+            f"- Updated standalone binaries and Docker images from CPython {old_python}",
+            f"  to the newest published CPython {new_python} patch release.",
+        ])
+    lines.extend(["", "---", ""])
+    marker = "---\n"
+    if marker not in text:
+        raise ValueError("could not find changelog insertion point")  # noqa: TRY003
+    path.write_text(text.replace(marker, marker + "\n" + "\n".join(lines), 1))
 
 
 def auto_release() -> dict[str, object]:
+    import tomllib
+
     old_lock = (AR_ROOT / "uv.lock").read_bytes()
     old_packages = package_versions(old_lock)
     old_python = PYTHON_VERSION_FILE.read_text().strip() if PYTHON_VERSION_FILE.exists() else INITIAL_BUNDLED_PYTHON
@@ -1027,16 +1005,30 @@ def auto_release() -> dict[str, object]:
             "python": new_python,
         }
 
+    pyproject_path = AR_ROOT / "pyproject.toml"
+    pyproject = pyproject_path.read_text()
+    current_version = tomllib.loads(pyproject)["project"]["version"]
+    version = bump_patch(current_version)
+    pyproject = re.sub(r'(?m)^version = "[^"]+"$', f'version = "{version}"', pyproject, count=1)
+    for dependency in ("pymcurl", "quickjs-ng"):
+        resolved = new_packages.get(dependency)
+        if not resolved or len(resolved) != 1:
+            raise ValueError(f"expected one resolved {dependency} version")  # noqa: TRY003
+        pyproject = replace_requirement(pyproject, dependency, resolved[0])
+    pyproject_path.write_text(pyproject)
     PYTHON_VERSION_FILE.write_text(new_python + "\n")
-    insert_changelog(dependencies, old_python, new_python)
+    insert_changelog(version, dependencies, old_python, new_python)
 
-    date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    # Refresh the project metadata recorded in the lock after changing its version
+    # and dependency minimums.
+    subprocess.run(["uv", "lock"], cwd=AR_ROOT, check=True)
     return {
         "changed": True,
-        "branch": f"deps/refresh-{date}",
+        "version": version,
+        "branch": f"release/auto-{version}",
         "dependencies": dependencies,
         "python": new_python,
-        "old_python": old_python,
+        "previous_python": old_python,
     }
 
 
@@ -1191,7 +1183,7 @@ Build:
 --history	Print latest changelog section
 --scenario-diagnostics FILE...
 		Print a sanitized summary of Px debug logs and Squid access/cache logs (tokens redacted)
---auto-release	Detect and prepare a dependency/CPython refresh (no version bump)
+--auto-release	Upgrade locks/CPython and prepare an automatic patch release
   --output FILE	Write the result JSON to FILE
 """)
 

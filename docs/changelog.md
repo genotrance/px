@@ -11,9 +11,6 @@
 - `--auth=NONE` forwards client headers upstream with their original name case instead of lowercasing them, which some proxies rejected (px#282).
 - `--test-auth` reports a specific message when the upstream proxy rejects a client's pass-through credentials under `--auth=NONE` (px#282).
 
-### Internal
-- `auto-release.yml` now proposes a `devel` dependency-refresh pull request instead of auto-releasing to `master`.
-
 ---
 
 ## v0.13.1 — 2026-10-31

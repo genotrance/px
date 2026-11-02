@@ -2,6 +2,13 @@
 
 ---
 
+## Unreleased
+
+### Bug fixes
+- auth=NONE pass-through sends the CONNECT request in one write so strict proxies do not treat headers as tunnel data (#282).
+
+---
+
 ## v0.13.1 — 2026-10-31
 
 ### Improvements

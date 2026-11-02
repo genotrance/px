@@ -28,7 +28,7 @@ Tests live in `tests/`.
 | `test_startup.py` | Startup bounds — the startup probe and its macOS CI guard, and px listening and quitting within a bounded time |
 | `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split, the uv cache without a restore fallback, fresh PyPI pymcurl install, `tools.py --check-mcurl` API guard and `--smoke-request` against a real px, `tools.py --scenario-diagnostics` token redaction and helper-invocation counting, and no cross-project or unreleased dependency in workflows |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix, the `scenario-windows` WSL2 keep-alive and `--test-auth` SSPI steps, and token redaction in the scenario log collection (needs bash, jq and PyYAML) |
-| `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers for the automatic release |
+| `test_auto_release.py` | `tools.py --auto-release` — lock/CPython change detection, the `Unreleased`/`Improvements` changelog line it inserts or replaces, and the `auto-release.yml` dependency-refresh workflow's structure |
 | `test_scenario_env.py` | Guards the `MCURL_WHEELS` candidate-wheel wiring in `scenario-env.sh` used by mcurl's release gate |
 | `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of probe reporting, final-status (401/407) failure, paced httpbin body echoes, bounded 429 retries and separate rate-limit exits, and Negotiate SPN addressing (`_negotiate_test_target`) |
 | `test_resolver.py` | Resolver and upstream-proxy DNS seeding tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IPv4/IPv6 literals and results, temporary libcurl entries, DNS-free `myIpAddress` discovery |
@@ -588,8 +588,8 @@ To override the auto-computed value, either pass an explicit `-n N` or set the
 
 `.github/workflows/ci.yml` runs in two modes. Pushes and pull requests run a fast
 set so feedback is quick; the full set runs weekly, on manual dispatch, as the
-pre-release gate and on the automatic-release candidate, so every configuration
-is still covered before a release. A `plan` job in `ci.yml` holds the static fast and full
+pre-release gate and on each dependency-refresh pull request branch, so every
+configuration is still covered before a release. A `plan` job in `ci.yml` holds the static fast and full
 matrices (`TESTS_*`, `MUSL_*`, `SCENARIO_FULL`) and emits the one chosen by the
 mode; `tests/test_ci_plan.py` runs that step and checks the selection logic.
 
@@ -601,8 +601,8 @@ mode; `tests/test_ci_plan.py` runs that step and checks the selection logic.
 | `workflow_call` (`full` input, default true) | full unless `full: false` |
 
 Callers: a manual `build.yml` dispatch on `devel` calls `ci.yml` through
-`workflow_call` with `full: true`, and `auto-release.yml` dispatches it on the
-release candidate branch with `-f full=true`. To run the full set by hand, use
+`workflow_call` with `full: true`, and `auto-release.yml` dispatches it on its
+dependency-refresh pull request branch with `-f full=true`. To run the full set by hand, use
 `gh workflow run ci.yml --ref devel`; add `-f full=false` for a fast run.
 
 **Fast mode** runs `quality` (pre-commit and mypy), `kerberos` and these test

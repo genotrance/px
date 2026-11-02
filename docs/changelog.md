@@ -6,6 +6,10 @@
 
 ### Bug fixes
 - auth=NONE pass-through sends the CONNECT request in one write so strict proxies do not treat headers as tunnel data (#282).
+- `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).
+- `--auth=NONE` HTTPS CONNECT no longer sends a duplicate success response before relaying the upstream tunnel (px#282).
+- `--auth=NONE` forwards client headers upstream with their original name case instead of lowercasing them, which some proxies rejected (px#282).
+- `--test-auth` reports a specific message when the upstream proxy rejects a client's pass-through credentials under `--auth=NONE` (px#282).
 
 ---
 
@@ -28,10 +32,6 @@
 - A request body sent late after a client-authentication `407` to `Expect: 100-continue` is no longer parsed as the next request.
 - Failed downstream client authentication now returns a fresh `407` instead of a `401`, and NEGOTIATE/NTLM restart correctly after a failed exchange.
 - `px --test`/`--test-auth` now fail requests ending with `401`/`407` (px#282).
-- `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).
-- `--auth=NONE` HTTPS CONNECT no longer sends a duplicate success response before relaying the upstream tunnel (px#282).
-- `--auth=NONE` forwards client headers upstream with their original name case instead of lowercasing them, which some proxies rejected (px#282).
-- `--test-auth` reports a specific message when the upstream proxy rejects a client's pass-through credentials under `--auth=NONE` (px#282).
 - `--test-auth` with Negotiate and one explicit proxy now uses the upstream proxy hostname.
 - Downstream NTLM/Digest/Basic authentication no longer stalls on repeated password lookups.
 - `px --test` output is retained when piped.

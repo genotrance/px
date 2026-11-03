@@ -38,6 +38,12 @@ def test_workflow_dispatches_release_build_after_master_push():
     block = text[step : text.index("name: Merge released master into devel")]
     assert "if: steps.publish.outcome == 'success'" in block
     assert "gh workflow run build.yml --ref master" in block
+    assert 'gh run watch "$RUN_ID" --exit-status --interval 30' in block
+    assert 'gh run view "$RUN_ID" --json conclusion' in block
+    assert "Release build run: $URL" in block
+    assert "Release build outcome: $OUTCOME" in block
+    assert 'echo "::error::Release build failed: $URL"' in block
+    assert "name: Fail if the release build failed" in text
 
 
 def test_workflow_backmerges_published_release_or_opens_a_pr():
@@ -47,7 +53,7 @@ def test_workflow_backmerges_published_release_or_opens_a_pr():
     start = text.index("name: Merge released master into devel")
     end = text.index("name: Close resolved blocked issue")
     block = text[start:end]
-    assert "if: steps.publish.outcome == 'success' && env.DRY_RUN != 'true'" in block
+    assert "if: steps.release_build.outcome == 'success' && env.DRY_RUN != 'true'" in block
     assert "git fetch origin devel master" in block
     assert "git checkout -B auto-release-sync origin/devel" in block
     assert block.count('git merge --no-ff --no-edit "$SHA"') == 2
@@ -59,3 +65,6 @@ def test_workflow_backmerges_published_release_or_opens_a_pr():
     assert 'gh pr create --base devel --head "$BRANCH"' in block
     assert "::error::" in block
     assert "exit 1" in block
+
+    issue_close = text[end : text.index("name: Fail after recording blocked CI")]
+    assert "if: steps.release_build.outcome == 'success'" in issue_close

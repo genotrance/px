@@ -606,9 +606,10 @@ release candidate branch with `-f full=true`. To run the full set by hand, use
 `gh workflow run ci.yml --ref devel`; add `-f full=false` for a fast run.
 The weekly automatic release prepares and tests its candidate from `master`,
 then fast-forwards that branch only after the candidate passes this full set.
-It immediately back-merges the published commit into `devel`; a conflict or a
-second concurrent `devel` update opens a pull request against `devel` and
-fails the release workflow rather than leaving the branches out of sync.
+It then waits for the master release build to succeed before back-merging the
+published commit into `devel`; a conflict or a second concurrent `devel`
+update opens a pull request against `devel` and fails the release workflow
+rather than leaving the branches out of sync.
 
 **Fast mode** runs `quality` (pre-commit and mypy), `kerberos` and these test
 jobs, with the `slow` marker deselected (`-m "not integration and not benchmark

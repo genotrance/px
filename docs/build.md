@@ -195,17 +195,17 @@ CPython changed, the workflow exits successfully. Otherwise it:
    and that `master` has not moved, then fast-forwards `master` to the tested
    commit. Pushes made with `GITHUB_TOKEN` do not trigger workflows, so the
    workflow explicitly dispatches `build.yml` on `master` and logs the run URL
-   without waiting for it. That build bundles and logs whatever CPython patch
-   its own build tools provide, builds and tests the release artifacts, and
-   publishes PyPI and the GitHub release. Any manual dispatch, including this
-   one, also invokes `build.yml`'s reusable full CI gate while the artifact
+   and waits for it to succeed. That build bundles and logs whatever CPython
+   patch its own build tools provide, builds and tests the release artifacts,
+   and publishes PyPI and the GitHub release. Any manual dispatch, including
+   this one, also invokes `build.yml`'s reusable full CI gate while the artifact
    jobs run; the candidate's exact full CI run in step 2 remains the release
    precondition, so this second run adds no additional coverage.
-4. The automatic-release workflow then merges the released `master` commit
-   back into `devel` with a non-fast-forward merge, without waiting for the
-   dispatched build. If `devel` moves before the push, it fetches and retries
-   the merge once. A conflict, or a second rejected push, aborts the local
-   merge, pushes the released commit without rewriting a branch, opens (or
+4. After the release build succeeds, the automatic-release workflow merges the
+   released `master` commit back into `devel` with a non-fast-forward merge. If
+   `devel` moves before the push, it fetches and retries the merge once. A
+   conflict, or a second rejected push, aborts the local merge, pushes the
+   released commit without rewriting a branch, opens (or
    reuses) a pull request against `devel`, and fails for manual resolution. In
    parallel, a successful `build.yml` run on `master` emits the `workflow_run`
    event that starts `publish.yml`, which publishes Docker and Winget from the

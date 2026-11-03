@@ -23,7 +23,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       GH_TOKEN: ${{ github.token }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
@@ -214,9 +214,18 @@ jobs:
           URL="https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
           echo "Release build run: $URL"
           echo "Release build run: $URL" >> "$GITHUB_STEP_SUMMARY"
+          WATCH_STATUS=0
+          gh run watch "$RUN_ID" --exit-status --interval 30 || WATCH_STATUS=$?
+          OUTCOME=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion // "unknown"')
+          echo "Release build outcome: $OUTCOME"
+          echo "Release build outcome: $OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$WATCH_STATUS" -ne 0 ]; then
+            echo "::error::Release build failed: $URL"
+            exit "$WATCH_STATUS"
+          fi
 
       - name: Merge released master into devel
-        if: steps.publish.outcome == 'success' && env.DRY_RUN != 'true'
+        if: steps.release_build.outcome == 'success' && env.DRY_RUN != 'true'
         working-directory: release
         env:
           SHA: ${{ steps.candidate.outputs.sha }}
@@ -271,7 +280,7 @@ jobs:
           fi
 
       - name: Close resolved blocked issue
-        if: steps.publish.outcome == 'success'
+        if: steps.release_build.outcome == 'success'
         run: |
           ISSUE=$(gh issue list --state open --search '"auto-release blocked" in:title' \
             --json number,title --jq '.[] | select(.title == "auto-release blocked") | .number' | head -1)
@@ -284,6 +293,6 @@ jobs:
         if: steps.ci.outcome == 'failure'
         run: exit 1
 
-      - name: Fail if the release build was not dispatched
+      - name: Fail if the release build failed
         if: steps.release_build.outcome == 'failure'
         run: exit 1

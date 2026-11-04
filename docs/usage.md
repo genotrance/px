@@ -281,6 +281,42 @@ Px.
 On Windows, `--kerberos` is silently ignored because Windows uses SSPI for
 Kerberos authentication, which handles ticket management transparently.
 
+## Kerberos and NTLM
+
+Recent versions of curl (and therefore Px, since Px bundles libcurl) no longer
+let a `Negotiate` exchange silently fall back to NTLM when Kerberos fails.
+Microsoft is also disabling NTLM by default across Windows going forward, and
+curl is removing NTLM support in a future release. Together this means a proxy
+that used to work via NTLM-inside-Negotiate can start failing outright once
+Px (or its bundled libcurl) is upgraded, instead of quietly downgrading.
+
+If Px logs that Negotiate failed because no Kerberos credentials are available
+for the proxy (Windows SSPI reports this as `SEC_E_NO_CREDENTIALS`, "No
+credentials are available in the security package"), it means the current
+identity has no Kerberos ticket for the proxy's service principal name (SPN,
+`HTTP/<proxy name>`) - typically because the proxy is addressed by an alias or
+CNAME that was never registered as an SPN for the proxy's service account.
+Px will not work around this automatically (it does not resolve aliases,
+rewrite the SPN, or fall back to NTLM on its own) because that would silently
+mask a directory configuration problem. Instead:
+
+- Run `klist get HTTP/<proxy host>` (the configured name) to confirm whether a
+  ticket can be obtained for that SPN.
+- Ask the proxy's administrators to register `HTTP/<proxy alias>` as an SPN on
+  the proxy service account so Kerberos can find it.
+- Meanwhile, address the proxy by its real hostname with `--server=<proxy real
+  host>`, or use explicit `--auth=NTLM`, only for as long as the bundled
+  libcurl still supports NTLM.
+
+To tell whether a proxy exchange actually used NTLM or Kerberos:
+
+- Run `klist` right after browsing through the proxy - a fresh service ticket
+  for the proxy's SPN means Kerberos was used; none means NTLM (or failure).
+- In Edge, capture a trace via `edge://net-export`, find the proxy
+  authentication request, and look at its token: one starting with
+  `TlRMTVNTUA` (base64 for `NTLMSSP`) is NTLM, while one starting with `YII` is
+  a Kerberos (SPNEGO/GSS-API) token.
+
 ## Client authentication
 
 Px can authenticate downstream clients connecting to it. This is useful in

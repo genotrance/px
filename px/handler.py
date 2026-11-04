@@ -14,7 +14,7 @@ import h11
 import keyring
 import mcurl
 
-from . import config, wproxy
+from . import config, kerberos, wproxy
 from .config import CLIENT_REALM, STATE
 from .debug import dprint, missing_module_message, pprint
 
@@ -110,7 +110,14 @@ def _lookup_client_password(username):
 
 
 def set_curl_auth(curl, auth):
-    "Set proxy authentication info for curl object"
+    """Set proxy authentication info for curl object.
+
+    Returns True if this transfer uses an SSPI/GSS-API default-identity login
+    (no explicit username) with Negotiate among the configured auth methods -
+    the one case where libcurl's SEC_E_NO_CREDENTIALS/no-Kerberos-credentials
+    Negotiate failure (px #288) can occur - so the caller should watch it via
+    kerberos.watch_proxy_credentials().
+    """
     if auth != "NONE":
         # Connecting to proxy and authenticating
         key = ""
@@ -123,7 +130,7 @@ def set_curl_auth(curl, auth):
                 key = ":"
             else:
                 dprint("Kerberos enabled but GSS-API not available in libcurl")
-                return
+                return False
         elif len(STATE.username) != 0:
             key = STATE.username
             if "PX_PASSWORD" in os.environ:  # noqa: SIM108
@@ -140,8 +147,9 @@ def set_curl_auth(curl, auth):
                 key = ":"
             else:
                 dprint("SSPI/GSS-API not available and no username configured - no auth")
-                return
+                return False
         curl.set_auth(user=key, password=pwd, auth=auth)
+        return key == ":" and bool(mcurl.getauth(str(auth).upper()) & mcurl.libcurl.CURLAUTH_NEGOTIATE)
     else:
         # Explicitly deferring proxy authentication to the client
         dprint(curl.easyhash + ": Skipping proxy authentication")
@@ -149,6 +157,7 @@ def set_curl_auth(curl, auth):
         # Use easy interface to maintain a persistent connection
         # for NTLM auth, multi interface does not guarantee this
         curl.is_easy = True
+        return False
 
 
 ###
@@ -1157,6 +1166,8 @@ class ConnectionHandler:
         dprint(self.curl.easyhash + ": Path = " + target)
 
         # Get destination (proxy or direct)
+        negotiate_watch = False
+        proxy_key = None
         ipport = await self._get_destination(target)
         if ipport is None:
             dprint(self.curl.easyhash + ": Configuring proxy settings")
@@ -1169,14 +1180,21 @@ class ConnectionHandler:
                 await asyncio.to_thread(STATE.mcurl.remove, self.curl)
                 return
 
-            set_curl_auth(self.curl, STATE.auth)
+            proxy_key = f"{server}:{port}"
+            # Watch for the Negotiate no-Kerberos-credentials failure (px #288) only
+            # while this proxy has not already been diagnosed once.
+            negotiate_watch = set_curl_auth(self.curl, STATE.auth) and not kerberos.proxy_diagnosed(proxy_key)
             proxy_resolve = await self._set_proxy_resolve(server, port)
         else:
             proxy_resolve = None
             dprint(self.curl.easyhash + ": Skipping auth proxying")
 
-        # Set debug mode
-        self.curl.set_debug(STATE.debug is not None)
+        # Set debug mode - also enabled when watching for the Negotiate
+        # no-Kerberos-credentials failure, since that text only reaches us
+        # via libcurl's verbose/debug channel (see px/kerberos.py)
+        self.curl.set_debug(STATE.debug is not None or negotiate_watch)
+        if negotiate_watch:
+            kerberos.watch_proxy_credentials(self.curl.easyhash, proxy_key)
 
         # Build headers dict for curl, stripping hop-by-hop and proxy headers
         strip_proxy_auth = strip_proxy_headers or (ipport is None and STATE.auth != "NONE")
@@ -1222,6 +1240,8 @@ class ConnectionHandler:
         try:
             success = await asyncio.to_thread(STATE.mcurl.do, self.curl)
         finally:
+            if negotiate_watch:
+                kerberos.unwatch_proxy_credentials(self.curl.easyhash)
             if proxy_resolve is not None:
                 # CURLOPT_RESOLVE retains the slist pointer, so clear it before
                 # releasing the request-scoped DNS override.

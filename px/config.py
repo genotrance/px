@@ -12,7 +12,7 @@ import threading
 import time
 import urllib.parse
 
-from . import wproxy
+from . import kerberos, wproxy
 from .debug import Debug, dprint, missing_module_message, pprint
 from .help import HELP
 
@@ -914,7 +914,7 @@ class State:
         self.reload_proxy()
 
         # Curl multi object to manage all easy connections
-        self.mcurl = mcurl.MCurl(debug_print=dprint)
+        self.mcurl = mcurl.MCurl(debug_print=kerberos.relay_debug)
 
         # Single-probe auth retry for proxies blocked by repeated 407s
         self.mcurl.set_auth_retry(self.authretry)

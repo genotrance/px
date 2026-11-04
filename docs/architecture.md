@@ -638,5 +638,35 @@ previously-blocked proxies are retried: `reload_kerberos()` calls
 `atexit` registers `_cleanup()` to remove the per-process ccache file.
 `do_quit()` calls `cleanup_kerberos()` explicitly before `os._exit()` since
 `os._exit()` bypasses `atexit` handlers.
+
+### Negotiate-without-credentials diagnostic (px #288)
+
+Recent libcurl no longer lets a Negotiate exchange silently fall back to NTLM,
+so a proxy whose SPN is not registered for the process's Kerberos identity
+fails outright. mcurl maps this to `CURLE_AUTH_ERROR`, but
+`curl_easy_strerror()` for that code is a generic "Authentication function
+returned an error" on every platform and curl version — it does not say why.
+The only released pymcurl surface that carries the actual SSPI/GSS-API text
+(`SEC_E_NO_CREDENTIALS`, "No credentials are available in the security
+package") is the verbose debug channel (`Curl.set_debug()`), which normally
+only runs under `--debug`.
+
+`set_curl_auth()` in `handler.py` returns whether a request's auth is the
+one case where this specific failure can occur: a default-identity SSPI/GSS-API
+login (no explicit `--username`, including the GSS-API path override above)
+with Negotiate among the configured auth methods. `_handle_request()` uses that
+to enable the debug channel for just that request (regardless of `--debug`)
+and registers the curl handle with `kerberos.watch_proxy_credentials()`.
+
+`config.py` wires `MCurl(debug_print=kerberos.relay_debug)` instead of passing
+`dprint` directly. `relay_debug()` watches every message mcurl's debug
+callback produces for a registered handle; on a match it prints one message
+per proxy via `pprint()` (so it is visible without `--debug`) before
+forwarding the original text to the real `dprint()` unchanged — normal debug
+logging is unaffected. Once a proxy has been diagnosed,
+`kerberos.proxy_diagnosed()` lets `_handle_request()` skip enabling the debug
+channel for it again. `px --test` needs no separate wiring: it drives real
+traffic through this same server-side `_handle_request()` path, so its output
+gets the identical message.
 The `/PxQuit` handler drains its `200` response before this forced exit, so
 the client sees a successful shutdown on frozen event loops as well.

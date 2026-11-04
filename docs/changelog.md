@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+### New features
+- Px now diagnoses Negotiate failing because libcurl has no Kerberos credentials for the proxy's SPN, once per proxy, with guidance on registering the SPN or falling back to `--server=`/`--auth=NTLM` (#288).
+
 ### Bug fixes
 - auth=NONE pass-through sends the CONNECT request in one write so strict proxies do not treat headers as tunnel data (#282).
 - `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).

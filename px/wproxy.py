@@ -394,6 +394,13 @@ if sys.platform == "win32":
                     if ie_proxy_config.fAutoDetect:
                         # Mode = Auto detect
                         self.mode = MODE_AUTO
+                        if (
+                            ie_proxy_config.lpszAutoConfigUrl is not None
+                            and len(ie_proxy_config.lpszAutoConfigUrl) != 0
+                        ):
+                            # Setup script next to auto-detect: WinHTTP tries both
+                            self.servers = [ie_proxy_config.lpszAutoConfigUrl]
+                            dprint("AutoConfigURL = " + self.servers[0])
                     elif ie_proxy_config.lpszAutoConfigUrl is not None and len(ie_proxy_config.lpszAutoConfigUrl) != 0:
                         # Mode = PAC
                         self.mode = MODE_PAC
@@ -457,6 +464,9 @@ if sys.platform == "win32":
                 autoproxy_options.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT
                 autoproxy_options.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
                 autoproxy_options.lpszAutoConfigUrl = 0
+                if self.servers:
+                    autoproxy_options.dwFlags |= WINHTTP_AUTOPROXY_CONFIG_URL
+                    autoproxy_options.lpszAutoConfigUrl = self.servers[0]
             else:
                 dprint("winhttp_find_proxy_for_url only applicable for MODE_AUTO and MODE_PAC")
                 return ""

@@ -17,7 +17,7 @@ Tests live in `tests/`.
 | `test_large_data.py` | Large data transfer reliability — concurrent multi-MB GET/POST over HTTP and HTTPS with SHA-256 integrity verification (marked `largedata`, run via `make test-large-data`) |
 | `test_debug.py` | Debug module tests — `Debug` singleton, `pprint`, `dprint` |
 | `test_kerberos.py` | Kerberos ticket management — unit tests (mocked subprocess, Linux/macOS only) and Docker-based integration tests against local MIT and Heimdal KDCs (marked `integration`, run via `make test-kerberos`) |
-| `test_negotiate_credentials.py` | Negotiate-without-Kerberos-credentials diagnostic (px #288) — `set_curl_auth()` watch-eligibility, positive/negative detection text, once-per-proxy and multiple-proxy behaviour, and runtime logging without `--debug` |
+| `test_negotiate_credentials.py` | Negotiate-without-Kerberos-credentials diagnostic (px #288) from mcurl's structured 401 result — once-per-proxy and multiple-proxy behaviour, no message for other failures or DIRECT, runtime logging without `--debug`; no libcurl debug channel on proxied, DIRECT or PAC transfers unless `--debug` (px #289); bad noproxy message text |
 | `test_client_auth.py` | Downstream client authentication unit tests — failed NEGOTIATE/NTLM/Digest/Basic credentials restart with a fresh 407, cached password lookups, and the connection handling of a 407 answering a held-back `Expect: 100-continue` (closes unless a handshake is in progress, in which case the late body is released and discarded and never parsed as the next request) |
 | `test_auth_retry.py` | `--authretry` integration tests — Px against a fake upstream proxy that denies or allows authenticated requests, proving latching after 3 consecutive 407s, exactly one probe per interval under a 50-client concurrent burst, and recovery |
 | `test_stream_upload.py` | Streamed upload unit and subprocess tests: body formats, trailers, `Expect: 100-continue`, authentication retries, header stripping, integrity, memory bounds, stalled clients, connection reuse, and parallel uploads. Proxy retry tests require libcurl NTLM. |
@@ -345,7 +345,7 @@ connection-close variant retains a 16-connection limit for overload testing. Eve
 subprocess and network operation has a bounded timeout, and scenarios assert
 that Px remains alive without a traceback. The cut-handshake test is
 deliberately not an xfail: its HTTPS variants must fail on pymcurl 8.23.0.2
-and pass on pymcurl 8.23.0.3 (the minimum), while the rest of the suite passes
+and pass on pymcurl 8.23.0.3 and newer, while the rest of the suite passes
 on both. Because the lab is deterministic, any other failure is a real
 regression.
 

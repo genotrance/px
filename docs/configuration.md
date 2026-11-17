@@ -108,7 +108,7 @@ for the full list of supported types.
 
 ## Settings
 
-Px requires pymcurl 8.23.0.2 or newer.
+Px requires pymcurl 8.23.0.4 or newer.
 
 | Flag | Env var | INI key | Default | Description |
 |------|---------|---------|---------|-------------|

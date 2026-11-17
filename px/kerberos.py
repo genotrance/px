@@ -10,7 +10,9 @@ import tempfile
 import threading
 import time
 
-from .debug import dprint, pprint
+import mcurl
+
+from .debug import pprint
 
 if sys.platform != "win32":
     import fcntl
@@ -31,26 +33,12 @@ RETRY_INTERVAL = 60
 #
 # Recent libcurl no longer lets a Negotiate exchange silently fall back to
 # NTLM, so a proxy whose SPN (HTTP/<alias>) is not registered for the
-# process's Kerberos identity now fails outright instead of degrading. The
-# failure is mapped by mcurl to CURLE_AUTH_ERROR, but curl_easy_strerror() for
-# that code is a generic "Authentication function returned an error" on every
-# platform and curl version - it does not say *why*. The only released pymcurl
-# surface that carries the actual SSPI/GSS-API text (e.g. SEC_E_NO_CREDENTIALS
-# / "No credentials are available in the security package") is the verbose
-# debug channel (Curl.set_debug()), which normally only runs under --debug.
-#
-# set_curl_auth() in handler.py enables that channel for the specific
-# requests where this failure is possible (SSO/no-username or managed-
-# Kerberos SSPI/GSS-API login, with Negotiate among the configured auth
-# methods) and registers the handle here via watch_proxy_credentials(). The
-# debug text still flows through to the real dprint() unchanged - this module
-# only taps it to recognize the specific failure and print one actionable
-# message per proxy, regardless of --debug.
-
-NO_CREDENTIALS_MARKERS = (
-    "sec_e_no_credentials",
-    "no credentials are available in the security package",
-)
+# process's Kerberos identity now fails outright instead of degrading.
+# pymcurl 8.23.0.4 classifies that failure itself (libcurl selected Negotiate
+# but never sent a token) and reports it as resp 401 with errstr starting with
+# mcurl.NEGOTIATE_NO_CREDENTIALS. handler.py passes each failed proxied
+# transfer to note_proxy_failure(), which prints one actionable message per
+# proxy, regardless of --debug.
 
 NO_CREDENTIALS_MESSAGE = (
     "Kerberos: proxy {proxy} rejected Negotiate - libcurl found no Kerberos credentials for its "
@@ -61,17 +49,20 @@ NO_CREDENTIALS_MESSAGE = (
 )
 
 _warned_proxies: set[str] = set()
-_watched_handles: dict[str, str] = {}
 
 
-def watch_proxy_credentials(easyhash, proxy):
-    "Watch a curl handle's debug text for the no-Kerberos-credentials Negotiate failure"
-    _watched_handles[easyhash] = proxy
+def is_no_credentials(resp, errstr):
+    "True if mcurl classified a failed transfer as Negotiate without Kerberos credentials"
+    return resp == 401 and errstr.startswith(mcurl.NEGOTIATE_NO_CREDENTIALS)
 
 
-def unwatch_proxy_credentials(easyhash):
-    "Stop watching a curl handle - call once its transfer is done"
-    _watched_handles.pop(easyhash, None)
+def note_proxy_failure(proxy, resp, errstr):
+    "Print the no-Kerberos-credentials guidance once per proxy if mcurl reported that failure"
+    if proxy in _warned_proxies or not is_no_credentials(resp, errstr):
+        return False
+    _warned_proxies.add(proxy)
+    pprint(NO_CREDENTIALS_MESSAGE.format(proxy=proxy))
+    return True
 
 
 def proxy_diagnosed(proxy):
@@ -82,25 +73,6 @@ def proxy_diagnosed(proxy):
 def reset_diagnosed_proxies():
     "Clear once-per-proxy diagnostic state - test support only"
     _warned_proxies.clear()
-    _watched_handles.clear()
-
-
-def relay_debug(msg):
-    """mcurl's debug_print hook.
-
-    Watches debug/verbose text for the Negotiate no-Kerberos-credentials
-    failure on a watched handle, then forwards msg to the real dprint()
-    unchanged so normal debug logging is unaffected.
-    """
-    easyhash, sep, rest = msg.partition(": ")
-    if sep:
-        proxy = _watched_handles.get(easyhash)
-        if proxy is not None and proxy not in _warned_proxies:
-            lowered = rest.lower()
-            if any(marker in lowered for marker in NO_CREDENTIALS_MARKERS):
-                _warned_proxies.add(proxy)
-                pprint(NO_CREDENTIALS_MESSAGE.format(proxy=proxy))
-    dprint(msg)
 
 
 class KerberosManager:

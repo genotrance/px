@@ -70,6 +70,13 @@ release on `master`. A changed lock is treated as a release candidate, including
 changes to transitive dependencies that do not have a minimum in
 `pyproject.toml`.
 
+### pymcurl 8.23.0.4
+
+Px 0.13.2 needs pymcurl 8.23.0.4 or newer: it never enables libcurl's debug
+channel unless asked (px#289) and reports the Negotiate no-credentials
+failure as `mcurl.NEGOTIATE_NO_CREDENTIALS` (px#288), which `tools.py`
+`check_mcurl` also requires.
+
 ### pymcurl 8.23.0.3
 
 Px 0.13.1 needs pymcurl 8.23.0.3 or newer from PyPI. It fixes px#268

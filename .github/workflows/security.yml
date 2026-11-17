@@ -1,0 +1,147 @@
+name: Security
+
+# Static security checks for every pull request and every push to the
+# integration and release branches. Runs no pull request code: it only reads
+# the checkout. Never trigger it with pull_request_target or workflow_run.
+# See docs/build.md for what each job checks and how to run it locally.
+
+on:
+  pull_request:
+  push:
+    branches: [devel, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Tool versions are pinned exactly; bump them here. Downloaded binaries are
+# also pinned by SHA-256 (see the release's checksums file). Actions are pinned
+# by commit SHA and kept current by Dependabot's github-actions ecosystem.
+env:
+  ZIZMOR_VERSION: "1.32.0"
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  BANDIT_VERSION: "1.9.4"
+
+jobs:
+  # Reports every zizmor finding, then fails on high severity findings only.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ZIZMOR_TARGETS: .github/workflows .github/actions .github/dependabot.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: "false"
+
+      - name: Report all findings
+        run: |
+          # shellcheck disable=SC2086
+          uvx "zizmor==$ZIZMOR_VERSION" --no-progress --no-exit-codes $ZIZMOR_TARGETS
+
+      - name: Fail on high severity findings
+        run: |
+          # shellcheck disable=SC2086
+          uvx "zizmor==$ZIZMOR_VERSION" --no-progress --min-severity=high --format=github $ZIZMOR_TARGETS
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$ARCHIVE"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check -
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP" actionlint
+
+      # Uses the runner's shellcheck for the run: scripts.
+      - name: Lint workflows
+        run: '"$RUNNER_TEMP/actionlint" -color'
+
+  # Added dependencies only, so it needs the pull request's base and head.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  # Scans the pull request's commits, or the pushed range on a push (the whole
+  # history for a new branch or an unknown previous commit). Any finding fails.
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        run: |
+          ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/$ARCHIVE"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$ARCHIVE" | sha256sum --check -
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP" gitleaks
+
+      - name: Scan commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          RANGE=""
+          if [ "$EVENT_NAME" = pull_request ]; then
+            RANGE="$PR_BASE_SHA..$PR_HEAD_SHA"
+          elif git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null; then
+            RANGE="$PUSH_BEFORE_SHA..$PUSH_HEAD_SHA"
+          fi
+          echo "Scanning commit range: ${RANGE:-whole history}"
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose --exit-code 1 \
+            ${RANGE:+--log-opts="$RANGE"} .
+
+  # Reports every finding in the log, then fails on high severity findings
+  # with high confidence only.
+  bandit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: "false"
+
+      - name: Report all findings
+        run: uvx "bandit==$BANDIT_VERSION" -r px --exit-zero
+
+      - name: Fail on high severity, high confidence findings
+        run: uvx "bandit==$BANDIT_VERSION" -r px --severity-level high --confidence-level high --quiet

@@ -805,6 +805,38 @@ that touches NTLM/Negotiate or SSPI handling.
 
 ---
 
+## Security checks locally
+
+`.github/workflows/security.yml` (see [Build](build.md#security-securityyml))
+runs on every pull request. Run the same checks before pushing; use the tool
+versions pinned in the workflow's `env` block (shown here for the current ones):
+
+```bash
+# Workflow security audit; online audits (impostor commits, stale pins) need a token
+GH_TOKEN=$(gh auth token) uvx zizmor==1.32.0 --no-progress .github/workflows .github/actions .github/dependabot.yml
+uvx zizmor==1.32.0 --no-progress --offline --min-severity=high .github/workflows .github/actions  # the gate
+uvx zizmor==1.32.0 --no-progress --persona=auditor .github/workflows .github/actions             # extra, informational
+
+# Workflow lint; install the release binary and shellcheck, or use a package manager
+actionlint
+
+# Secrets in the whole history, or only the commits being pushed
+gitleaks git --redact --verbose .
+gitleaks git --redact --verbose --log-opts="origin/devel..HEAD" .
+
+# Python security issues (the gate, then the full report)
+uvx bandit==1.9.4 -r px --severity-level high --confidence-level high --quiet
+uvx bandit==1.9.4 -r px
+```
+
+`dependency-review` needs a pull request and GitHub's dependency graph, so it
+only runs on GitHub. `tests/test_security_workflow.py` checks that actions are
+pinned by SHA with a version comment, that workflows declare permissions and
+never use `pull_request_target`, and that `security.yml` keeps its triggers,
+thresholds and pinned tool versions.
+
+---
+
 ## Local container testing
 
 The `build_local` function in `build.sh` provides end-to-end local build and

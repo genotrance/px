@@ -498,6 +498,68 @@ resolve the newest release from PyPI.
   submission requires a `WINGET_TOKEN` repository secret (classic PAT with
   `public_repo` and `workflow` scopes).
 
+### Security (`security.yml`)
+
+Static security checks that run on every pull request and on pushes to `devel`
+and `master`. They only read the checkout and run no pull request code, so the
+workflow has read-only `contents` permission, checks out without persisting
+credentials, and never uses `pull_request_target` or `workflow_run`. It is
+independent of `ci.yml`, so it does not duplicate the test matrix. Each job is
+its own check, so a failure names the tool:
+
+| Job | Checks | Fails on |
+|---|---|---|
+| `zizmor` | `.github/workflows`, `.github/actions` and `dependabot.yml` for workflow vulnerabilities (template injection, excessive permissions, unpinned actions, credential persistence, dangerous triggers, Dependabot cooldown) | high severity findings; every other finding is printed in the log |
+| `actionlint` | The same workflows for syntax, expression and shell (`shellcheck`) errors | any finding |
+| `dependency-review` (pull requests only) | Dependencies added or changed by the pull request, from GitHub's dependency graph | high or critical vulnerabilities |
+| `gitleaks` | Secrets in the pull request's commits, or the pushed range on a push (the whole history for a new branch) | any finding |
+| `bandit` | Python security issues in `px/` | high severity with high confidence; every other finding is printed in the log |
+
+Maintenance notes:
+
+- **Versions.** The tools are pinned to exact versions in the workflow-level
+  `env` block (`ZIZMOR_VERSION`, `ACTIONLINT_VERSION`, `GITLEAKS_VERSION`,
+  `BANDIT_VERSION`); bump them there. The actionlint and gitleaks release
+  tarballs are also pinned by SHA-256 (`ACTIONLINT_SHA256`,
+  `GITLEAKS_SHA256`, taken from each release's checksums file), so bump the
+  hash with the version. zizmor and Bandit run through `uvx`.
+- **Action pins.** Every action in every workflow and in the composite action
+  is pinned by full commit SHA with a trailing `# vX.Y.Z` comment, which is
+  what `tests/test_security_workflow.py` enforces. Dependabot's
+  `github-actions` ecosystem keeps the pins current, updating the comment with
+  the SHA. Dependabot has a 7 day cooldown, so a brand-new release is not
+  proposed until it has had time to be vetted. When pinning by hand, resolve the
+  SHA from the action's release tag (a commit, not an annotated tag object)
+  and prefer releases at least 7 days old.
+- **Suppressions.** A zizmor finding is suppressed with an inline
+  `# zizmor: ignore[rule]` comment on the flagged line, with the reason in the
+  comment above it; Bandit uses `# nosec BXXX` with a reason. gitleaks
+  allowlists live in `.gitleaks.toml` and must be narrow (path and pattern)
+  with a comment per entry. A pull request can edit that file, so the reviewer
+  reads any change to it. Current suppressions: `publish.yml`'s `workflow_run`
+  trigger (it only follows this repository's own `Build` run on master) and
+  its `GITHUB_PATH` write (a checksum-verified binary in `RUNNER_TEMP`), the
+  `release` job of `build.yml` and the release checkout of `auto-release.yml`
+  (they push with the persisted credentials), and the scenario lab's
+  `--helper-protocol=squid-2.5-ntlmssp` that gitleaks mistakes for a key.
+- **Hardened workflows.** `ci.yml` and `build.yml` default to `contents: read`
+  at workflow level (the `release` job of `build.yml` adds `contents: write` and
+  `id-token: write`), `publish.yml` keeps `permissions: {}`, and
+  `auto-release.yml` grants its write permissions on its single job. Checkouts
+  use `persist-credentials: false` unless the job pushes. Matrix, input and
+  step-output values reach `run:` scripts through `env:`, not `${{ }}`.
+- **Review.** Before integrating any pull request the reviewer reads this
+  workflow's output (zizmor and Bandit print their lower-severity findings in
+  the log) and addresses or justifies every finding.
+- **Not covered here.** The `self-repository` zizmor hint (`$/` instead of
+  `./` for local actions) and the `superfluous-actions` hint for
+  `softprops/action-gh-release` are low severity and left as they are, since
+  changing them alters how local actions and the release are resolved.
+  Semgrep, OpenSSF Scorecard and Coverity Scan are not set up.
+
+The checks run locally the same way; see
+[Testing](testing.md#security-checks-locally).
+
 ### Local release check (`./build.sh release_check`)
 
 CI on `devel` and `working` runs only the fast `ci.yml` set. It never runs
@@ -681,4 +743,7 @@ three test images). `make test-kerberos` depends on this target.
 ## Dependabot
 
 Dependabot is configured in `.github/dependabot.yml` to check for updates
-monthly for both pip dependencies and GitHub Actions versions.
+monthly for both pip dependencies and GitHub Actions versions, and waits 7 days
+after a release before proposing it (security updates are not delayed). Because
+actions are pinned by commit SHA, its `github-actions` updates change the SHA and
+the `# vX.Y.Z` comment together; see [Security](#security-securityyml).

@@ -179,7 +179,7 @@ def test_build_workflow_leaves_docker_and_winget_to_publish_workflow():
 
     for publishing in ("DOCKERHUB", "WINGET", "docker/login-action", "winget", "--docker", "--push"):
         assert publishing not in build
-    assert "workflow_dispatch:\n\nconcurrency:" in build
+    assert "workflow_dispatch:\n\npermissions:\n  contents: read\n\nconcurrency:" in build
 
 
 def test_publish_workflow_follows_master_builds_and_manual_dispatch():

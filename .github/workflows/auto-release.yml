@@ -10,11 +10,7 @@ on:
         type: boolean
         default: true
 
-permissions:
-  actions: write
-  contents: write
-  issues: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: auto-release
@@ -24,27 +20,35 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: write
+      issues: write
+      pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
     steps:
       - name: Check out release automation
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: automation
+          persist-credentials: false
 
-      - name: Check out the last release
-        uses: actions/checkout@v7
+      # This checkout pushes the candidate branch, master and devel, so it keeps
+      # its credentials; nothing in this job uploads an artifact.
+      - name: Check out the last release # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: master
           fetch-depth: 0
           path: release
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       - name: Install the locked release environment
         working-directory: release
@@ -92,8 +96,10 @@ jobs:
       - name: Finish dry run
         if: steps.prepare.outputs.changed == 'true' && env.DRY_RUN == 'true'
         working-directory: release
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
         run: |
-          echo "Dry run: candidate v${{ steps.prepare.outputs.version }} was not pushed."
+          echo "Dry run: candidate v$VERSION was not pushed."
           git diff --stat
 
       - name: Commit and push candidate branch
@@ -128,7 +134,7 @@ jobs:
           DISPATCHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           gh workflow run ci.yml --ref "$BRANCH" -f full=true
           RUN_ID=""
-          for attempt in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             RUN_ID=$(gh run list --workflow ci.yml --branch "$BRANCH" \
               --event workflow_dispatch --created ">=$DISPATCHED" \
               --json databaseId --jq '.[0].databaseId // empty')
@@ -200,7 +206,7 @@ jobs:
           DISPATCHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           gh workflow run build.yml --ref master
           RUN_ID=""
-          for attempt in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             RUN_ID=$(gh run list --workflow build.yml --branch master \
               --event workflow_dispatch --created ">=$DISPATCHED" \
               --json databaseId --jq '.[0].databaseId // empty')
@@ -281,11 +287,13 @@ jobs:
 
       - name: Close resolved blocked issue
         if: steps.release_build.outcome == 'success'
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
         run: |
           ISSUE=$(gh issue list --state open --search '"auto-release blocked" in:title' \
             --json number,title --jq '.[] | select(.title == "auto-release blocked") | .number' | head -1)
           if [ -n "$ISSUE" ]; then
-            gh issue comment "$ISSUE" --body "Automatic release v${{ steps.prepare.outputs.version }} passed CI and updated master."
+            gh issue comment "$ISSUE" --body "Automatic release v$VERSION passed CI and updated master."
             gh issue close "$ISSUE"
           fi
 

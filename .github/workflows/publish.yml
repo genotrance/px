@@ -6,7 +6,9 @@ name: Publish
 on:
   # Follows every successful build.yml run on master, including the push made
   # by auto-release.yml, so a new or completed release is published next.
-  workflow_run:
+  # Only this repository's own Build run on master triggers it (no pull request
+  # code runs), and every input comes from the GitHub release.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [Build]
     types: [completed]
   # Finishes or repeats publication of a release that already exists.
@@ -42,7 +44,7 @@ jobs:
       dry_run: ${{ steps.version.outputs.dry_run }}
       windows_zip_url: ${{ steps.release.outputs.windows_zip_url }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
@@ -121,7 +123,7 @@ jobs:
       VERSION: ${{ needs.resolve.outputs.version }}
       DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
@@ -148,7 +150,7 @@ jobs:
 
       - name: Log in to Docker Hub
         if: steps.plan.outputs.tags != '' && env.DRY_RUN != 'true'
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -226,11 +228,13 @@ jobs:
           printf '%s  %s\n' "$(cat "$ZIP.sha256")" "$ZIP" | sha256sum --check -
           echo "### Winget: submit $URL$( [ "$DRY_RUN" = true ] && echo ' (dry run, not submitted)')" >> "$GITHUB_STEP_SUMMARY"
 
+      # RUNNER_TEMP is runner-controlled and holds the checksum-verified binary,
+      # so adding it to GITHUB_PATH is safe.
       - name: Install komac
         if: steps.winget.outputs.publish == 'true' && env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
+        run: | # zizmor: ignore[github-env]
           ARCHIVE="komac-$KOMAC_VERSION-x86_64-unknown-linux-gnu.tar.gz"
           mkdir -p "$RUNNER_TEMP/komac"
           cd "$RUNNER_TEMP/komac"

@@ -1056,11 +1056,11 @@ class ConnectionHandler:
             return False
 
         A1 = f"{client_username}:{CLIENT_REALM}:{client_password}"
-        HA1 = hashlib.md5(A1.encode("utf-8")).hexdigest()
+        HA1 = hashlib.md5(A1.encode("utf-8"), usedforsecurity=False).hexdigest()
         A2 = f"{method}:{params['uri']}"
-        HA2 = hashlib.md5(A2.encode("utf-8")).hexdigest()
+        HA2 = hashlib.md5(A2.encode("utf-8"), usedforsecurity=False).hexdigest()
         A3 = f"{HA1}:{params['nonce']}:{params['nc']}:{params['cnonce']}:{params['qop']}:{HA2}"
-        response = hashlib.md5(A3.encode("utf-8")).hexdigest()
+        response = hashlib.md5(A3.encode("utf-8"), usedforsecurity=False).hexdigest()
 
         if response != params["response"]:
             dprint("Authentication failed: Bad response")

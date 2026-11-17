@@ -20,6 +20,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
@@ -34,7 +37,9 @@ jobs:
       musl: ${{ steps.plan.outputs.musl }}
       scenario: ${{ steps.plan.outputs.scenario }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Select the matrix
         id: plan
@@ -109,9 +114,11 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -134,7 +141,9 @@ jobs:
     name: test ${{ matrix.os }} py${{ matrix.python-version }} ${{ matrix.event-loop || 'auto' }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -146,11 +155,13 @@ jobs:
         timeout-minutes: 60
         env:
           MARKER: ${{ needs.plan.outputs.marker }}
+          MATRIX_EVENT_LOOP: ${{ matrix.event-loop }}
+          MATRIX_OS: ${{ matrix.os }}
         run: |
-          if [ "${{ matrix.event-loop }}" == "asyncio" ]; then
+          if [ "$MATRIX_EVENT_LOOP" == "asyncio" ]; then
             export PX_EVENT_LOOP=asyncio
           fi
-          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+          if [ "$MATRIX_OS" == "macos-latest" ]; then
             export PX_CI_MINIMAL=1
             ignore=(--ignore=tests/test_network.py)
           fi
@@ -164,17 +175,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: test ${{ matrix.name }} py${{ matrix.pyver }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Run tests in musllinux container
         timeout-minutes: 60
         env:
           MARKER: ${{ needs.plan.outputs.marker }}
+          MATRIX_IMAGE: ${{ matrix.image }}
+          PYVER: ${{ matrix.pyver }}
         run: |
-          docker run --rm -e MARKER -v ${{ github.workspace }}:/px -w /px \
-            ${{ matrix.image }} /bin/bash -c '
-              PY=/opt/python/cp${{ matrix.pyver }}-cp${{ matrix.pyver }}/bin/python3
-              if [ ! -f "$PY" ]; then echo "Python ${{ matrix.pyver }} not found"; exit 1; fi
+          docker run --rm -e MARKER -e PYVER -v "$GITHUB_WORKSPACE":/px -w /px \
+            "$MATRIX_IMAGE" /bin/bash -c '
+              PY=/opt/python/cp$PYVER-cp$PYVER/bin/python3
+              if [ ! -f "$PY" ]; then echo "Python $PYVER not found"; exit 1; fi
               curl -LsSf https://astral.sh/uv/install.sh | sh
               . ~/.local/bin/env
               "$PY" -m venv /tmp/test-env
@@ -191,7 +206,9 @@ jobs:
     if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -208,7 +225,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -233,7 +252,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -247,7 +268,9 @@ jobs:
   kerberos:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -268,7 +291,9 @@ jobs:
     runs-on: ubuntu-latest
     name: scenario py${{ matrix.python-version }} ${{ matrix.event-loop }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -287,9 +312,11 @@ jobs:
         timeout-minutes: 60
         env:
           SCENARIO_INSTANCE: ${{ strategy.job-index }}
+          MATRIX_PYTHON_VERSION: ${{ matrix.python-version }}
+          MATRIX_EVENT_LOOP: ${{ matrix.event-loop }}
         run: |
-          export UV_PYTHON=${{ matrix.python-version }}
-          export PX_EVENT_LOOP=${{ matrix.event-loop }}
+          export UV_PYTHON=$MATRIX_PYTHON_VERSION
+          export PX_EVENT_LOOP=$MATRIX_EVENT_LOOP
           tests/scenarios/env/scenario-env.sh test tests/scenarios -m scenario -v --durations=30 \
             --basetemp=/tmp/px-scenario-tmp
 
@@ -306,7 +333,7 @@ jobs:
 
       - name: Upload scenario logs
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: scenario-logs-py${{ matrix.python-version }}-${{ matrix.event-loop }}
           path: ${{ runner.temp }}/scenario-artifacts
@@ -340,7 +367,9 @@ jobs:
     # Job timeout backstops the WSL2 runner freeze in actions/runner-images#14938.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -357,7 +386,7 @@ jobs:
       - name: Set up WSL2
         # Catches ordinary WSL2 hangs; a frozen runner is caught by the job timeout instead.
         timeout-minutes: 5
-        uses: Vampire/setup-wsl@v7
+        uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
         with:
           distribution: Ubuntu-24.04
           wsl-version: 2
@@ -528,7 +557,7 @@ jobs:
             --proxy=squid-sso.corp.test:31288 --auth=NEGOTIATE --username='pxgood@CORP.TEST' \
             --threads=16 --socktimeout=30 > "$RUNNER_TEMP/px-windows-negotiate.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/px-negotiate.pid"
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             rc=0
             curl --connect-timeout 1 --silent --output /dev/null http://127.0.0.1:3130 || rc=$?
             [ $rc -ne 7 ] && break
@@ -572,7 +601,7 @@ jobs:
           }
 
           for method in POST PUT PATCH; do
-            lower=$(printf '%s' "$method" | tr 'A-Z' 'a-z')
+            lower=$(printf '%s' "$method" | tr '[:upper:]' '[:lower:]')
             check_upload "$method" "$small" "$small_sha" 12345 no "$lower-small"
             check_upload "$method" "$big" "$big_sha" $((5 * 1024 * 1024)) no "$lower-big"
             check_upload "$method" "$small" "$small_sha" 12345 yes "$lower-chunked"
@@ -673,7 +702,7 @@ jobs:
 
       - name: Upload scenario logs
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: scenario-logs-windows
           path: |

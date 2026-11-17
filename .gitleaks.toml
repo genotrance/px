@@ -1,0 +1,15 @@
+title = "Px gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Keep every entry narrow (path AND pattern) and comment why it is safe.
+[[allowlists]]
+description = "Squid ntlm_auth helper protocol name in the scenario lab entrypoints; a protocol identifier, not a credential (generic-api-key false positive on 'helper-protocol=...')"
+condition = "AND"
+paths = [
+    '''^tests/scenarios/env/(dc|proxy)/entrypoint\.sh$''',
+]
+regexes = [
+    '''squid-2\.5-ntlmssp''',
+]

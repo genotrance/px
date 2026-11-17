@@ -52,12 +52,52 @@ def change_dir(path):
         os.chdir(old_dir)
 
 
+# PX_* env vars whose values are credentials and must never reach test/CI
+# logs; everything else under PX_* is harmless diagnostic info.
+SENSITIVE_ENV_NAMES = {"PX_PASSWORD", "PX_CLIENT_PASSWORD"}
+
+# CLI flags whose value is a credential, matched case-insensitively against
+# "--name" or "--name=value" tokens in a logged command string.
+SENSITIVE_CLI_FLAGS = {"--password", "--client-password"}
+
+REDACTED = "***REDACTED***"
+
+
+def _redact_cmd(cmd):
+    """Mask --password/--client-password values in a loggable command string.
+
+    The real cmd passed to subprocess/os.system is untouched; this only
+    affects what gets printed."""
+    tokens = cmd.split(" ")
+    redacted_tokens = []
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            redacted_tokens.append(REDACTED)
+            skip_next = False
+            continue
+
+        flag = token.split("=", 1)[0].lower()
+        if flag in SENSITIVE_CLI_FLAGS:
+            if "=" in token:
+                redacted_tokens.append(f"{token.split('=', 1)[0]}={REDACTED}")
+            else:
+                redacted_tokens.append(token)
+                skip_next = True
+        else:
+            redacted_tokens.append(token)
+
+    return " ".join(redacted_tokens)
+
+
 def px_print_env(cmd, env=os.environ):
-    print(cmd)
+    print(_redact_cmd(cmd))
 
     if env is not None:
         for key, value in env.items():
             if key.startswith("PX_"):
+                if key in SENSITIVE_ENV_NAMES:
+                    value = REDACTED
                 print(f"  {key}={value}")
 
 

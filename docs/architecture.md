@@ -282,6 +282,25 @@ Px can authenticate to the upstream proxy using:
   mode, `curl.is_easy = True` to use the easy interface for persistent
   connections needed by NTLM.
 
+Easy vs multi: NTLM and Negotiate authenticate a connection, not a request, so
+a client's Type 1 and Type 3 must reach the server on one upstream connection.
+The shared multi pool does not guarantee that, while an easy handle keeps its
+own connection cache. So the easy interface is used for `--auth=NONE` through an
+upstream proxy and, for DIRECT plain-HTTP targets (noproxy or PAC `DIRECT`),
+once a request on that client connection carries `Authorization: NTLM` or
+`Negotiate` (px #290); the choice then sticks for the client connection
+(`_uses_conn_auth()`), since later requests may carry no header after the
+handshake. `Curl.reset()` clears `is_easy` but keeps the easy handle and its
+connection, so the next request on the client connection reuses it
+(`tests/test_direct_ntlm.py` asserts this). Other DIRECT traffic stays on the
+multi pool. The thread cost is the same either way: every transfer runs
+`mcurl.do()` in a worker thread (`--threads`, default 32) until it completes;
+an easy transfer additionally reads its request body in blocking mode (see
+above), so a stalled client blocks only its own thread. Zero-length
+POST/PUT/PATCH requests set `CURLOPT_KEEP_SENDING_ON_ERROR` for DIRECT targets
+and `--auth=NONE` proxying, so libcurl keeps the connection across the 401/407
+handshake leg.
+
 Downstream client authentication (gateway mode) is optional and supports
 `NEGOTIATE`, `NTLM`, `DIGEST`, and `BASIC`. Credentials are retrieved from the
 keyring under the realm `PxClient` or from `PX_CLIENT_PASSWORD` /

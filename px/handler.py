@@ -695,6 +695,9 @@ class ConnectionHandler:
         self._close_after_response = False
         self._drain_body = False
         self._tunnel_established = False
+        # Set once a DIRECT request on this connection carries NTLM/Negotiate
+        # auth: the connection then stays on mcurl's easy interface (px #290)
+        self._direct_conn_auth = False
 
         # Client address
         peername = writer.get_extra_info("peername")
@@ -1176,6 +1179,11 @@ class ConnectionHandler:
         else:
             proxy_resolve = None
             dprint(self.curl.easyhash + ": Skipping auth proxying")
+            if not self.curl.is_connect and self._uses_conn_auth(headers):
+                # Connection-oriented server auth (NTLM/Negotiate) must keep one
+                # upstream connection, which the multi pool does not guarantee (px #290)
+                dprint(self.curl.easyhash + ": Using easy interface for DIRECT connection auth")
+                self.curl.is_easy = True
 
         # Set debug mode
         self.curl.set_debug(STATE.debug is not None)
@@ -1193,8 +1201,8 @@ class ConnectionHandler:
             header_writer = HeaderBridgeWriter(loop, self.transport)
             self.curl.bridge(body_reader, response_writer, header_writer)
 
-            # Support NTLM auth from http client in auth=NONE mode with upstream proxy
-            if ipport is None and STATE.auth == "NONE" and method in ("POST", "PUT", "PATCH"):
+            # Support NTLM auth from http client in auth=NONE mode with upstream proxy or DIRECT
+            if (ipport is not None or STATE.auth == "NONE") and method in ("POST", "PUT", "PATCH"):
                 content_length = headers.get("content-length")
                 if content_length is not None and content_length == "0":
                     dprint(self.curl.easyhash + ": Setting CURLOPT_KEEP_SENDING_ON_ERROR")
@@ -1251,6 +1259,13 @@ class ConnectionHandler:
             self._recv_buf = b""  # Consumed by tunnel
 
         await asyncio.to_thread(STATE.mcurl.remove, self.curl)
+
+    def _uses_conn_auth(self, headers):
+        "True if this client connection uses NTLM/Negotiate server auth (sticky)"
+        if not self._direct_conn_auth:
+            scheme = headers.get("authorization", "").split(" ", 1)[0].lower()
+            self._direct_conn_auth = scheme in ("ntlm", "negotiate")
+        return self._direct_conn_auth
 
     async def _set_proxy_resolve(self, host, port):
         """Temporarily seed libcurl's DNS cache with Px's shared proxy lookup.

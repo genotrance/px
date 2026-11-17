@@ -17,6 +17,7 @@
 - `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).
 - `--auth=NONE` HTTPS CONNECT no longer sends a duplicate success response before relaying the upstream tunnel (px#282).
 - `--auth=NONE` forwards client headers upstream with their original name case instead of lowercasing them, which some proxies rejected (px#282).
+- NTLM/Negotiate authentication to servers reached DIRECT (noproxy or PAC `DIRECT`) keeps the handshake on one server connection, including empty POSTs (#290).
 - `--test-auth` reports a specific message when the upstream proxy rejects a client's pass-through credentials under `--auth=NONE` (px#282).
 
 ---

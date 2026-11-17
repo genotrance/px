@@ -1,24 +1,28 @@
-"""Tests for tests/helpers.py — credential redaction in px_print_env."""
+"""Tests for safe px_print_env diagnostics."""
 
 from helpers import px_print_env
 
 
-class TestPxPrintEnvRedaction:
-    def test_sensitive_env_values_are_redacted(self, capsys):
+class TestPxPrintEnvDiagnostics:
+    def test_mapping_values_are_never_logged(self, capsys):
         env = {"PX_PASSWORD": "s3cr3t", "PX_CLIENT_PASSWORD": "als0s3cr3t"}
         px_print_env("px --port=3128", env)
         out = capsys.readouterr().out
         assert "s3cr3t" not in out
         assert "als0s3cr3t" not in out
-        assert "PX_PASSWORD=***REDACTED***" in out
-        assert "PX_CLIENT_PASSWORD=***REDACTED***" in out
+        assert "PX_PASSWORD=<set>" in out
+        assert "PX_CLIENT_PASSWORD=<set>" in out
 
-    def test_harmless_env_values_are_not_redacted(self, capsys):
-        env = {"PX_PORT": "3128", "PX_LISTEN": "127.0.0.1"}
+    def test_non_sensitive_mapping_values_are_not_logged(self, capsys):
+        env = {"PX_PORT": "3128", "PX_LISTEN": "127.0.0.1", "PX_TOKEN": "secret"}
         px_print_env("px --port=3128", env)
         out = capsys.readouterr().out
-        assert "PX_PORT=3128" in out
-        assert "PX_LISTEN=127.0.0.1" in out
+        assert "3128" in out  # The command's port remains useful diagnostic output.
+        assert "127.0.0.1" not in out
+        assert "secret" not in out
+        assert "PX_PORT=<set>" in out
+        assert "PX_LISTEN=<set>" in out
+        assert "PX_TOKEN=<set>" in out
 
     def test_cmd_with_password_equals_value_is_redacted(self, capsys):
         px_print_env("px --username=bob --password=s3cr3t --port=3128", {})

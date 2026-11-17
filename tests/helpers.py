@@ -52,10 +52,6 @@ def change_dir(path):
         os.chdir(old_dir)
 
 
-# PX_* env vars whose values are credentials and must never reach test/CI
-# logs; everything else under PX_* is harmless diagnostic info.
-SENSITIVE_ENV_NAMES = {"PX_PASSWORD", "PX_CLIENT_PASSWORD"}
-
 # CLI flags whose value is a credential, matched case-insensitively against
 # "--name" or "--name=value" tokens in a logged command string.
 SENSITIVE_CLI_FLAGS = {"--password", "--client-password"}
@@ -94,11 +90,11 @@ def px_print_env(cmd, env=os.environ):
     print(_redact_cmd(cmd))
 
     if env is not None:
-        for key, value in env.items():
+        for key in env:
             if key.startswith("PX_"):
-                if key in SENSITIVE_ENV_NAMES:
-                    value = REDACTED
-                print(f"  {key}={value}")
+                # The supplied mapping can contain credentials under arbitrary
+                # PX_* names, so report only that each setting is present.
+                print(f"  {key}=<set>")
 
 
 def is_port_free(port):

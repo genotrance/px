@@ -436,10 +436,13 @@ def test_pymcurl_minimum_is_read_from_pyproject():
 
 def test_check_mcurl_requires_every_api(monkeypatch, capsys):
     full = types.SimpleNamespace(
-        Curl=types.SimpleNamespace(resume_upload=1, transfer_id=2, get_os_errno=3), REWIND_ERROR="x", __version__="1"
+        Curl=types.SimpleNamespace(resume_upload=1, transfer_id=2, get_os_errno=3),
+        REWIND_ERROR="x",
+        NEGOTIATE_NO_CREDENTIALS="y",
+        __version__="1",
     )
     monkeypatch.setattr(tools, "mcurl", full)
-    monkeypatch.setattr("importlib.metadata.version", lambda name: "8.23.0.3")
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "8.23.0.4")
     tools.check_mcurl()
 
     for cls, name in (
@@ -447,8 +450,14 @@ def test_check_mcurl_requires_every_api(monkeypatch, capsys):
         ("Curl", "transfer_id"),
         ("Curl", "get_os_errno"),
         (None, "REWIND_ERROR"),
+        (None, "NEGOTIATE_NO_CREDENTIALS"),
     ):
-        broken = types.SimpleNamespace(Curl=types.SimpleNamespace(**vars(full.Curl)), REWIND_ERROR="x", __version__="1")
+        broken = types.SimpleNamespace(
+            Curl=types.SimpleNamespace(**vars(full.Curl)),
+            REWIND_ERROR="x",
+            NEGOTIATE_NO_CREDENTIALS="y",
+            __version__="1",
+        )
         delattr(broken.Curl if cls else broken, name)
         monkeypatch.setattr(tools, "mcurl", broken)
         with pytest.raises(SystemExit):

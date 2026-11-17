@@ -421,7 +421,7 @@ Px depends on the following Python packages:
 - [keyring](https://pypi.org/project/keyring/)
 - [keyrings.alt](https://pypi.org/project/keyrings.alt/)
 - [netaddr](https://pypi.org/project/netaddr/)
-- [pymcurl](https://pypi.org/project/pymcurl/) 8.23.0.2 or newer
+- [pymcurl](https://pypi.org/project/pymcurl/) 8.23.0.4 or newer
 - [psutil](https://pypi.org/project/psutil/)
 - [pyspnego](https://pypi.org/project/pyspnego/)
 - [python-dotenv](https://pypi.org/project/python-dotenv/)

@@ -152,8 +152,10 @@ class Pac:
     def _load_url(self, jsurl):
         "Load specfied PAC URL"
         dprint(f"Loading PAC url: {jsurl}")
+        from .config import STATE
+
         c = mcurl.Curl(jsurl)
-        c.set_debug()
+        c.set_debug(STATE.debug is not None)
         c.buffer()
         c.set_follow()
         ret = c.perform()

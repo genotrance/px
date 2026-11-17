@@ -104,7 +104,10 @@ def parse_noproxy(noproxystr, iponly=False):
                 elif "*" in bypass and len(bypass) > 1:
                     # The only wildcard available is a single * character, which matches all hosts
                     # and effectively disables the proxy.
-                    dprint("Bad noproxy host definition - see CURLOPT_NOPROXY documentation")
+                    dprint(
+                        f"Bad noproxy host definition '{bypass}' - use '.corp.example' or 'corp.example' "
+                        "to match a domain and its subdomains, not '*.corp.example' (see CURLOPT_NOPROXY)"
+                    )
                 else:
                     noproxy_hosts.add(bypass)
             else:

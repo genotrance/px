@@ -335,7 +335,10 @@ def check_portable(root):
     print("No Homebrew or /usr/local library references")
 
 
-REQUIRED_MCURL = {"Curl": ("resume_upload", "transfer_id", "get_os_errno"), "": ("REWIND_ERROR",)}
+REQUIRED_MCURL = {
+    "Curl": ("resume_upload", "transfer_id", "get_os_errno"),
+    "": ("REWIND_ERROR", "NEGOTIATE_NO_CREDENTIALS"),
+}
 
 
 def missing_mcurl_apis(module):
@@ -358,7 +361,7 @@ def check_mcurl():
     missing = missing_mcurl_apis(mcurl)
     if missing:
         print(f"ERROR: pymcurl {version} lacks required APIs: {', '.join(missing)}")
-        print("The installed pymcurl is not the released artifact px requires (pymcurl>=8.23.0.3 from PyPI)")
+        print("The installed pymcurl is not the released artifact px requires (pymcurl>=8.23.0.4 from PyPI)")
         sys.exit(1)
 
 

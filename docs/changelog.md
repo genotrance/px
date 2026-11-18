@@ -12,9 +12,8 @@
 - The bad noproxy entry debug message names the accepted `.corp.example` / `corp.example` syntax.
 
 ### Bug fixes
-- On Windows, Px falls back from WinHTTP auto-detect to PAC and then the manual proxy from Internet Options (#291).
+- On Windows, Px discovers proxies through WinHTTP, falling back to PAC and Internet Options bypass rules (#112, #291).
 - Px no longer turns on libcurl debug output (and its overhead) without `--debug`, which fixes the Windows CFFI error box (#289).
-- Windows manual-proxy bypass entries now honour `*.domain` and `<local>` semantics (#291).
 - auth=NONE pass-through sends the CONNECT request in one write so strict proxies do not treat headers as tunnel data (#282).
 - `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).
 - `--auth=NONE` HTTPS CONNECT no longer sends a duplicate success response before relaying the upstream tunnel (px#282).

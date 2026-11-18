@@ -330,6 +330,17 @@ When auto-detect and a setup script are both set, `MODE_AUTO` passes both to
 bypass list applies only to that fallback. A script that answers `DIRECT` is an
 answer, not a failure, so it does not trigger the fallback.
 
+`find_proxy_for_url()` reports which source supplied the selected proxy or
+`DIRECT` decision through debug output. This keeps `self.servers` unambiguous:
+in `MODE_PAC` and `MODE_AUTO` with a setup script it stores the PAC URL, not
+the proxy selected for a request.
+
+Internet Options bypass entries use Windows syntax rather than the
+`--noproxy` syntax: `*.example.com` matches subdomains of `example.com`, and
+`<local>` matches host names without a dot. Px applies those rules for both a
+manual proxy and the manual fallback. See Microsoft's
+[ProxyCfg.exe reference](https://learn.microsoft.com/windows/win32/winhttp/proxycfg-exe--a-proxy-configuration-tool).
+
 ### noproxy
 
 The `parse_noproxy()` function parses the noproxy string into two structures:

@@ -307,6 +307,14 @@ def test_binary_is_launched_on_the_test_runner_before_the_suite():
     assert body.index('smoke_binary "$NAME"') < body.index("tox ")
 
 
+def test_windows_binary_tests_serialize_xdist_for_local_tls_reliability():
+    script = (ROOT / "build.sh").read_text()
+    body = script[script.index("test_binary() {") : script.index("# --- Local build and test ---")]
+
+    windows = body[body.index('if [ "$OS" = "windows" ]') : body.index('if [ "${PX_CI_MINIMAL:-}" = "1" ]')]
+    assert 'PYTEST_CMD="pytest -n 1 tests --durations=30"' in windows
+
+
 def test_host_ownership_check_includes_directories_and_files():
     script = (ROOT / "build.sh").read_text()
     assert "find_non_host_owned()" in script

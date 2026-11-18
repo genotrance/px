@@ -534,7 +534,9 @@ The `[tool.tox]` configuration in `pyproject.toml` defines py310–py314 and a
 `binary` environment. Each Python environment installs the release wheel and
 runs the default selection; the `binary` environment runs the same suite
 against the compiled binary named by `PXBIN`. Linux runs `pytest -n auto`, and
-the native macOS and Windows runs use `-n 2`. Each xdist worker reserves a
+the native macOS run uses `-n 2`; Windows uses `-n 1` so its local
+`pytest-httpbin` TLS listener cannot time out a queued Schannel handshake under
+runner load. Each xdist worker reserves a
 block of three Px ports from 3148–3947 (`find_free_port_block` in
 `tests/helpers.py`), wide enough for two parallel tox environments with one
 worker per core on large hosts. Reservation ownership is checked with
@@ -570,15 +572,16 @@ px. Check these before debugging a test:
 ## Parallel test execution
 
 Tests use `pytest-xdist` with `-n auto` in the Makefile, in tox on Linux and in
-CI; the native macOS and Windows artifact runs use `-n 2`.
+CI; the native macOS artifact run uses `-n 2` and Windows uses `-n 1`.
 The `pytest_xdist_auto_num_workers` hook in `conftest.py` computes the worker
 count based on CPU count and platform:
 
 - **All platforms**: `max(2, cpu_count // 4)` — each test can spawn up to 4
   processes, so dividing by 4 avoids oversubscription.
-- **Windows CI**: forced to 1 (`CI` env var set) — Schannel TLS handshakes fail
-  under concurrent HTTPS CONNECT tests when multiple Px instances compete for
-  connections on resource-constrained CI runners.
+- **Windows CI**: forced to 1 (`CI` env var set), and the Windows binary gate
+  explicitly uses `-n 1` — this prevents concurrent Px starts and local
+  `pytest-httpbin` TLS handshakes from exhausting a resource-constrained
+  runner. The behavioral coverage still runs in full, serially.
 
 Each xdist worker starts its search for proxy test ports (`fixtures.py`) at a
 worker-specific offset and atomically reserves the first free block of 3

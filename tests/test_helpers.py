@@ -1,6 +1,7 @@
 """Tests for test-harness helpers."""
 
 import os
+import struct
 import subprocess
 import sys
 
@@ -152,3 +153,38 @@ def test_run_px_keeps_posix_popen_flags_unchanged(monkeypatch, tmp_path):
     logfile.close()
 
     assert "creationflags" not in recorded
+
+
+class TestNtlmType2:
+    """Fake NTLM proxies must offer a challenge current Windows SSPI accepts.
+
+    Windows SSPI on the 2025-11 Windows Server image failed every Type 3 with
+    SEC_E_UNSUPPORTED_FUNCTION for an NTLMv1-only challenge (no extended
+    session security, 128-bit keys or target info).
+    """
+
+    def test_challenge_offers_ntlmv2(self):
+        message = helpers.ntlm_type_2()
+        assert message[:8] == b"NTLMSSP\x00"
+        assert struct.unpack("<I", message[8:12])[0] == 2
+        flags = struct.unpack("<I", message[20:24])[0]
+        for flag in (0x00080000, 0x00800000, 0x20000000):
+            assert flags & flag
+        info_len, _, info_offset = struct.unpack("<HHI", message[40:48])
+        info = message[info_offset : info_offset + info_len]
+        av_ids = []
+        while info:
+            av_id, av_len = struct.unpack("<HH", info[:4])
+            av_ids.append(av_id)
+            info = info[4 + av_len :]
+        assert av_ids[-1] == 0
+        assert {1, 2, 7} <= set(av_ids)
+
+    def test_ntlm_client_builds_type_3(self):
+        # On Windows spnego uses SSPI, the provider libcurl uses in px
+        spnego = pytest.importorskip("spnego")
+        client = spnego.client("ntlm-test", "ntlm-pass", hostname="proxy.example", protocol="ntlm")
+        client.step()
+        type_3 = client.step(helpers.ntlm_type_2())
+        assert type_3[:8] == b"NTLMSSP\x00"
+        assert type_3[8:12] == b"\x03\x00\x00\x00"

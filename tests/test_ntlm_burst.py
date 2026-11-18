@@ -26,14 +26,6 @@ INTERRUPTED_HANDSHAKES = BURST_SIZE
 RESPONSE_BODY = b"ntlm upstream ok"
 
 
-def _type_2():
-    """Return a structurally valid Type 2 challenge for libcurl's NTLM SSPI."""
-    flags = 0x00000001 | 0x00000200
-    return (
-        b"NTLMSSP\x00" + struct.pack("<IHHII", 2, 0, 0, 40, flags) + b"\x01\x02\x03\x04\x05\x06\x07\x08" + b"\x00" * 8
-    )
-
-
 class _FakeNtlmUpstream(socketserver.ThreadingTCPServer):
     """A tiny NTLM proxy which can drop CONNECT handshakes after Type 1."""
 
@@ -95,7 +87,7 @@ class _NtlmHandler(socketserver.StreamRequestHandler):
                 # This is the failure mode from px#268: libcurl remembers the
                 # preceding 407 while the proxy drops the Type 1 connection.
                 return None
-            self._challenge(["Proxy-Authenticate: NTLM " + base64.b64encode(_type_2()).decode()])
+            self._challenge(["Proxy-Authenticate: NTLM " + base64.b64encode(ntlm_type_2()).decode()])
             return False
 
         if message_type != 3:

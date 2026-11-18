@@ -3,6 +3,7 @@ import contextlib
 import os
 import platform
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,53 @@ STARTUP_PROBES = {
         "from px import main; main.STATE.parse_config()"
     ),
 }
+
+
+NTLM_TYPE_2_FLAGS = (
+    0x00000001  # NEGOTIATE_UNICODE
+    | 0x00000004  # REQUEST_TARGET
+    | 0x00000200  # NEGOTIATE_NTLM
+    | 0x00008000  # NEGOTIATE_ALWAYS_SIGN
+    | 0x00010000  # TARGET_TYPE_DOMAIN
+    | 0x00080000  # NEGOTIATE_EXTENDED_SESSIONSECURITY
+    | 0x00800000  # NEGOTIATE_TARGET_INFO
+    | 0x02000000  # NEGOTIATE_VERSION
+    | 0x20000000  # NEGOTIATE_128
+    | 0x80000000  # NEGOTIATE_56
+)
+
+
+def ntlm_type_2(domain="EXAMPLE", computer="FAKEPROXY"):
+    """Return an NTLMv2-capable Type 2 challenge, as a current Windows server sends.
+
+    Windows SSPI refuses to build a Type 3 (SEC_E_UNSUPPORTED_FUNCTION) for a
+    challenge that offers only NTLMv1: no extended session security, 128-bit
+    keys or target info. Fake NTLM proxies must send this form.
+    """
+    filetime = int((time.time() + 11644473600) * 10_000_000)
+    target_name = domain.encode("utf-16-le")
+    av_pairs = [
+        (2, target_name),
+        (1, computer.encode("utf-16-le")),
+        (4, domain.lower().encode("utf-16-le") + b".\x00e\x00x\x00"),
+        (3, computer.lower().encode("utf-16-le")),
+        (7, struct.pack("<Q", filetime)),
+        (0, b""),
+    ]
+    target_info = b"".join(struct.pack("<HH", av_id, len(value)) + value for av_id, value in av_pairs)
+    header_len = 56
+    return (
+        b"NTLMSSP\x00"
+        + struct.pack("<IHHII", 2, len(target_name), len(target_name), header_len, NTLM_TYPE_2_FLAGS)
+        + os.urandom(8)
+        + b"\x00" * 8
+        + struct.pack("<HHI", len(target_info), len(target_info), header_len + len(target_name))
+        + bytes((10, 0))
+        + struct.pack("<H", 20348)
+        + b"\x00\x00\x00\x0f"
+        + target_name
+        + target_info
+    )
 
 
 class PxStartupError(AssertionError):

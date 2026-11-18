@@ -23,7 +23,7 @@ import mcurl
 import psutil
 import pytest
 from fixtures import *  # noqa: F403
-from helpers import is_port_free, print_buffer, quit_px, run_px
+from helpers import is_port_free, ntlm_type_2, print_buffer, quit_px, run_px
 
 from px import handler
 
@@ -162,13 +162,6 @@ class _OriginHandler(socketserver.StreamRequestHandler):
             )
 
 
-def _type_2():
-    flags = 0x00000001 | 0x00000200
-    return (
-        b"NTLMSSP\x00" + struct.pack("<IHHII", 2, 0, 0, 40, flags) + b"\x01\x02\x03\x04\x05\x06\x07\x08" + b"\x00" * 8
-    )
-
-
 class _NtlmProxyHandler(socketserver.StreamRequestHandler):
     """NTLM proxy answering uploads itself.
 
@@ -203,7 +196,7 @@ class _NtlmProxyHandler(socketserver.StreamRequestHandler):
                 authenticated = True
             if not authenticated:
                 challenge = "Proxy-Authenticate: NTLM" + (
-                    " " + base64.b64encode(_type_2()).decode() if stage == 1 else ""
+                    " " + base64.b64encode(ntlm_type_2()).decode() if stage == 1 else ""
                 )
                 self.server.record(**leg, length=length)
                 respond(self.wfile, 407, [challenge], b"auth required")

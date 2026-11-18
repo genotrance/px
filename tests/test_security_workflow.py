@@ -111,10 +111,7 @@ def test_gitleaks_allowlist_is_narrow_and_commented():
 def test_build_yml_master_release_is_latest_not_prerelease():
     build = yaml.safe_load((GITHUB / "workflows" / "build.yml").read_text())
     release_job = build["jobs"]["release"]
-    create_release_step = next(
-        step for step in release_job["steps"]
-        if "Create release" in step.get("name", "")
-    )
+    create_release_step = next(step for step in release_job["steps"] if "Create release" in step.get("name", ""))
 
     with_params = create_release_step.get("with", {})
     assert with_params.get("prerelease") is False, "Master releases must have prerelease: false"

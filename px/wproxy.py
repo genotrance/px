@@ -614,7 +614,12 @@ if sys.platform == "win32":
                     servers = self.fallback_for_netloc(netloc)
                     dprint(f"Source = manual fallback: {servers}")
                     return servers, netloc, path
-                source = "auto-detect" if self.mode == MODE_AUTO else "PAC"
+                if self.mode == MODE_PAC:
+                    source = "PAC"
+                elif self.servers:
+                    source = "auto-detect or PAC"
+                else:
+                    source = "auto-detect"
                 dprint(f"Source = {source}: {proxy}")
                 return parse_proxy(proxy), netloc, path
             elif self.mode in (MODE_MANUAL,):

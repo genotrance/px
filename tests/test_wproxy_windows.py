@@ -281,7 +281,19 @@ class TestSourceLabeling:
         messages.clear()
         wproxy.find_proxy_for_url("https://www.example.com/")
 
-        assert any(message.startswith("Source = auto-detect") for message in messages)
+        assert any(message.startswith("Source = auto-detect:") for message in messages)
+
+    def test_auto_detect_with_pac_labelled(self, fake_winhttp):
+        from px.wproxy import Wproxy
+
+        fake_winhttp.ie(True, PAC_URL, None, None)
+        fake_winhttp.answer(proxy="proxy.example:8080")
+        messages = []
+        wproxy = Wproxy(debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("https://www.example.com/")
+
+        assert any(message.startswith("Source = auto-detect or PAC:") for message in messages)
 
     def test_pac_labelled(self, fake_winhttp):
         from px.wproxy import Wproxy

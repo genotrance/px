@@ -408,6 +408,11 @@ test_binary() {
             export UV_PYTHON_PREFERENCE=only-managed
         fi
         PYTEST_CMD="pytest -n 2 tests --durations=30"
+        if [ "$OS" = "windows" ]; then
+            # pytest-httpbin's TLS listener serializes slow Schannel handshakes.
+            # A second xdist worker can leave one in its timeout while Px starts.
+            PYTEST_CMD="pytest -n 1 tests --durations=30"
+        fi
         if [ "${PX_CI_MINIMAL:-}" = "1" ]; then
             # Keep macOS artifact testing aligned with ci.yml's full matrix:
             # only its unsupported network test is excluded; slow tests run.

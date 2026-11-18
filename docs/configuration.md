@@ -11,6 +11,11 @@ browser's order: auto-detect, then the setup script, then the manual proxy
 server if neither finds a proxy. Without any proxy definition, Px connects to
 sites directly.
 
+Internet Options' bypass list applies to its manual proxy, including when that
+proxy is used as an automatic-setup fallback. `*.example.com` bypasses
+subdomains of that domain and `<local>` bypasses a host name with no dot. This
+is separate from `--noproxy`, which uses libcurl-compatible syntax.
+
 Configuration can be supplied from multiple sources, applied in order of
 precedence (highest first):
 

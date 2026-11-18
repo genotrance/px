@@ -244,3 +244,43 @@ class TestWproxyBase:
         w = _WproxyBase()
         _netloc, path = w.get_netloc("http://example.com/path?key=val")
         assert "?key=val" in path
+
+
+class TestSourceLabeling:
+    """find_proxy_for_url() identifies the source of its proxy decision."""
+
+    def test_source_label_none(self, monkeypatch):
+        monkeypatch.setattr("urllib.request.getproxies", lambda: {})
+        from px.wproxy import _WproxyBase
+
+        messages = []
+        wproxy = _WproxyBase(debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("http://example.com")
+
+        assert any(message.startswith("Source = none") for message in messages)
+
+    def test_source_label_configuration(self):
+        from px.wproxy import _WproxyBase
+
+        messages = []
+        wproxy = _WproxyBase(mode=MODE_CONFIG, servers=[("proxy.example", 8080)], debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("http://example.com")
+
+        assert any(message.startswith("Source = configuration") for message in messages)
+
+    def test_source_label_noproxy(self, monkeypatch):
+        from px.wproxy import _WproxyBase
+
+        monkeypatch.setattr(
+            socket, "getaddrinfo", lambda *_: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.25", 0))]
+        )
+        messages = []
+        wproxy = _WproxyBase(
+            mode=MODE_CONFIG, servers=[("proxy.example", 8080)], noproxy="192.0.2.0/24", debug_print=messages.append
+        )
+        messages.clear()
+        wproxy.find_proxy_for_url("http://cache.example")
+
+        assert any(message.startswith("Source = noproxy") for message in messages)

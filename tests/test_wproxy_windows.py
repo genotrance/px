@@ -266,3 +266,92 @@ def test_other_winhttp_errors_do_not_fall_back(fake_winhttp):
     servers, _, _ = Wproxy().find_proxy_for_url("https://www.example.com/")
 
     assert servers == []
+
+
+class TestSourceLabeling:
+    "find_proxy_for_url() logs which Windows source supplied its result"
+
+    def test_auto_detect_labelled(self, fake_winhttp):
+        from px.wproxy import Wproxy
+
+        fake_winhttp.ie(True, None, None, None)
+        fake_winhttp.answer(proxy="proxy.example:8080")
+        messages = []
+        wproxy = Wproxy(debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("https://www.example.com/")
+
+        assert any(message.startswith("Source = auto-detect") for message in messages)
+
+    def test_pac_labelled(self, fake_winhttp):
+        from px.wproxy import Wproxy
+
+        fake_winhttp.ie(False, PAC_URL, None, None)
+        fake_winhttp.answer(proxy="proxy.example:8080")
+        messages = []
+        wproxy = Wproxy(debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("https://www.example.com/")
+
+        assert any(message.startswith("Source = PAC") for message in messages)
+
+    def test_manual_labelled(self, fake_winhttp):
+        from px.wproxy import Wproxy
+
+        fake_winhttp.ie(False, None, "manual.example:3128", None)
+        messages = []
+        wproxy = Wproxy(debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("https://www.example.com/")
+
+        assert any(message.startswith("Source = manual:") for message in messages)
+
+    def test_manual_fallback_labelled(self, fake_winhttp):
+        from px.wproxy import Wproxy
+
+        fake_winhttp.ie(True, PAC_URL, "manual.example:3128", None)
+        fake_winhttp.answer(error=12180)
+        messages = []
+        wproxy = Wproxy(debug_print=messages.append)
+        messages.clear()
+        wproxy.find_proxy_for_url("https://www.example.com/")
+
+        assert any(message.startswith("Source = manual fallback") for message in messages)
+
+
+class TestWindowsBypassWildcardAndLocal:
+    "Windows bypass-list wildcard domains and <local>"
+
+    def test_manual_wildcard_domain_bypasses_subdomains_not_bare_domain(self, fake_winhttp):
+        from px.wproxy import DIRECT, Wproxy
+
+        fake_winhttp.ie(False, None, "manual.example:3128", "*.corp.example")
+        wproxy = Wproxy()
+
+        assert wproxy.find_proxy_for_url("http://wiki.corp.example/")[0] == [DIRECT]
+        assert wproxy.find_proxy_for_url("http://corp.example/")[0] == [("manual.example", 3128)]
+
+    def test_manual_local_bypasses_hostname_without_dot(self, fake_winhttp, monkeypatch):
+        from px.resolver import Resolver
+        from px.wproxy import DIRECT, Wproxy
+
+        monkeypatch.setattr(Resolver, "lookup", lambda *_args, **_kwargs: None)
+        fake_winhttp.ie(False, None, "manual.example:3128", "<local>")
+        wproxy = Wproxy()
+
+        assert wproxy.find_proxy_for_url("http://fileserver/")[0] == [DIRECT]
+        assert wproxy.find_proxy_for_url("http://fileserver.corp.example/")[0] == [("manual.example", 3128)]
+
+    def test_fallback_wildcard_domain_bypasses_subdomains_not_bare_domain(self, fake_winhttp):
+        from px.wproxy import DIRECT
+
+        assert _fallback_servers(fake_winhttp, "*.corp.example", "http://wiki.corp.example/") == [DIRECT]
+        assert _fallback_servers(fake_winhttp, "*.corp.example", "http://corp.example/") == [("manual.example", 3128)]
+
+    def test_fallback_local_bypasses_hostname_without_dot(self, fake_winhttp):
+        from px.wproxy import DIRECT
+
+        assert _fallback_servers(fake_winhttp, "<local>", "http://fileserver/") == [DIRECT]
+        assert _fallback_servers(fake_winhttp, "<local>", "http://fileserver.corp.example/") == [
+            ("manual.example", 3128)
+        ]

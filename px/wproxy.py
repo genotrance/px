@@ -255,20 +255,26 @@ class _WproxyBase:
         netloc, path = self.get_netloc(url)
         if self.mode == MODE_NONE:
             # Direct connection since no proxy configured
+            dprint("Source = none: no proxy configured")
             return [DIRECT], netloc, path
 
         ipport = self.check_noproxy_for_netloc(netloc)
         if ipport is not None:
             # Direct connection since in noproxy list
+            dprint(f"Source = noproxy: {netloc[0]} bypasses proxy")
             return [DIRECT], ipport, path
 
         if self.mode in (MODE_ENV, MODE_CONFIG):
             # Return proxy from environment or configuration
+            source = "environment" if self.mode == MODE_ENV else "configuration"
+            dprint(f"Source = {source}: {self.servers}")
             return self.servers[:], netloc, path  # type: ignore[index]
 
         if self.mode == MODE_CONFIG_PAC:
             # Return proxy from configured PAC URL/file
-            return parse_proxy(self.pac.find_proxy_for_url(url, netloc[0])), netloc, path
+            proxy = self.pac.find_proxy_for_url(url, netloc[0])
+            dprint(f"Source = configured PAC: {proxy}")
+            return parse_proxy(proxy), netloc, path
 
         return None, netloc, path
 
@@ -368,6 +374,31 @@ if sys.platform == "win32":
                 proxies.append(proxy_str)
         return parse_proxy(",".join(proxies)) if proxies else []
 
+    def parse_windows_bypass(bypass_str):
+        """Parse Internet Options bypass entries without treating them as --noproxy."""
+
+        noproxy, hosts = parse_noproxy(None)
+        wildcards: set[str] = set()
+        bypass_no_dot = False
+
+        if not bypass_str:
+            return noproxy, hosts, wildcards, bypass_no_dot
+
+        for entry in bypass_str.lower().replace(" ", ";").split(";"):
+            if not entry:
+                continue
+            if entry == "<local>":
+                bypass_no_dot = True
+            elif entry.startswith("*."):
+                # Internet Options uses a leading wildcard for domain suffixes.
+                wildcards.add(entry[1:])
+            else:
+                entry_noproxy, entry_hosts = parse_noproxy(entry)
+                noproxy.update(entry_noproxy)
+                hosts.update(entry_hosts)
+
+        return noproxy, hosts, wildcards, bypass_no_dot
+
     class Wproxy(_WproxyBase):
         "Load proxy information from Windows Internet Options"
 
@@ -394,6 +425,10 @@ if sys.platform == "win32":
             # Kept apart from noproxy: its bypass list applies to the fallback only.
             self.fallback_servers = []
             self.fallback_noproxy, self.fallback_noproxy_hosts = parse_noproxy(None)
+            self.fallback_bypass_wildcards: set[str] = set()
+            self.fallback_bypass_no_dot = False
+            self.bypass_wildcards: set[str] = set()
+            self.bypass_no_dot = False
 
             if mode != MODE_NONE:
                 # Check MODE_CONFIG and MODE_CONFIG_PAC cases
@@ -432,9 +467,11 @@ if sys.platform == "win32":
                             self.mode = MODE_MANUAL
                             self.servers = proxies
 
-                            # Proxy exceptions into noproxy
+                            # Internet Options exceptions use a different syntax than --noproxy.
                             bypass_str = ie_proxy_config.lpszProxyBypass or ""
-                            npxy, npxy_hosts = parse_noproxy(bypass_str)
+                            npxy, npxy_hosts, self.bypass_wildcards, self.bypass_no_dot = parse_windows_bypass(
+                                bypass_str
+                            )
                             self.noproxy.update(npxy)
                             self.noproxy_hosts.update(npxy_hosts)
 
@@ -445,9 +482,12 @@ if sys.platform == "win32":
                         except ValueError as error:
                             # Older px ignored the manual proxy here: a malformed one only disables the fallback
                             dprint(f"Ignoring malformed manual proxy as fallback: {error}")
-                        self.fallback_noproxy, self.fallback_noproxy_hosts = parse_noproxy(
-                            ie_proxy_config.lpszProxyBypass
-                        )
+                        (
+                            self.fallback_noproxy,
+                            self.fallback_noproxy_hosts,
+                            self.fallback_bypass_wildcards,
+                            self.fallback_bypass_no_dot,
+                        ) = parse_windows_bypass(ie_proxy_config.lpszProxyBypass)
 
             if self.mode == MODE_NONE:
                 # Get from environment since nothing in Internet Options
@@ -539,6 +579,12 @@ if sys.platform == "win32":
                 return [DIRECT]
 
             host = netloc[0].lower()
+            if self.fallback_bypass_no_dot and "." not in host:
+                return [DIRECT]
+
+            if any(host.endswith(wildcard) for wildcard in self.fallback_bypass_wildcards):
+                return [DIRECT]
+
             for entry in self.fallback_noproxy_hosts:
                 entry = entry.lstrip(".")
                 if host == entry or host.endswith("." + entry):
@@ -565,10 +611,22 @@ if sys.platform == "win32":
                 # Use proxies as resolved via WinHttp
                 proxy = self.winhttp_find_proxy_for_url(url)
                 if proxy is None:
-                    return self.fallback_for_netloc(netloc), netloc, path
+                    servers = self.fallback_for_netloc(netloc)
+                    dprint(f"Source = manual fallback: {servers}")
+                    return servers, netloc, path
+                source = "auto-detect" if self.mode == MODE_AUTO else "PAC"
+                dprint(f"Source = {source}: {proxy}")
                 return parse_proxy(proxy), netloc, path
             elif self.mode in (MODE_MANUAL,):
                 # Use specific proxies configured
+                host = netloc[0].lower()
+                if self.bypass_no_dot and "." not in host:
+                    dprint(f"Source = manual: {host} bypasses proxy")
+                    return [DIRECT], netloc, path
+                if any(host.endswith(wildcard) for wildcard in self.bypass_wildcards):
+                    dprint(f"Source = manual: {host} bypasses proxy")
+                    return [DIRECT], netloc, path
+                dprint(f"Source = manual: {self.servers}")
                 return self.servers[:], netloc, path
 
 else:

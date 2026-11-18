@@ -141,6 +141,9 @@ when other backends fail.
 Credential Manager is the recommended backend. The password is stored as a
 'Generic Credential' with 'Px' as the network address name.
 
+When `--debug` or `--test` reports proxy selection, Px names the source that
+supplied it: auto-detect, PAC, manual proxy, or manual fallback.
+
     Control Panel > User Accounts > Credential Manager > Windows Credentials
 
 Or: `rundll32.exe keymgr.dll, KRShowKeyMgr`

@@ -356,6 +356,18 @@ if sys.platform == "win32":
     WINHTTP_ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT = 12167
     WINHTTP_ERROR_WINHTTP_AUTODETECTION_FAILED = 12180
 
+    def _parse_ie_proxy(proxies_str):
+        "Parse the lpszProxy value of Internet Options into a list of (host, port) servers"
+        proxies = []
+        for proxy_str in (proxies_str or "").lower().replace(" ", ";").split(";"):
+            if "=" in proxy_str:
+                scheme, proxy = proxy_str.split("=", 1)
+                if scheme.strip() != "ftp":
+                    proxies.append(proxy)
+            elif proxy_str:
+                proxies.append(proxy_str)
+        return parse_proxy(",".join(proxies)) if proxies else []
+
     class Wproxy(_WproxyBase):
         "Load proxy information from Windows Internet Options"
 
@@ -367,6 +379,8 @@ if sys.platform == "win32":
             Order of proxy priority:
             - Configuration - MODE_CONFIG, MODE_CONFIG_PAC
             - Internet Options - MODE_AUTO, MODE_PAC, MODE_MANUAL
+              The manual proxy of Internet Options is the fallback of MODE_AUTO and MODE_PAC
+              when the automatic setup finds no proxy (WinHTTP error 12180 or 12167)
             - Environment - MODE_ENV - uses urllib.request.getproxies()
             """
 
@@ -375,6 +389,11 @@ if sys.platform == "win32":
                 dprint = debug_print
 
             self.servers = []
+
+            # Manual proxy of Internet Options, used when MODE_AUTO or MODE_PAC finds no proxy.
+            # Kept apart from noproxy: its bypass list applies to the fallback only.
+            self.fallback_servers = []
+            self.fallback_noproxy, self.fallback_noproxy_hosts = parse_noproxy(None)
 
             if mode != MODE_NONE:
                 # Check MODE_CONFIG and MODE_CONFIG_PAC cases
@@ -394,6 +413,13 @@ if sys.platform == "win32":
                     if ie_proxy_config.fAutoDetect:
                         # Mode = Auto detect
                         self.mode = MODE_AUTO
+                        if (
+                            ie_proxy_config.lpszAutoConfigUrl is not None
+                            and len(ie_proxy_config.lpszAutoConfigUrl) != 0
+                        ):
+                            # Setup script next to auto-detect: WinHTTP tries both
+                            self.servers = [ie_proxy_config.lpszAutoConfigUrl]
+                            dprint("AutoConfigURL = " + self.servers[0])
                     elif ie_proxy_config.lpszAutoConfigUrl is not None and len(ie_proxy_config.lpszAutoConfigUrl) != 0:
                         # Mode = PAC
                         self.mode = MODE_PAC
@@ -401,24 +427,27 @@ if sys.platform == "win32":
                         dprint("AutoConfigURL = " + self.servers[0])
                     else:
                         # Mode = Manual proxy
-                        proxies = []
-                        proxies_str = ie_proxy_config.lpszProxy or ""
-                        for proxy_str in proxies_str.lower().replace(" ", ";").split(";"):
-                            if "=" in proxy_str:
-                                scheme, proxy = proxy_str.split("=", 1)
-                                if scheme.strip() != "ftp":
-                                    proxies.append(proxy)
-                            elif proxy_str:
-                                proxies.append(proxy_str)
+                        proxies = _parse_ie_proxy(ie_proxy_config.lpszProxy)
                         if proxies:
                             self.mode = MODE_MANUAL
-                            self.servers = parse_proxy(",".join(proxies))
+                            self.servers = proxies
 
                             # Proxy exceptions into noproxy
                             bypass_str = ie_proxy_config.lpszProxyBypass or ""
                             npxy, npxy_hosts = parse_noproxy(bypass_str)
                             self.noproxy.update(npxy)
                             self.noproxy_hosts.update(npxy_hosts)
+
+                    if self.mode in (MODE_AUTO, MODE_PAC):
+                        # Manual proxy and its bypass list as fallback of the automatic setup
+                        try:
+                            self.fallback_servers = _parse_ie_proxy(ie_proxy_config.lpszProxy)
+                        except ValueError as error:
+                            # Older px ignored the manual proxy here: a malformed one only disables the fallback
+                            dprint(f"Ignoring malformed manual proxy as fallback: {error}")
+                        self.fallback_noproxy, self.fallback_noproxy_hosts = parse_noproxy(
+                            ie_proxy_config.lpszProxyBypass
+                        )
 
             if self.mode == MODE_NONE:
                 # Get from environment since nothing in Internet Options
@@ -431,6 +460,7 @@ if sys.platform == "win32":
 
         # Find proxy for specified URL using WinHttp API
         #   Used internally for MODE_AUTO and MODE_PAC
+        #   Returns None when the automatic setup found no proxy, "" on other failures
         def winhttp_find_proxy_for_url(self, url, autologon=True):
             ACCESS_TYPE = WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
             if WIN_VERSION < 6.3:
@@ -457,6 +487,9 @@ if sys.platform == "win32":
                 autoproxy_options.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT
                 autoproxy_options.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
                 autoproxy_options.lpszAutoConfigUrl = 0
+                if self.servers:
+                    autoproxy_options.dwFlags |= WINHTTP_AUTOPROXY_CONFIG_URL
+                    autoproxy_options.lpszAutoConfigUrl = self.servers[0]
             else:
                 dprint("winhttp_find_proxy_for_url only applicable for MODE_AUTO and MODE_PAC")
                 return ""
@@ -476,11 +509,11 @@ if sys.platform == "win32":
             if not ok:
                 error = ctypes.GetLastError()
                 if error == WINHTTP_ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT:
-                    dprint("Could not download PAC file, trying DIRECT instead")
-                    return "DIRECT"
+                    dprint("Could not download PAC file, falling back to the manual proxy or DIRECT")
+                    return None
                 elif error == WINHTTP_ERROR_WINHTTP_AUTODETECTION_FAILED:
-                    dprint("Autodetection failed, trying DIRECT instead")
-                    return "DIRECT"
+                    dprint("Autodetection failed, falling back to the manual proxy or DIRECT")
+                    return None
                 else:
                     dprint(f"WinHttpGetProxyForUrl failed: {error}")
                     return ""
@@ -499,6 +532,25 @@ if sys.platform == "win32":
 
             # TODO: WinHttpCloseHandle(), GlobalFree() on lpszProxy and lpszProxyBypass
 
+        def fallback_for_netloc(self, netloc):
+            "Servers for a host when the automatic setup found no proxy: manual proxy unless bypassed"
+
+            if not self.fallback_servers:
+                return [DIRECT]
+
+            host = netloc[0].lower()
+            for entry in self.fallback_noproxy_hosts:
+                entry = entry.lstrip(".")
+                if host == entry or host.endswith("." + entry):
+                    return [DIRECT]
+
+            if self.fallback_noproxy.size:
+                ip = self.get_resolver().lookup(host, socket.AF_UNSPEC)
+                if ip is not None and ip in self.fallback_noproxy:
+                    return [DIRECT]
+
+            return self.fallback_servers[:]
+
         def find_proxy_for_url(self, url):
             """
             Return list of proxy servers to use for this url
@@ -511,7 +563,10 @@ if sys.platform == "win32":
                 return servers, netloc, path
             elif self.mode in (MODE_AUTO, MODE_PAC):
                 # Use proxies as resolved via WinHttp
-                return parse_proxy(self.winhttp_find_proxy_for_url(url)), netloc, path
+                proxy = self.winhttp_find_proxy_for_url(url)
+                if proxy is None:
+                    return self.fallback_for_netloc(netloc), netloc, path
+                return parse_proxy(proxy), netloc, path
             elif self.mode in (MODE_MANUAL,):
                 # Use specific proxies configured
                 return self.servers[:], netloc, path

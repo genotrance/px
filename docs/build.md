@@ -560,6 +560,23 @@ Maintenance notes:
 The checks run locally the same way; see
 [Testing](testing.md#security-checks-locally).
 
+### CodeQL (`codeql.yml`)
+
+CodeQL uses advanced setup rather than GitHub's default setup. Default setup
+does not run on pull requests from forks, leaving the required
+`Analyze (python)` check unreported and blocking those contributions. The
+workflow runs on every pull request (including documentation-only changes), on
+pushes to `devel` and `master`, and weekly. It checks Python with
+`build-mode: none`, so it does not execute pull-request code, and uses the
+`security-extended` query suite.
+
+The `analyze` job has the least permissions needed to upload code-scanning
+results: `contents: read` and `security-events: write`; no `actions: read`
+permission is needed for this public repository. Its displayed job name must
+remain exactly `Analyze (python)` so branch protection recognizes the existing
+required check. Keep CodeQL default setup unconfigured: GitHub rejects
+advanced-setup uploads while default setup is enabled.
+
 ### Local release check (`./build.sh release_check`)
 
 CI on `devel` and `working` runs only the fast `ci.yml` set. It never runs

@@ -22,6 +22,7 @@
 
 ### Internal
 - Added `security.yml` (zizmor, actionlint, dependency review, gitleaks, Bandit) and SHA-pinned and hardened the workflows.
+- Added an advanced-setup CodeQL workflow so the required analysis check reports on fork pull requests.
 
 ---
 

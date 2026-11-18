@@ -31,6 +31,7 @@ Tests live in `tests/`.
 | `test_build_python.py` | Build tooling — newest-patch Windows embed zip selection, bundled-version logging, macOS Mach-O portability check, macOS CI interpreter choice, workflow input checks, `build.yml`/`publish.yml` release publishing split, the uv cache without a restore fallback, fresh PyPI pymcurl install, `tools.py --check-mcurl` API guard and `--smoke-request` against a real px, `tools.py --scenario-diagnostics` token redaction and helper-invocation counting, and no cross-project or unreleased dependency in workflows |
 | `test_ci_plan.py` | The `plan` step of `ci.yml` — runs its script for each trigger and checks fast vs full mode, the marker expression and the job counts of each matrix, the `scenario-windows` WSL2 keep-alive and `--test-auth` SSPI steps, and token redaction in the scenario log collection (needs bash, jq and PyYAML) |
 | `test_auto_release.py` | `tools.py --auto-release` — version bump and dependency-change helpers, release-build dispatch, and strict master-to-devel back-merge/PR-fallback workflow structure |
+| `test_security_workflow.py` | Workflow security guardrails — SHA pins and version comments, least-privilege permissions and safe triggers, security workflow checks, and CodeQL advanced setup with the required `Analyze (python)` check name |
 | `test_scenario_env.py` | Guards the `MCURL_WHEELS` candidate-wheel wiring in `scenario-env.sh` used by mcurl's release gate |
 | `test_test_action.py` | The `--test`/`--test-auth` actions — unit tests of probe reporting, final-status (401/407) failure, paced httpbin body echoes, bounded 429 retries and separate rate-limit exits, and Negotiate SPN addressing (`_negotiate_test_target`) |
 | `test_resolver.py` | Resolver and upstream-proxy DNS seeding tests — positive/negative caching, in-flight de-duplication, lookup timeout with late cache fill, bounded pool, IPv4/IPv6 literals and results, temporary libcurl entries, DNS-free `myIpAddress` discovery |
@@ -832,8 +833,9 @@ uvx bandit==1.9.4 -r px
 `dependency-review` needs a pull request and GitHub's dependency graph, so it
 only runs on GitHub. `tests/test_security_workflow.py` checks that actions are
 pinned by SHA with a version comment, that workflows declare permissions and
-never use `pull_request_target`, and that `security.yml` keeps its triggers,
-thresholds and pinned tool versions.
+never use `pull_request_target`, that `security.yml` keeps its triggers,
+thresholds and pinned tool versions, and that `codeql.yml` retains advanced
+setup for fork pull requests and the required `Analyze (python)` job name.
 
 ---
 

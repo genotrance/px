@@ -2,7 +2,7 @@
 
 ---
 
-## v0.13.2 (unreleased)
+## v0.13.2 — 2026-11-18
 
 ### New features
 - Px now diagnoses Negotiate failing because libcurl has no Kerberos credentials for the proxy's SPN, once per proxy, with guidance on registering the SPN or falling back to `--server=`/`--auth=NTLM` (#288).

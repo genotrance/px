@@ -537,7 +537,9 @@ against the compiled binary named by `PXBIN`. Linux runs `pytest -n auto`, and
 the native macOS and Windows runs use `-n 2`. Each xdist worker reserves a
 block of three Px ports from 3148–3947 (`find_free_port_block` in
 `tests/helpers.py`), wide enough for two parallel tox environments with one
-worker per core on large hosts. tox and tox-uv are not dev
+worker per core on large hosts. Reservation ownership is checked with
+`psutil.pid_exists`, rather than a signal probe, so stale files can be reclaimed
+without sending a Windows console control event to a live pytest process. tox and tox-uv are not dev
 dependencies: the `test-binary` job in `build.yml` installs them, and
 `make test-glibc` or `make test-musl` (`build_local` in `build.sh`) run the same
 matrix locally in the build containers. See [Build](build.md#github-actions).
@@ -556,9 +558,11 @@ px. Check these before debugging a test:
 - **Pin Python 3.14 when it matters.** CI runs on 3.14
   (`UV_PYTHON=3.14`). `uv` may otherwise pick a newer interpreter such as 3.15,
   which px does not support yet.
-- **Stop leftover px processes between runs.** A failed test can leave px
-  servers listening on the test ports, and the next run then fails with port
-  conflicts or stale behaviour. Check for running px processes and stop them
+- **Process cleanup.** Test Px instances launch through the platform shell for
+  command compatibility. Their cleanup stops the full process tree after a
+  failed startup, failed `--quit`, or shutdown timeout; Windows launches use
+  `CREATE_NO_WINDOW` so tests do not show Px console windows. If an interrupted
+  run still leaves Px servers listening on test ports, stop those processes
   before starting another run.
 
 ---

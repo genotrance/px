@@ -9,6 +9,7 @@ import tempfile
 import time
 
 import keyring
+import psutil
 
 _port_reservations = set()
 
@@ -150,15 +151,12 @@ def find_free_port_block(start=PORT_BLOCK_BASE, count=3):
             try:
                 with open(path) as reservation:
                     pid = int(reservation.read())
-                os.kill(pid, 0)
             except (FileNotFoundError, ValueError):
                 # The owner may still be writing its PID.
                 continue
-            except ProcessLookupError:
+            if not psutil.pid_exists(pid):
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(path)
-                continue
-            except OSError:
                 continue
             continue
 
@@ -185,6 +183,27 @@ def is_px_running(port, listen_ip="127.0.0.1", timeout=20):
     raise PxStartupError(listen_ip, port)
 
 
+def terminate_process_tree(subp, timeout=10):
+    """Stop a launched process and every descendant it still owns."""
+    try:
+        root = psutil.Process(subp.pid)
+        processes = [*root.children(recursive=True), root]
+    except psutil.Error:
+        processes = []
+
+    for process in processes:
+        with contextlib.suppress(psutil.Error):
+            process.terminate()
+    _, alive = psutil.wait_procs(processes, timeout=timeout)
+    for process in alive:
+        with contextlib.suppress(psutil.Error):
+            process.kill()
+    psutil.wait_procs(alive, timeout=timeout)
+
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subp.wait(timeout=timeout)
+
+
 def quit_px(name, subp, cmd, strict=True, buffer=None):
     """Stop a running Px instance.
 
@@ -205,20 +224,23 @@ def quit_px(name, subp, cmd, strict=True, buffer=None):
     if ret != 0 and buffer is not None:
         print(f"{name} Px log:")
         print_buffer(buffer)
-    if strict:
-        assert ret == 0, f"Failed: Unable to --quit Px: {ret}"
     print(f"{name} Px --quit {'succeeded' if ret == 0 else 'failed'}")
 
-    # Wait for exit
-    if strict:
-        retcode = subp.wait()
-        assert retcode == 0, f"{name} Px exited with {retcode}"
+    if ret != 0:
+        terminate_process_tree(subp)
+        if strict:
+            assert ret == 0, f"Failed: Unable to --quit Px: {ret}"
+        print(f"{name} Px exited")
+        return
+    try:
+        retcode = subp.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        terminate_process_tree(subp)
+        if strict:
+            raise AssertionError(f"{name} Px did not exit after --quit") from None  # noqa: TRY003
     else:
-        try:
-            subp.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            subp.kill()
-            subp.wait()
+        if strict:
+            assert retcode == 0, f"{name} Px exited with {retcode}"
     print(f"{name} Px exited")
 
 
@@ -242,18 +264,16 @@ def run_px(name, port, tmp_path, flags="", env=None, listen_ip="127.0.0.1", star
     px_print_env(f"{name}: {cmd}", env)
 
     logfile = open(f"{tmp_path}{os.sep}{name}-{port}.log", "w+")
-    subp = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=logfile, env=env, cwd=tmp_path)
+    popen_kwargs = {}
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    subp = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=logfile, env=env, cwd=tmp_path, **popen_kwargs)
 
     try:
         assert is_px_running(port, listen_ip, startup_timeout), f"{name} Px didn't start @ {listen_ip}:{port}"
     except Exception:
         # A failed startup must not leave a process holding a test port.
-        subp.terminate()
-        try:
-            subp.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            subp.kill()
-            subp.wait()
+        terminate_process_tree(subp)
         logfile.close()
         raise
 

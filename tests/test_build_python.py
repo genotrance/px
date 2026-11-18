@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -313,12 +314,20 @@ def test_host_ownership_check_includes_directories_and_files():
     assert 'find "$_droot" -xdev ! -type c ! -user "$(id -u)" -print' in script
     assert 'grep -F -x -- "$_dentry"' in script
 
-    syntax = subprocess.run(  # noqa: S603 -- validates the checked-in POSIX script
-        ["sh", "-n", str(ROOT / "build.sh")],  # noqa: S607 -- invokes the POSIX shell
-        capture_output=True,
-        text=True,
-    )
-    assert syntax.returncode == 0, syntax.stderr
+    if shutil.which("sh"):
+        syntax = subprocess.run(  # noqa: S603 -- validates the checked-in POSIX script
+            ["sh", "-n", str(ROOT / "build.sh")],  # noqa: S607 -- invokes the POSIX shell
+            capture_output=True,
+            text=True,
+        )
+        assert syntax.returncode == 0, syntax.stderr
+
+
+def test_build_shell_syntax_check_skips_when_sh_is_absent(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda _command: None)
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: pytest.fail("sh should not run"))
+
+    test_host_ownership_check_includes_directories_and_files()
 
 
 def test_binary_smoke_check_imports_ssl_and_spnego_before_artifact_tests():

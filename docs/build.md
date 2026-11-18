@@ -491,9 +491,9 @@ resolve the newest release from PyPI.
   durations. Linux and Windows retain their complete artifact tests.
 - **release** — on `master` only: publishes the sdist and wheel to PyPI using
   trusted publishing, creates and pushes a version tag, creates a GitHub
-  release with changelog notes extracted via `tools.py --history`. Docker
-  Hub images and the Windows installer's
-  [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
+  release with changelog notes extracted via `tools.py --history` as a normal
+  release (not prerelease) marked as Latest. Docker Hub images and the Windows
+  installer's [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
   submission are published by `publish.yml` once the build succeeds. Winget
   submission requires a `WINGET_TOKEN` repository secret (classic PAT with
   `public_repo` and `workflow` scopes).

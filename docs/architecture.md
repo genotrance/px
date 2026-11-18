@@ -324,6 +324,12 @@ On Windows, the `Wproxy` subclass uses `WinHttpGetIEProxyConfigForCurrentUser()`
 and `WinHttpGetProxyForUrl()` via ctypes to discover and resolve proxies from
 Internet Options.
 
+When auto-detect and a setup script are both set, `MODE_AUTO` passes both to
+`WinHttpGetProxyForUrl()`: WPAD first, the script second. If neither finds a proxy
+(WinHTTP errors 12180 and 12167), `MODE_AUTO` and `MODE_PAC` fall back to the Internet Options manual proxy, as browsers do. Its
+bypass list applies only to that fallback. A script that answers `DIRECT` is an
+answer, not a failure, so it does not trigger the fallback.
+
 ### noproxy
 
 The `parse_noproxy()` function parses the noproxy string into two structures:

@@ -12,6 +12,7 @@
 - The bad noproxy entry debug message names the accepted `.corp.example` / `corp.example` syntax.
 
 ### Bug fixes
+- On Windows, Px now uses the setup script when auto-detect finds no proxy, and falls back to the manual proxy server from Internet Options when neither finds one, as browsers do (#112).
 - Px no longer turns on libcurl debug output (and its overhead) without `--debug`, which fixes the Windows CFFI error box (#289).
 - auth=NONE pass-through sends the CONNECT request in one write so strict proxies do not treat headers as tunnel data (#282).
 - `--auth=NONE` HTTPS CONNECT is forwarded to the upstream proxy with the client's own target instead of `CONNECT http:443` (px#282).

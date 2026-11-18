@@ -6,8 +6,10 @@
 
 Px requires only one piece of information to function — the server name and port
 of the proxy server. If not specified, Px will check Internet Options or
-environment variables for any proxy definitions. Without this, Px will try to
-connect to sites directly.
+environment variables for any proxy definitions. On Windows, Px follows the
+browser's order: auto-detect, then the setup script, then the manual proxy
+server if neither finds a proxy. Without any proxy definition, Px connects to
+sites directly.
 
 Configuration can be supplied from multiple sources, applied in order of
 precedence (highest first):

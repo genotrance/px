@@ -382,7 +382,8 @@ jobs:
           name: Px v${{ needs.setup.outputs.version }}
           body_path: /tmp/notes.md
           files: release/*
-          prerelease: true
+          prerelease: false
+          make_latest: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
